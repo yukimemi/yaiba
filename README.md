@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/yukimemi/yaiba/main/assets/logo.svg" alt="yaiba — vim-flavoured todo & gantt, peer to peer" width="560">
+  <img src="https://raw.githubusercontent.com/yukimemi/yaiba/main/assets/logo.svg" alt="yaiba — vim-flavoured todo & gantt, peer to peer" width="620">
 </p>
 
 > 刃 — *the blade*. A vim-flavoured todo and gantt planner that runs as a
