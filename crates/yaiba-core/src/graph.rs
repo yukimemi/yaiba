@@ -23,8 +23,19 @@ pub struct Scheduled {
     pub blocked: bool,
     /// The computed finish lands after the declared due date.
     pub overdue: bool,
-    /// Number of edges from any root; used by the UI to indent rows.
-    pub depth: i64,
+    /// Depth in the work breakdown: 0 for a root (a "project"), 1 for
+    /// its children, and so on. This is what the UI indents by and what
+    /// fold levels count — **not** the dependency chain length.
+    pub level: i64,
+    /// Has children, so its dates and progress are aggregated rather
+    /// than entered.
+    pub summary: bool,
+    /// Progress to display: a task's own for a leaf, the
+    /// duration-weighted roll-up of descendants for a summary.
+    pub progress: i64,
+    /// Number of direct children — the UI needs it to draw a fold
+    /// marker without walking the tree itself.
+    pub children: i64,
 }
 
 /// The full timeline plus its critical path.
@@ -130,16 +141,75 @@ pub fn would_cycle(deps: &[Dep], from: TaskId, to: TaskId) -> bool {
     false
 }
 
+/// The parent to actually use: present in this snapshot, and not the
+/// task itself.
+///
+/// A task whose parent is missing (deleted, or simply not merged here
+/// yet) is treated as a root rather than dropped, so it stays visible.
+/// Every caller must agree on this rule — when `children_of` and
+/// `levels` disagreed, an orphan was indented one level under a parent
+/// that wasn't there.
+fn effective_parent(task: &Task, ids: &HashSet<TaskId>) -> Option<TaskId> {
+    task.parent.filter(|p| *p != task.id && ids.contains(p))
+}
+
+/// Direct children of each task, in the tasks' own order.
+fn children_of(tasks: &[Task]) -> HashMap<TaskId, Vec<TaskId>> {
+    let ids: HashSet<TaskId> = tasks.iter().map(|t| t.id).collect();
+    let mut children: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+    for task in tasks {
+        if let Some(parent) = effective_parent(task, &ids) {
+            children.entry(parent).or_default().push(task.id);
+        }
+    }
+    children
+}
+
+/// Depth of each task in the breakdown, and the roots, in one walk.
+///
+/// A parent chain that loops — possible after a merge, since two peers
+/// can independently re-parent — is cut by the visit bound and its
+/// members are treated as roots, so the UI still renders.
+fn levels(tasks: &[Task]) -> HashMap<TaskId, i64> {
+    let ids: HashSet<TaskId> = tasks.iter().map(|t| t.id).collect();
+    let parents: HashMap<TaskId, Option<TaskId>> = tasks
+        .iter()
+        .map(|t| (t.id, effective_parent(t, &ids)))
+        .collect();
+    let mut levels = HashMap::with_capacity(tasks.len());
+    for task in tasks {
+        let mut level = 0;
+        let mut current = parents.get(&task.id).copied().flatten();
+        while let Some(id) = current {
+            level += 1;
+            if level > tasks.len() as i64 {
+                level = 0; // cycle: treat as a root
+                break;
+            }
+            current = parents.get(&id).copied().flatten();
+        }
+        levels.insert(task.id, level);
+    }
+    levels
+}
+
 /// Place every task on the calendar.
 ///
-/// Forward pass honours both the dependency edges and any hard-pinned
-/// `start`; the backward pass derives slack, and zero-slack tasks form
-/// the critical path. Cycles degrade gracefully — the offending tasks
-/// simply lose their edge constraints rather than aborting the whole
-/// schedule. That matters more here than in a single-writer app: two
-/// peers can concurrently add edges that only form a loop once merged,
-/// so a cyclic graph is a state the UI must survive, not just an error
-/// to reject at the door.
+/// Two structures are at work and they are deliberately independent:
+///
+/// * **Dependencies** order tasks. The forward pass honours them plus
+///   any pinned `start`; the backward pass derives slack, and zero-slack
+///   tasks form the critical path.
+/// * **The work breakdown** contains them. A task with children is a
+///   *summary*: its span is the union of its children's, its progress
+///   their duration-weighted roll-up. Only leaves are scheduled from
+///   dependencies — giving a summary its own dates would produce a
+///   second answer competing with the roll-up.
+///
+/// Both structures degrade instead of failing when they come back
+/// malformed. Two peers can concurrently add edges that only close a
+/// loop once merged, or re-parent tasks into a cycle, so a broken graph
+/// is a state the UI has to survive rather than an error it can refuse.
 pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
     let project_start = tasks
         .iter()
@@ -159,67 +229,138 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
     let (preds, succs) = adjacency(tasks, deps);
     let order = topo_order(tasks, &succs);
     let by_id: HashMap<TaskId, &Task> = tasks.iter().map(|t| (t.id, t)).collect();
+    let children = children_of(tasks);
+    let level = levels(tasks);
+    let is_summary = |id: &TaskId| children.get(id).is_some_and(|c| !c.is_empty());
 
-    // Forward pass: earliest start / earliest finish.
+    // Forward pass, leaves only: earliest start / earliest finish.
+    //
+    // Summaries are deliberately skipped. Their dates come from their
+    // children in the roll-up below, so scheduling them here would just
+    // produce a second answer to fight with.
     let mut es: HashMap<TaskId, NaiveDate> = HashMap::new();
     let mut ef: HashMap<TaskId, NaiveDate> = HashMap::new();
-    let mut depth: HashMap<TaskId, i64> = HashMap::new();
     for id in &order {
         let Some(task) = by_id.get(id) else { continue };
-        let anchor = task.start.unwrap_or(project_start);
-        let mut start = anchor;
-        let mut own_depth = 0;
+        if is_summary(id) {
+            continue;
+        }
+        let mut start = task.start.unwrap_or(project_start);
         for p in preds.get(id).into_iter().flatten() {
+            // A dependency on a summary contributes nothing: only leaves
+            // carry dates at this point.
             if let Some(pred_end) = ef.get(p) {
                 start = start.max(*pred_end + Duration::days(1));
             }
-            own_depth = own_depth.max(depth.get(p).copied().unwrap_or(0) + 1);
         }
         let end = start + Duration::days(duration_of(task) - 1);
         es.insert(*id, start);
         ef.insert(*id, end);
-        depth.insert(*id, own_depth);
     }
 
-    let project_end = ef.values().copied().max().unwrap_or(project_start);
+    let leaf_end = ef.values().copied().max().unwrap_or(project_start);
 
-    // Backward pass: latest finish / latest start.
-    let mut lf: HashMap<TaskId, NaiveDate> = HashMap::new();
+    // Backward pass, leaves only: latest start, hence slack.
     let mut ls: HashMap<TaskId, NaiveDate> = HashMap::new();
     for id in order.iter().rev() {
         let Some(task) = by_id.get(id) else { continue };
-        let mut finish = project_end;
+        if is_summary(id) {
+            continue;
+        }
+        let mut finish = leaf_end;
         for s in succs.get(id).into_iter().flatten() {
             if let Some(succ_start) = ls.get(s) {
                 finish = finish.min(*succ_start - Duration::days(1));
             }
         }
-        let start = finish - Duration::days(duration_of(task) - 1);
-        lf.insert(*id, finish);
-        ls.insert(*id, start);
+        ls.insert(*id, finish - Duration::days(duration_of(task) - 1));
     }
+
+    let mut slack: HashMap<TaskId, i64> = ls
+        .iter()
+        .filter_map(|(id, late)| es.get(id).map(|early| (*id, (*late - *early).num_days())))
+        .collect();
+    let mut progress: HashMap<TaskId, i64> = tasks
+        .iter()
+        .map(|t| (t.id, t.progress.clamp(0, 100)))
+        .collect();
+    // Weight for the progress roll-up: a leaf counts for its duration, a
+    // summary for the sum of its subtree, so a two-week child moves the
+    // parent more than a one-day sibling.
+    let mut weight: HashMap<TaskId, i64> = tasks.iter().map(|t| (t.id, duration_of(t))).collect();
+    let mut blocked: HashMap<TaskId, bool> = tasks
+        .iter()
+        .map(|task| {
+            let waiting = preds
+                .get(&task.id)
+                .into_iter()
+                .flatten()
+                .any(|p| by_id.get(p).is_some_and(|t| t.status != Status::Done));
+            (task.id, waiting)
+        })
+        .collect();
+
+    // Roll summaries up, deepest first, so every child is resolved by
+    // the time its parent is reached.
+    let mut deepest_first: Vec<&Task> = tasks.iter().collect();
+    deepest_first.sort_by_key(|t| std::cmp::Reverse(level.get(&t.id).copied().unwrap_or(0)));
+    for task in deepest_first {
+        let Some(kids) = children.get(&task.id).filter(|k| !k.is_empty()) else {
+            continue;
+        };
+        if let Some(start) = kids.iter().filter_map(|k| es.get(k)).min().copied() {
+            es.insert(task.id, start);
+        }
+        if let Some(end) = kids.iter().filter_map(|k| ef.get(k)).max().copied() {
+            ef.insert(task.id, end);
+        }
+        if let Some(min_slack) = kids.iter().filter_map(|k| slack.get(k)).min().copied() {
+            slack.insert(task.id, min_slack);
+        }
+        let total: i64 = kids
+            .iter()
+            .map(|k| weight.get(k).copied().unwrap_or(1))
+            .sum();
+        if total > 0 {
+            let done: i64 = kids
+                .iter()
+                .map(|k| {
+                    weight.get(k).copied().unwrap_or(1) * progress.get(k).copied().unwrap_or(0)
+                })
+                .sum();
+            progress.insert(task.id, (done / total).clamp(0, 100));
+        }
+        weight.insert(task.id, total.max(1));
+        // A summary is blocked when anything inside it is.
+        let any_blocked = kids
+            .iter()
+            .any(|k| blocked.get(k).copied().unwrap_or(false));
+        if any_blocked {
+            blocked.insert(task.id, true);
+        }
+    }
+
+    let project_end = ef.values().copied().max().unwrap_or(project_start);
 
     let mut scheduled: Vec<Scheduled> = tasks
         .iter()
         .map(|task| {
             let start = es.get(&task.id).copied().unwrap_or(project_start);
             let end = ef.get(&task.id).copied().unwrap_or(project_start);
-            let late_start = ls.get(&task.id).copied().unwrap_or(start);
-            let slack_days = (late_start - start).num_days();
-            let blocked = preds
-                .get(&task.id)
-                .into_iter()
-                .flatten()
-                .any(|p| by_id.get(p).is_some_and(|t| t.status != Status::Done));
+            let slack_days = slack.get(&task.id).copied().unwrap_or(0);
+            let kids = children.get(&task.id).map_or(0, |c| c.len() as i64);
             Scheduled {
                 id: task.id,
                 start,
                 end,
                 slack_days,
                 critical: slack_days <= 0,
-                blocked,
+                blocked: blocked.get(&task.id).copied().unwrap_or(false),
                 overdue: task.due.is_some_and(|due| due < end),
-                depth: depth.get(&task.id).copied().unwrap_or(0),
+                level: level.get(&task.id).copied().unwrap_or(0),
+                summary: kids > 0,
+                progress: progress.get(&task.id).copied().unwrap_or(0),
+                children: kids,
             }
         })
         .collect();
@@ -257,6 +398,7 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 8, 1, 0, 0, 0).unwrap();
         Task {
             id: id(n),
+            parent: None,
             title: format!("task {n}"),
             notes: String::new(),
             status: Status::Todo,
@@ -370,6 +512,123 @@ mod tests {
             "1 -> 3 is just a shortcut edge"
         );
         assert!(would_cycle(&deps, id(1), id(1)), "self-edge");
+    }
+
+    /// `child(n, parent, duration)` — a leaf inside `parent`.
+    fn child(n: u128, parent: u128, duration: i64) -> Task {
+        let mut task = task(n, duration, None);
+        task.parent = Some(id(parent));
+        task
+    }
+
+    #[test]
+    fn a_summary_spans_its_children() {
+        // 1 is the project; 2 and 3 are the work.
+        let mut parent = task(1, 1, None);
+        parent.duration_days = 99; // ignored: summaries don't have their own span
+        let mut a = child(2, 1, 3);
+        a.start = Some(day(4));
+        let mut b = child(3, 1, 2);
+        b.start = Some(day(10));
+
+        let s = schedule(&[parent, a, b], &[], day(1));
+        let root = find(&s, 1);
+        assert_eq!((root.start, root.end), (day(4), day(11)));
+        assert!(root.summary);
+        assert_eq!(root.children, 2);
+        assert_eq!(root.level, 0);
+        assert_eq!(find(&s, 2).level, 1);
+    }
+
+    #[test]
+    fn summary_progress_is_weighted_by_duration() {
+        let parent = task(1, 1, None);
+        // A 9-day task at 100% and a 1-day task at 0% is 90%, not 50%.
+        let mut long_done = child(2, 1, 9);
+        long_done.start = Some(day(1));
+        long_done.progress = 100;
+        let mut short_todo = child(3, 1, 1);
+        short_todo.start = Some(day(1));
+        short_todo.progress = 0;
+
+        let s = schedule(&[parent, long_done, short_todo], &[], day(1));
+        assert_eq!(find(&s, 1).progress, 90);
+    }
+
+    #[test]
+    fn levels_nest_and_roll_up_through_grandchildren() {
+        let root = task(1, 1, None);
+        let mut mid = task(2, 1, None);
+        mid.parent = Some(id(1));
+        let mut leaf = child(3, 2, 4);
+        leaf.start = Some(day(5));
+
+        let s = schedule(&[root, mid, leaf], &[], day(1));
+        assert_eq!(find(&s, 1).level, 0);
+        assert_eq!(find(&s, 2).level, 1);
+        assert_eq!(find(&s, 3).level, 2);
+        // The grandchild's span reaches all the way to the root.
+        assert_eq!((find(&s, 1).start, find(&s, 1).end), (day(5), day(8)));
+        assert!(find(&s, 2).summary && !find(&s, 3).summary);
+    }
+
+    #[test]
+    fn dependencies_still_order_leaves_inside_a_breakdown() {
+        // Hierarchy and dependencies are independent axes: 2 and 3 are
+        // siblings, and 2 must still finish before 3 starts.
+        let parent = task(1, 1, None);
+        let mut first = child(2, 1, 2);
+        first.start = Some(day(1));
+        let second = child(3, 1, 2);
+
+        let s = schedule(&[parent, first, second], &[dep(2, 3)], day(1));
+        assert_eq!(find(&s, 2).end, day(2));
+        assert_eq!(find(&s, 3).start, day(3));
+        assert_eq!(find(&s, 1).end, day(4), "the summary covers both");
+    }
+
+    #[test]
+    fn a_summary_is_blocked_when_anything_inside_it_is() {
+        let parent = task(1, 1, None);
+        let mut blocker = task(2, 1, Some(day(1)));
+        let inner = child(3, 1, 1);
+
+        let s = schedule(
+            &[parent.clone(), blocker.clone(), inner.clone()],
+            &[dep(2, 3)],
+            day(1),
+        );
+        assert!(find(&s, 3).blocked, "the leaf waits on an unfinished task");
+        assert!(find(&s, 1).blocked, "and so the summary does too");
+
+        blocker.status = Status::Done;
+        let s = schedule(&[parent, blocker, inner], &[dep(2, 3)], day(1));
+        assert!(!find(&s, 1).blocked);
+    }
+
+    #[test]
+    fn a_parent_cycle_degrades_to_roots() {
+        // Two peers re-parent into each other; the merge produces a loop.
+        let mut a = task(1, 1, Some(day(1)));
+        let mut b = task(2, 1, Some(day(1)));
+        a.parent = Some(id(2));
+        b.parent = Some(id(1));
+
+        let s = schedule(&[a, b], &[], day(1));
+        assert_eq!(s.tasks.len(), 2, "both still render");
+        assert_eq!(find(&s, 1).level, 0);
+        assert_eq!(find(&s, 2).level, 0);
+    }
+
+    #[test]
+    fn a_missing_parent_leaves_the_child_at_the_root() {
+        // The parent's tombstone arrived but the child's update hasn't.
+        let mut orphan = task(1, 2, Some(day(3)));
+        orphan.parent = Some(id(99));
+
+        let s = schedule(&[orphan], &[], day(1));
+        assert_eq!(find(&s, 1).level, 0);
+        assert!(!find(&s, 1).summary);
     }
 
     #[test]

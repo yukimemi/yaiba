@@ -68,6 +68,7 @@ export async function applyOps(ops: Op[]): Promise<AppData> {
 /** The fields an inverse patch has to carry to fully restore a task. */
 export function snapshotPatch(task: Task): Required<TaskPatch> {
   return {
+    parent: task.parent,
     title: task.title,
     notes: task.notes,
     status: task.status,

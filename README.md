@@ -6,9 +6,9 @@
 > single local binary and syncs directly between people. No server to
 > host, no account to make.
 
-**Status: working end to end — modal UI, dependency scheduling with a
-critical path, and peer-to-peer replication over
-[iroh](https://iroh.computer). Not yet on crates.io.**
+**Status: released — modal UI, a foldable work breakdown, dependency
+scheduling with a critical path, and peer-to-peer replication over
+[iroh](https://iroh.computer). `cargo install yaiba`.**
 
 ## Why
 
@@ -26,13 +26,26 @@ server.
   forward/backward pass that computes each task's earliest start, its
   slack, and the critical path — so "when does this actually land"
   has an answer rather than a guess.
+- **One outline, every altitude.** Tasks nest, and folding to a level
+  changes who the view is for: level 0 is the project list a manager
+  scans, level 4 is the work an implementer is actually doing. Same
+  data, same keys.
 - **One binary.** The UI is compiled in. Download, run, work.
 - **Peer-to-peer, not client-server.** Everyone runs their own replica.
   Edits merge; nobody hosts.
 
 ## Install
 
-Not published yet — build from source:
+From crates.io, or build from source:
+
+```sh
+cargo install yaiba
+yaiba
+```
+
+Prebuilt binaries for Linux / macOS / Windows are on the
+[releases page](https://github.com/yukimemi/yaiba/releases). To build it
+yourself:
 
 ```sh
 git clone https://github.com/yukimemi/yaiba
@@ -80,12 +93,37 @@ yaiba self-update --check    # just tell me whether one exists
 | `x` | complete (the row gets cut) · `s` cycles todo → doing → done |
 | `dd` `yy` `p` | delete, yank, paste · `u` / `^r` undo, redo |
 | `J` `K` | move the row within the manual order |
-| `+` `-` | duration ±1 day · `>` `<` priority · `(` `)` progress |
+| `+` `-` | duration ±1 day · `gp` `gP` priority · `(` `)` progress |
 | `D` | add a dependency: pick the task this one waits for, `⏎` |
 | `X` | cut a dependency |
 | `v` | visual line select — every edit above applies to the block |
 | `/` `n` `N` | search |
-| `tab` | split → list → gantt · `zi` `zo` zoom the timeline |
+| `tab` | split → list → gantt · `[` `]` zoom the timeline |
+| `>>` `<<` | nest under the row above / move back out |
+| `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |
+| `za` | fold this row · `zf` focus its subtree, `zF` to come back |
+
+## Projects, and the level you look at them from
+
+There is no separate "project" object: a task with no parent *is* a
+project. That means the same fold commands that collapse a sub-task
+collapse a whole project, and one gantt spans all of them.
+
+```
+zM              every project on one screen, each showing its own roll-up
+zr              open one level — the phases inside each project
+zf              zoom into just this subtree
+:level 2        jump straight to an altitude
+```
+
+A task with children becomes a **summary**: its bar spans its children's
+dates and its percentage is their duration-weighted roll-up, so a
+9-day task at 100% and a 1-day task at 0% reads 90%, not 50%. You never
+type a summary's dates — they are a consequence of the work inside it.
+
+Dependencies and nesting are separate axes on purpose: a parent
+*contains* its children, a dependency *orders* two tasks. Only leaves
+are scheduled from dependencies; summaries follow.
 
 Commands take dates the way you'd say them: `:due tom`, `:due mon`,
 `:due +3d`, `:due 8/14`. Filters compose: `:f tag:dev open crit`.
@@ -139,7 +177,7 @@ only the difference crosses the wire.
 Bar positions come from a forward pass over the dependency DAG (earliest
 start, honouring any pinned start date) and a backward pass (latest
 start, hence slack). Zero slack means critical path — drawn in magenta.
-Blocked, overdue and depth are derived the same way, so they can't drift
+Blocked, overdue and level are derived the same way, so they can't drift
 from the graph they describe.
 
 Cycles are rejected when you create them, but the renderer still

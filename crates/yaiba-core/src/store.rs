@@ -17,8 +17,8 @@ use uuid::Uuid;
 
 use crate::crdt::{
     Entry, FIELD_CREATED, FIELD_DELETED, FIELD_DUE, FIELD_DURATION, FIELD_EXISTS, FIELD_NOTES,
-    FIELD_POSITION, FIELD_PRIORITY, FIELD_PROGRESS, FIELD_START, FIELD_STATUS, FIELD_TITLE,
-    TAG_PREFIX, VersionVector, dep_key, parse_dep_key, parse_task_key, task_key,
+    FIELD_PARENT, FIELD_POSITION, FIELD_PRIORITY, FIELD_PROGRESS, FIELD_START, FIELD_STATUS,
+    FIELD_TITLE, TAG_PREFIX, VersionVector, dep_key, parse_dep_key, parse_task_key, task_key,
 };
 use crate::graph;
 use crate::hlc::{Clock, Hlc, NodeId};
@@ -260,6 +260,7 @@ impl Store {
         let now = Utc::now();
 
         let mut writes = vec![
+            (key.clone(), FIELD_PARENT.into(), json!(new.parent)),
             (key.clone(), FIELD_TITLE.into(), json!(new.title)),
             (key.clone(), FIELD_NOTES.into(), json!(new.notes)),
             (key.clone(), FIELD_STATUS.into(), json!(new.status.as_str())),
@@ -309,6 +310,7 @@ impl Store {
         let wanted: HashSet<String> = normalise_tags(&task.tags).into_iter().collect();
 
         let mut writes = vec![
+            (key.clone(), FIELD_PARENT.into(), json!(task.parent)),
             (key.clone(), FIELD_TITLE.into(), json!(task.title)),
             (key.clone(), FIELD_NOTES.into(), json!(task.notes)),
             (
@@ -358,6 +360,23 @@ impl Store {
         let key = task_key(id);
         let mut writes = Vec::new();
 
+        if let Some(v) = patch.parent {
+            // Re-parenting is the one patch that can corrupt the shape
+            // of the tree, so it is checked before anything is written.
+            if let Some(new_parent) = v {
+                if new_parent == id {
+                    return Err(Error::ParentCycle);
+                }
+                let snapshot = self.snapshot()?;
+                if !snapshot.tasks.iter().any(|t| t.id == new_parent) {
+                    return Err(Error::NotFound(new_parent));
+                }
+                if is_descendant(&snapshot.tasks, new_parent, id) {
+                    return Err(Error::ParentCycle);
+                }
+            }
+            writes.push((key.clone(), FIELD_PARENT.into(), json!(v)));
+        }
         if let Some(v) = patch.title {
             writes.push((key.clone(), FIELD_TITLE.into(), json!(v)));
         }
@@ -571,6 +590,24 @@ fn observe(tx: &rusqlite::Transaction<'_>, node: NodeId, seq: u64) -> Result<()>
     Ok(())
 }
 
+/// Is `candidate` inside the subtree rooted at `ancestor`?
+///
+/// Used to refuse a re-parent that would put a task inside its own
+/// descendants. The walk is bounded by the task count so a cycle that
+/// arrived through a merge can't hang the check.
+fn is_descendant(tasks: &[Task], candidate: TaskId, ancestor: TaskId) -> bool {
+    let parents: HashMap<TaskId, Option<TaskId>> = tasks.iter().map(|t| (t.id, t.parent)).collect();
+    let mut current = Some(candidate);
+    for _ in 0..=tasks.len() {
+        match current {
+            Some(id) if id == ancestor => return true,
+            Some(id) => current = parents.get(&id).copied().flatten(),
+            None => return false,
+        }
+    }
+    false
+}
+
 /// Strip the display `#` and drop blanks so `#dev` and `dev` are one tag.
 fn normalise_tags(tags: &[String]) -> Vec<String> {
     let mut out: Vec<String> = tags
@@ -672,6 +709,10 @@ fn materialize(entries: &[Entry]) -> Snapshot {
         live.insert(id);
         tasks.push(Task {
             id,
+            parent: fields
+                .get(FIELD_PARENT)
+                .and_then(|e| e.value.as_str())
+                .and_then(|s| s.parse().ok()),
             title: field_str(fields, FIELD_TITLE).unwrap_or_default(),
             notes: field_str(fields, FIELD_NOTES).unwrap_or_default(),
             status,

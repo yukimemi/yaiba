@@ -31,6 +31,8 @@ pub enum Error {
     Cycle { from: TaskId, to: TaskId },
     #[error("a task cannot depend on itself")]
     SelfDep,
+    #[error("that would put a task inside itself")]
+    ParentCycle,
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
     #[error(transparent)]

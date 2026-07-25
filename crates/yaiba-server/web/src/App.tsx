@@ -21,7 +21,7 @@ const HALF_PAGE = 10;
 const STATUS_CYCLE: Status[] = ["todo", "doing", "done"];
 
 /** Keys that only make sense as the first half of a two-key command. */
-const PREFIXES = new Set(["d", "y", "g", "z", "c"]);
+const PREFIXES = new Set(["d", "y", "g", "z", "c", ">", "<"]);
 
 const NORMALIZE: Record<string, string> = {
   ArrowDown: "j",
@@ -67,6 +67,12 @@ export function App() {
   const [zoom, setZoom] = useState<Zoom>("day");
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("manual");
+  /** Rows folded one at a time with za / zc. */
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  /** Hide anything deeper than this; null shows every level. */
+  const [foldLevel, setFoldLevel] = useState<number | null>(null);
+  /** Show only this subtree — :only / zf. */
+  const [focus, setFocus] = useState<string | null>(null);
 
   const modeRef = useRef<Mode>("normal");
   const listPane = useRef<HTMLDivElement>(null);
@@ -85,8 +91,24 @@ export function App() {
     [data],
   );
   const visible = useMemo(
-    () => (data ? visibleTasks(data.tasks, bySchedule, filter, sort) : []),
-    [data, bySchedule, filter, sort],
+    () =>
+      data
+        ? visibleTasks(data.tasks, bySchedule, {
+            query: filter,
+            sort,
+            collapsed,
+            foldLevel,
+            focus,
+          })
+        : [],
+    [data, bySchedule, filter, sort, collapsed, foldLevel, focus],
+  );
+
+  /** Deepest level present, so zr knows when it has fully unfolded. */
+  const maxLevel = useMemo(
+    () =>
+      (data?.schedule.tasks ?? []).reduce((m, s) => Math.max(m, s.level), 0),
+    [data],
   );
 
   const cursorAt = visible.findIndex((t) => t.id === cursorId);
@@ -218,6 +240,80 @@ export function App() {
       void run(ops, undo, label);
     },
     [run],
+  );
+
+  /**
+   * Nest rows under the sibling above them — the outliner convention.
+   *
+   * The anchor is the nearest preceding row at the same level, which is
+   * what "the one above" means visually. A row with nothing above it at
+   * its level has nowhere to go, and says so rather than silently doing
+   * nothing.
+   */
+  const indent = useCallback(
+    (tasks: Task[]) => {
+      if (!tasks.length) return;
+      const ops: Op[] = [];
+      const undo: Op[] = [];
+      for (const task of tasks) {
+        const index = visible.findIndex((t) => t.id === task.id);
+        const level = bySchedule.get(task.id)?.level ?? 0;
+        let anchor: string | null = null;
+        for (let i = index - 1; i >= 0; i -= 1) {
+          const candidate = visible[i];
+          const candidateLevel = bySchedule.get(candidate.id)?.level ?? 0;
+          if (candidateLevel === level) {
+            anchor = candidate.id;
+            break;
+          }
+          // Reached a shallower row: this is the first child here.
+          if (candidateLevel < level) break;
+        }
+        if (!anchor) continue;
+        ops.push({ kind: "patch", id: task.id, patch: { parent: anchor } });
+        undo.push({
+          kind: "patch",
+          id: task.id,
+          patch: { parent: task.parent },
+        });
+      }
+      if (!ops.length) {
+        say("nothing above to nest under", "error");
+        return;
+      }
+      void run(ops, undo, "indent");
+    },
+    [visible, bySchedule, run],
+  );
+
+  /** Move rows up one level, to their grandparent. */
+  const outdent = useCallback(
+    (tasks: Task[]) => {
+      if (!data || !tasks.length) return;
+      const byId = new Map(data.tasks.map((t) => [t.id, t]));
+      const ops: Op[] = [];
+      const undo: Op[] = [];
+      for (const task of tasks) {
+        if (!task.parent) continue;
+        const grandparent = byId.get(task.parent)?.parent ?? null;
+        ops.push({
+          kind: "patch",
+          id: task.id,
+          patch: { parent: grandparent },
+        });
+        undo.push({
+          kind: "patch",
+          id: task.id,
+          patch: { parent: task.parent },
+        });
+      }
+      if (!ops.length) {
+        say("already at the top level", "error");
+        return;
+      }
+      void run(ops, undo, "outdent");
+    },
+    [data, run],
   );
 
   /**
@@ -451,6 +547,8 @@ export function App() {
 
   const applyUi = useCallback((ui: UiPatch) => {
     if (ui.view) setView(ui.view);
+    if (ui.focus !== undefined) setFocus(ui.focus);
+    if (ui.foldLevel !== undefined) setFoldLevel(ui.foldLevel);
     if (ui.zoom) setZoom(ui.zoom);
     if (ui.filter !== undefined) setFilter(ui.filter);
     if (ui.sort) setSort(ui.sort);
@@ -680,14 +778,14 @@ export function App() {
           "duration",
         );
         break;
-      case ">":
+      case "gp":
         patchAll(
           selection,
           (task) => ({ priority: Math.min(3, task.priority + 1) }),
           "priority",
         );
         break;
-      case "<":
+      case "gP":
         patchAll(
           selection,
           (task) => ({ priority: Math.max(0, task.priority - 1) }),
@@ -733,16 +831,72 @@ export function App() {
       case "<tab>":
         setView(VIEW_CYCLE[(VIEW_CYCLE.indexOf(view) + 1) % VIEW_CYCLE.length]);
         break;
-      case "zi":
+      case "]":
         setZoom(
           ZOOM_CYCLE[
             Math.min(ZOOM_CYCLE.indexOf(zoom) + 1, ZOOM_CYCLE.length - 1)
           ],
         );
         break;
-      case "zo":
+      case "[":
         setZoom(ZOOM_CYCLE[Math.max(ZOOM_CYCLE.indexOf(zoom) - 1, 0)]);
         break;
+      // ---- folding: the "level" axis
+      case "zm":
+        // Fold one level shallower. From "everything visible" that means
+        // starting at the deepest level actually present, so the first
+        // press always does something.
+        setFoldLevel((prev) => Math.max((prev ?? maxLevel) - 1, 0));
+        break;
+      case "zr":
+        setFoldLevel((prev) =>
+          prev === null || prev + 1 >= maxLevel ? null : prev + 1,
+        );
+        break;
+      case "zM":
+        setFoldLevel(0);
+        break;
+      case "zR":
+        setFoldLevel(null);
+        setCollapsed(new Set());
+        break;
+      case "za":
+      case "zo":
+      case "zc": {
+        if (!current) break;
+        const wantOpen = cmd === "zo";
+        const wantClose = cmd === "zc";
+        setCollapsed((prev) => {
+          const next = new Set(prev);
+          const isClosed = next.has(current.id);
+          if (wantOpen || (cmd === "za" && isClosed)) next.delete(current.id);
+          else if (wantClose || cmd === "za") next.add(current.id);
+          return next;
+        });
+        break;
+      }
+      case "zf":
+        // Zoom into this subtree and drop every fold, so the focused
+        // project opens fully rather than inheriting the outer view.
+        if (current) {
+          setFocus(current.id);
+          setFoldLevel(null);
+          say(`focused “${current.title}” — zF to come back`);
+        }
+        break;
+      case "zF":
+        setFocus(null);
+        say("showing everything");
+        break;
+
+      // ---- the breakdown itself
+      case ">>":
+        indent(selection);
+        break;
+      case "<<":
+        outdent(selection);
+        break;
+
       case "R":
         void load();
         say("reloaded", "ok");
@@ -929,6 +1083,10 @@ export function App() {
         projectEnd={data.schedule.end}
         peerCount={peers.peers.length}
         syncOn={peers.ticket !== null}
+        foldLevel={foldLevel}
+        focusTitle={
+          focus ? (data.tasks.find((t) => t.id === focus)?.title ?? null) : null
+        }
       />
 
       <div className="panes">
@@ -957,6 +1115,7 @@ export function App() {
               filter ? "nothing matches this filter." : "no tasks yet."
             }
             sort={sort}
+            collapsed={collapsed}
             paneRef={listPane}
             onScroll={syncScroll(listPane)}
           />

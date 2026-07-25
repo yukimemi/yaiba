@@ -274,13 +274,34 @@ body::after {
   color: var(--edge);
 }
 
-/* Depth gauge: one stroke per dependency level, so the shape of the
-   graph is legible without leaving the list. Not decoration — it is the
-   same `depth` the scheduler computed. */
-.row__depth {
-  color: var(--ash-dim);
+/* Indent by depth in the work breakdown — the same `level` the
+   scheduler computed, and the same number the fold commands count. */
+.row__indent {
   flex: none;
-  letter-spacing: 1px;
+  white-space: pre;
+}
+
+/* Marks a summary row as open or closed. Blank for a leaf, so the
+   columns still line up. */
+.row__fold {
+  flex: none;
+  width: 1ch;
+  color: var(--ash);
+}
+
+/* A summary is structure, not work: quieter, but its title stands out
+   as a heading. */
+.row--summary .row__title {
+  color: var(--steel);
+  font-weight: 700;
+}
+
+.row--summary .row__box {
+  color: var(--ash-dim);
+}
+
+.row--summary .row__fold {
+  color: var(--edge);
 }
 
 .row__caret {
@@ -538,6 +559,34 @@ body::after {
   overflow: hidden;
 }
 
+/* Summary: a thin bracket with downward ticks at each end, the way a
+   gantt has always drawn a rolled-up span. Deliberately not bar-shaped,
+   so a project can't be mistaken for a task. */
+.gantt__bar--summary {
+  top: 7px;
+  height: 7px;
+  border: none;
+  border-radius: 0;
+  background: var(--ash);
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% 100%,
+    calc(100% - 4px) 40%,
+    4px 40%,
+    0 100%
+  );
+}
+
+.gantt__bar--summary.gantt__bar--critical {
+  background: var(--blood);
+  box-shadow: none;
+}
+
+.gantt__bar--summary .gantt__fill {
+  display: none;
+}
+
 .gantt__bar--critical {
   border-color: var(--blood);
   background: rgba(244, 114, 182, 0.14);
@@ -551,6 +600,13 @@ body::after {
 
 .gantt__bar--blocked {
   border-style: dashed;
+}
+
+/* A summary is almost always "blocked" — something inside it usually is
+   — so the dashed outline carries no information there and only adds
+   noise. */
+.gantt__bar--summary.gantt__bar--blocked {
+  border-style: none;
 }
 
 .gantt__bar--overdue {

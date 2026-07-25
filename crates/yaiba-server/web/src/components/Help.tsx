@@ -32,12 +32,22 @@ const GROUPS: Group[] = [
     title: "PLAN",
     keys: [
       ["+ / -", "duration ±1 day"],
-      ["> / <", "priority up / down"],
+      ["gp / gP", "priority up / down"],
       ["( / )", "progress ∓10%"],
       ["D", "add a dependency"],
       ["X", "remove a dependency"],
-      ["zi / zo", "gantt zoom in / out"],
+      ["[ / ]", "gantt zoom out / in"],
       ["v", "visual line select"],
+    ],
+  },
+  {
+    title: "BREAKDOWN",
+    keys: [
+      [">> / <<", "nest under the row above / move out"],
+      ["zm / zr", "fold one level shallower / deeper"],
+      ["zM / zR", "fold to projects only / unfold all"],
+      ["za", "toggle this row · zo open · zc close"],
+      ["zf / zF", "focus this subtree / show everything"],
     ],
   },
   {
@@ -62,6 +72,14 @@ const GROUPS: Group[] = [
     keys: [
       [":ticket", "copy this replica's invite"],
       [":join ⟨t⟩", "sync with the peer that ticket names"],
+    ],
+  },
+  {
+    title: ": BREAKDOWN",
+    keys: [
+      [":level ⟨n⟩", "show down to level n (bare = all)"],
+      [":parent ⟨n⟩", "move under row n (bare = top level)"],
+      [":only / :all", "focus this subtree / clear"],
     ],
   },
 ];

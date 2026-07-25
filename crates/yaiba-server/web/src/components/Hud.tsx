@@ -11,6 +11,9 @@ interface Props {
   projectEnd: string;
   peerCount: number;
   syncOn: boolean;
+  /** Null when every level is shown. */
+  foldLevel: number | null;
+  focusTitle: string | null;
 }
 
 const METER_CELLS = 10;
@@ -26,6 +29,8 @@ export function Hud({
   projectEnd,
   peerCount,
   syncOn,
+  foldLevel,
+  focusTitle,
 }: Props) {
   const done = tasks.filter((t) => t.status === "done").length;
   const filled = tasks.length
@@ -43,6 +48,16 @@ export function Hud({
 
       <span className="hud__spacer" />
 
+      {focusTitle && (
+        <span className="hud__stat">
+          only <b>{focusTitle}</b>
+        </span>
+      )}
+      {foldLevel !== null && (
+        <span className="hud__stat">
+          level <b>{foldLevel}</b>
+        </span>
+      )}
       {filter && (
         <span className="hud__stat">
           filter <b>{filter}</b> · {visibleCount}

@@ -286,9 +286,12 @@ impl IntoResponse for ApiError {
             ApiError::Domain(e) => {
                 let status = match &e {
                     Error::NotFound(_) => StatusCode::NOT_FOUND,
-                    // A cycle or a self-edge is a legal request against
-                    // an illegal state transition — that's what 409 is.
-                    Error::Cycle { .. } | Error::SelfDep => StatusCode::CONFLICT,
+                    // A cycle, a self-edge, or nesting a task inside its
+                    // own subtree is a legal request against an illegal
+                    // state transition — that's what 409 is.
+                    Error::Cycle { .. } | Error::SelfDep | Error::ParentCycle => {
+                        StatusCode::CONFLICT
+                    }
                     Error::Sqlite(_) | Error::Other(_) => StatusCode::INTERNAL_SERVER_ERROR,
                 };
                 (status, e.to_string())

@@ -142,6 +142,10 @@ export function Gantt({
                 <div
                   className={[
                     "gantt__bar",
+                    // A summary gets a bracket spanning its children
+                    // rather than a bar of its own: it isn't work, it is
+                    // the extent of the work inside it.
+                    sched.summary && "gantt__bar--summary",
                     sched.critical && "gantt__bar--critical",
                     task.status === "done" && "gantt__bar--done",
                     sched.blocked && "gantt__bar--blocked",
@@ -151,13 +155,17 @@ export function Gantt({
                     .join(" ")}
                   style={{ left, width: barW }}
                   title={`${task.title}\n${sched.start} → ${sched.end}${
+                    sched.summary ? ` · ${sched.children} inside` : ""
+                  }${
                     sched.slack_days > 0 ? `\nslack ${sched.slack_days}d` : ""
                   }`}
                 >
                   <div
                     className="gantt__fill"
                     style={{
-                      width: `${task.status === "done" ? 100 : task.progress}%`,
+                      width: `${
+                        task.status === "done" ? 100 : sched.progress
+                      }%`,
                     }}
                   />
                 </div>

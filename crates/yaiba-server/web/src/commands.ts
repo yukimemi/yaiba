@@ -8,6 +8,10 @@ export type Zoom = "day" | "week" | "month";
 
 export interface UiPatch {
   view?: View;
+  /** Show only this subtree; null clears the focus. */
+  focus?: string | null;
+  /** Hide anything deeper than this; null shows every level. */
+  foldLevel?: number | null;
   zoom?: Zoom;
   filter?: string;
   sort?: SortKey;
@@ -259,6 +263,49 @@ export function runCommand(
         undoOps: [{ kind: "addDep", dep }],
         label: "unlink",
         message: `unlinked from “${target.title}”`,
+      };
+    }
+
+    // ---- the work breakdown ---------------------------------------
+    case "only":
+      if (!current) return { error: "no task under the cursor" };
+      return {
+        ui: { focus: current.id, foldLevel: null },
+        message: `focused “${current.title}” — :all to come back`,
+      };
+    case "all":
+      return { ui: { focus: null, foldLevel: null }, message: "showing everything" };
+    case "level":
+    case "lv": {
+      if (!arg) return { ui: { foldLevel: null }, message: "all levels" };
+      const n = Number(arg);
+      if (!Number.isInteger(n) || n < 0) {
+        return { error: "usage: :level <0 or more>  (:level with no argument shows all)" };
+      }
+      return { ui: { foldLevel: n }, message: `level ${n}` };
+    }
+    case "parent": {
+      if (!current) return { error: "no task under the cursor" };
+      if (!arg || arg === "none" || arg === "-") {
+        return {
+          ops: [{ kind: "patch", id: current.id, patch: { parent: null } }],
+          undoOps: [
+            { kind: "patch", id: current.id, patch: { parent: current.parent } },
+          ],
+          label: "unparent",
+          message: "moved to the top level",
+        };
+      }
+      const target = rowAt(ctx, arg);
+      if (typeof target === "string") return { error: target };
+      if (target.id === current.id) return { error: "a task can't contain itself" };
+      return {
+        ops: [{ kind: "patch", id: current.id, patch: { parent: target.id } }],
+        undoOps: [
+          { kind: "patch", id: current.id, patch: { parent: current.parent } },
+        ],
+        label: "reparent",
+        message: `moved under “${target.title}”`,
       };
     }
 

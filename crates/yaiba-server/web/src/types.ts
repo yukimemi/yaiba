@@ -5,6 +5,12 @@ export type Status = "todo" | "doing" | "done";
 
 export interface Task {
   id: TaskId;
+  /**
+   * Enclosing task. `null` makes this a root — which is what a
+   * "project" is here. Orthogonal to dependencies: a parent *contains*
+   * its children, a dependency *orders* two tasks.
+   */
+  parent: TaskId | null;
   title: string;
   notes: string;
   status: Status;
@@ -37,7 +43,14 @@ export interface Scheduled {
   critical: boolean;
   blocked: boolean;
   overdue: boolean;
-  depth: number;
+  /** Depth in the work breakdown: 0 = a root/project. Drives indent and folding. */
+  level: number;
+  /** Has children, so dates and progress are rolled up rather than entered. */
+  summary: boolean;
+  /** Own progress for a leaf; the weighted roll-up for a summary. */
+  progress: number;
+  /** Direct child count — enough to draw a fold marker. */
+  children: number;
 }
 
 export interface Schedule {
@@ -57,6 +70,7 @@ export interface AppData {
 }
 
 export interface NewTask {
+  parent?: TaskId | null;
   title: string;
   notes?: string;
   status?: Status;
@@ -72,6 +86,7 @@ export interface NewTask {
 export type TaskPatch = Partial<
   Pick<
     Task,
+    | "parent"
     | "title"
     | "notes"
     | "status"

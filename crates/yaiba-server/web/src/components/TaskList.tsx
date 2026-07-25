@@ -24,6 +24,8 @@ interface Props {
   onlyPane: boolean;
   emptyHint: string;
   sort: SortKey;
+  /** Rows folded individually, so the marker can show open vs closed. */
+  collapsed: Set<string>;
   paneRef: React.RefObject<HTMLDivElement | null>;
   onScroll: () => void;
 }
@@ -49,6 +51,7 @@ export function TaskList({
   onlyPane,
   emptyHint,
   sort,
+  collapsed,
   paneRef,
   onScroll,
 }: Props) {
@@ -134,6 +137,7 @@ export function TaskList({
             const classes = [
               "row",
               `row--${task.status}`,
+              sched?.summary && "row--summary",
               isCursor && "row--cursor",
               selected.has(task.id) && "row--selected",
               sched?.blocked && "row--blocked",
@@ -151,10 +155,14 @@ export function TaskList({
                 {index === draftIndex && draftRow}
                 <div className={classes} ref={isCursor ? cursorRef : undefined}>
                   <span className="row__num">{index + 1}</span>
-                  {/* One stroke per dependency level: the graph's shape,
-                      visible without leaving the list. */}
-                  <span className="row__depth">
-                    {"│".repeat(Math.min(sched?.depth ?? 0, 6))}
+                  {/* Indent by position in the work breakdown, and mark
+                      summaries so a collapsed one is obviously hiding
+                      something rather than just being a short task. */}
+                  <span className="row__indent">
+                    {"  ".repeat(Math.min(sched?.level ?? 0, 8))}
+                  </span>
+                  <span className="row__fold">
+                    {sched?.summary ? (collapsed.has(task.id) ? "▸" : "▾") : " "}
                   </span>
                   <span className="row__caret">▸</span>
                   <span className="row__box">{BOX[task.status]}</span>
@@ -184,8 +192,16 @@ export function TaskList({
                       #{tag}
                     </span>
                   ))}
-                  {task.progress > 0 && task.status !== "done" && (
-                    <span className="row__meta">{task.progress}%</span>
+                  {(sched?.progress ?? task.progress) > 0 &&
+                    task.status !== "done" && (
+                      <span className="row__meta">
+                        {sched?.progress ?? task.progress}%
+                      </span>
+                    )}
+                  {sched?.summary && (
+                    <span className="row__meta">
+                      {sched.children}
+                    </span>
                   )}
                   {sched?.critical && <span className="row__crit">◆</span>}
                   {task.due && (

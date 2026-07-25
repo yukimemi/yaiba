@@ -50,6 +50,13 @@ impl Status {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
+    /// Enclosing task, forming the work breakdown. `None` makes this a
+    /// root — which is what a "project" is here.
+    ///
+    /// Orthogonal to dependencies: a parent *contains* its children,
+    /// while a dependency *orders* two tasks. A task can have both.
+    #[serde(default)]
+    pub parent: Option<TaskId>,
     pub title: String,
     #[serde(default)]
     pub notes: String,
@@ -83,6 +90,8 @@ pub struct Task {
 /// Payload for `POST /api/tasks`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct NewTask {
+    #[serde(default)]
+    pub parent: Option<TaskId>,
     pub title: String,
     #[serde(default)]
     pub notes: String,
@@ -112,6 +121,8 @@ pub struct NewTask {
 /// explicit `null` mean different things: leave alone vs. clear.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct TaskPatch {
+    #[serde(default, deserialize_with = "double_option")]
+    pub parent: Option<Option<TaskId>>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]

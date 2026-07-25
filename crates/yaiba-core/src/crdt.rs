@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 use crate::hlc::{Hlc, NodeId};
 
+pub const FIELD_PARENT: &str = "parent";
 pub const FIELD_TITLE: &str = "title";
 pub const FIELD_NOTES: &str = "notes";
 pub const FIELD_STATUS: &str = "status";
