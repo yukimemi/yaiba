@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 150" width="560" height="150" role="img" aria-label="yaiba — vim-flavoured todo and gantt, peer to peer">
+  <defs>
+    <linearGradient id="edge" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#f472b6"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity=".55"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity=".12"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="560" height="150" rx="10" fill="#05070d"/>
+
+  <!-- timeline grid: the gantt, reduced to its bones -->
+  <g stroke="#0e1626" stroke-width="1">
+    <path d="M0 40.5H560M0 70.5H560M0 100.5H560"/>
+    <path d="M120.5 20V130M180.5 20V130M240.5 20V130M300.5 20V130M360.5 20V130M420.5 20V130M480.5 20V130"/>
+  </g>
+
+  <!-- three bars and the dependency that chains them -->
+  <g>
+    <rect x="300" y="30" width="86" height="14" rx="2" fill="url(#bar)" stroke="#0e7490"/>
+    <rect x="396" y="60" width="66" height="14" rx="2" fill="url(#bar)" stroke="#0e7490"/>
+    <rect x="330" y="90" width="120" height="14" rx="2" fill="rgba(244,114,182,.16)" stroke="#f472b6"/>
+    <path d="M386 37h10v23h-4" fill="none" stroke="#0e7490" stroke-width="1.2"/>
+    <path d="M462 67h12v30h-20" fill="none" stroke="#f472b6" stroke-width="1.2"/>
+  </g>
+
+  <!-- the blade -->
+  <path d="M44 112 L92 34 L104 41 L56 119 Z" fill="url(#edge)"/>
+  <path d="M44 112 L56 119 L34 124 Z" fill="#94a3b8"/>
+
+  <text x="130" y="86" font-family="ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace"
+        font-size="46" font-weight="700" letter-spacing="14" fill="#22d3ee">YAIBA</text>
+  <text x="130" y="112" font-family="ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace"
+        font-size="13" letter-spacing="2.5" fill="#64748b">刃 — todo &amp; gantt, peer to peer</text>
+</svg>

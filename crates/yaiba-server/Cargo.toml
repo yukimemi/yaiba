@@ -1,0 +1,43 @@
+[package]
+# The crate that carries the binary owns the plain name, so users get
+# `cargo install yaiba` and then `yaiba`. The directory keeps the
+# `-server` suffix to say what it holds next to `-core` and `-sync`.
+name        = "yaiba"
+description = "Vim-flavoured todo & gantt planner that ships as a single binary with its web UI embedded, and syncs peer-to-peer"
+include = [
+    "src/**/*",
+    # Only the built SPA bundle — rust-embed reads dist/ at compile
+    # time. node_modules/ and the Vite sources under web/src/ don't
+    # ship to crates.io; release CI rebuilds the bundle before publish
+    # so the published bytes match the tagged commit.
+    "web/dist/**/*",
+    "Cargo.toml",
+]
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+authors.workspace      = true
+
+[dependencies]
+yaiba-core = { path = "../yaiba-core", version = "0.1.0" }
+yaiba-sync = { path = "../yaiba-sync", version = "0.1.0" }
+
+anyhow             = { workspace = true }
+axum               = { workspace = true }
+chrono             = { workspace = true }
+clap               = { workspace = true }
+dirs               = { workspace = true }
+mime_guess         = { workspace = true }
+rust-embed         = { workspace = true }
+serde              = { workspace = true }
+serde_json         = { workspace = true }
+tokio              = { workspace = true }
+tower-http         = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+yaiba-sync = { path = "../yaiba-sync" }

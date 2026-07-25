@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = ["crates/yaiba-core", "crates/yaiba-server", "crates/yaiba-sync"]
+
+[workspace.package]
+version      = "0.1.0"
+edition      = "2024"
+# Floor set by iroh 1.0, which the sync layer depends on.
+rust-version = "1.91"
+license      = "MIT"
+repository   = "https://github.com/yukimemi/yaiba"
+homepage     = "https://github.com/yukimemi/yaiba"
+authors      = ["yukimemi <yukimemi@gmail.com>"]
+
+[profile.dev]
+# Windows MSVC link.exe hits PDB LIMIT (LNK1318) once the dependency
+# tree gets big (axum + sqlx + reqwest + jsonwebtoken + tokio-cron-
+# scheduler + tracing all carry many monomorphisations on the same
+# workspace). Line-tables-only debug info keeps backtraces useful
+# while keeping the PDB inside the linker's per-record limit on
+# Windows. No effect on Linux / macOS builds.
+debug = "line-tables-only"
+
+[workspace.dependencies]
+# Shared dependency pins. Member crates declare them with
+#   foo = { workspace = true }
+# so version bumps happen in one place.
+anyhow             = "1.0.102"
+axum               = { version = "0.8.9", features = ["macros"] }
+chrono             = { version = "0.4.44", features = ["serde"] }
+clap               = { version = "4.6.1", features = ["derive", "env"] }
+dirs               = "6.0.0"
+iroh               = "1.0.3"
+mime_guess         = "2.0.5"
+rusqlite           = { version = "0.38.0", features = ["bundled", "chrono"] }
+rust-embed         = "8.11.0"
+serde              = { version = "1.0.228", features = ["derive"] }
+serde_json         = "1.0.150"
+thiserror          = "2.0.18"
+tokio              = { version = "1.52.3", features = ["full"] }
+tower-http         = { version = "0.6.11", features = ["cors", "trace"] }
+tracing            = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid               = { version = "1.23.2", features = ["v4", "v7", "serde"] }

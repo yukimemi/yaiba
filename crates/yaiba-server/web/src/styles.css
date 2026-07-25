@@ -1,0 +1,805 @@
+/*
+ * yaiba — neon HUD over a terminal skeleton.
+ *
+ * The palette is deliberately narrow: cyan is the blade (cursor, focus,
+ * structure), magenta is reserved *only* for the critical path, amber
+ * only for overdue. If a colour shows up, it means something.
+ */
+
+:root {
+  --void: #05070d;
+  --panel: #080c16;
+  --grid: #0e1626;
+  --grid-strong: #1b2740;
+
+  --edge: #22d3ee;
+  --edge-dim: #0e7490;
+  --blood: #f472b6;
+  --rust: #fbbf24;
+  --jade: #34d399;
+
+  --steel: #cbd5e1;
+  --ash: #64748b;
+  --ash-dim: #3f4d63;
+
+  --row-h: 26px;
+  --gutter: 14px;
+
+  --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SFMono-Regular",
+    Consolas, "Noto Sans Mono CJK JP", "Yu Gothic UI", monospace;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--void);
+  color: var(--steel);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: var(--row-h);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  /* Faint vertical grid — the sense of a plotted timeline even in the
+     list-only view. */
+  background-image: linear-gradient(
+    90deg,
+    var(--grid) 1px,
+    transparent 1px 64px
+  );
+  background-size: 64px 100%;
+}
+
+/* Scanlines. Kept extremely subtle: at 0.06 alpha it reads as CRT
+   texture, at 0.2 it reads as a costume. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(34, 211, 238, 0.06) 0 1px,
+    transparent 1px 3px
+  );
+  mix-blend-mode: overlay;
+}
+
+::selection {
+  background: var(--edge);
+  color: var(--void);
+}
+
+/* ---- shell ------------------------------------------------------- */
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+}
+
+
+/* ---- HUD header -------------------------------------------------- */
+
+.hud {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 6px var(--gutter);
+  border-bottom: 1px solid var(--grid-strong);
+  background: linear-gradient(180deg, #070b13, var(--void));
+}
+
+.hud__mark {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  letter-spacing: 0.34em;
+  font-weight: 700;
+  color: var(--edge);
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.55);
+}
+
+.hud__kanji {
+  letter-spacing: 0;
+  font-size: 15px;
+  color: var(--blood);
+  text-shadow: 0 0 14px rgba(244, 114, 182, 0.5);
+}
+
+.hud__mode {
+  padding: 0 8px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  border: 1px solid currentColor;
+  color: var(--edge);
+}
+
+.hud__mode[data-mode="insert"] {
+  color: var(--jade);
+}
+.hud__mode[data-mode="visual"] {
+  color: var(--blood);
+}
+.hud__mode[data-mode="command"],
+.hud__mode[data-mode="search"] {
+  color: var(--rust);
+}
+.hud__mode[data-mode="link"],
+.hud__mode[data-mode="unlink"] {
+  color: var(--blood);
+}
+
+.hud__spacer {
+  flex: 1;
+}
+
+.hud__meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ash);
+}
+
+.hud__bar {
+  display: inline-block;
+  color: var(--jade);
+  letter-spacing: -1px;
+}
+
+.hud__bar span {
+  color: var(--ash-dim);
+}
+
+.hud__stat {
+  color: var(--ash);
+}
+
+.hud__stat b {
+  color: var(--steel);
+  font-weight: 500;
+}
+
+.hud__peers {
+  color: var(--edge-dim);
+}
+
+.hud__peers[data-live="true"] {
+  color: var(--edge);
+  text-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+}
+
+/* ---- panes ------------------------------------------------------- */
+
+.panes {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pane {
+  min-width: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--grid-strong) transparent;
+}
+
+.pane--list {
+  flex: 0 0 var(--list-w, 46%);
+  border-right: 1px solid var(--grid-strong);
+}
+
+.pane--list.pane--only {
+  flex: 1;
+  border-right: none;
+}
+
+.pane--gantt {
+  flex: 1;
+}
+
+/* ---- task rows --------------------------------------------------- */
+
+/* No padding: row N here must line up with row N on the timeline, and
+   any offset here shifts every bar out of alignment. */
+.rows {
+  padding: 0 0 40vh;
+}
+
+/* Mirrors .gantt__head — same height, same sticky behaviour — so both
+   panes start their first row on the same line. */
+.list__head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: calc(var(--row-h) * 2);
+  background: var(--panel);
+  border-bottom: 1px solid var(--grid-strong);
+}
+
+.list__summary {
+  display: flex;
+  gap: 12px;
+  height: var(--row-h);
+  padding: 0 var(--gutter);
+  color: var(--ash);
+}
+
+.list__summary-right {
+  margin-left: auto;
+  color: var(--ash-dim);
+}
+
+.row--head {
+  color: var(--ash-dim);
+  height: var(--row-h);
+}
+
+.row--head .row__title,
+.row--head .row__num,
+.row--head .row__box {
+  color: var(--ash-dim);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-h);
+  padding: 0 var(--gutter) 0 0;
+  white-space: nowrap;
+  position: relative;
+}
+
+.row__num {
+  width: 3.5ch;
+  padding-left: var(--gutter);
+  text-align: right;
+  color: var(--ash-dim);
+  flex: none;
+}
+
+.row--cursor .row__num {
+  color: var(--edge);
+}
+
+/* Depth gauge: one stroke per dependency level, so the shape of the
+   graph is legible without leaving the list. Not decoration — it is the
+   same `depth` the scheduler computed. */
+.row__depth {
+  color: var(--ash-dim);
+  flex: none;
+  letter-spacing: 1px;
+}
+
+.row__caret {
+  flex: none;
+  color: transparent;
+}
+
+.row--cursor .row__caret {
+  color: var(--edge);
+  text-shadow: 0 0 8px var(--edge);
+}
+
+.row__box {
+  flex: none;
+  color: var(--ash);
+}
+
+.row--done .row__box {
+  color: var(--jade);
+}
+
+.row--doing .row__box {
+  color: var(--edge);
+}
+
+.row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.row--done .row__title {
+  color: var(--ash);
+  text-decoration: line-through;
+  text-decoration-color: var(--jade);
+}
+
+.row--blocked .row__title {
+  color: var(--ash);
+}
+
+.row__tag {
+  flex: none;
+  color: var(--edge-dim);
+}
+
+.row__meta {
+  flex: none;
+  color: var(--ash-dim);
+}
+
+.row__meta--due {
+  color: var(--ash);
+}
+
+.row__meta--overdue {
+  color: var(--rust);
+  text-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
+}
+
+.row__prio {
+  flex: none;
+  width: 2ch;
+  color: var(--rust);
+}
+
+.row__crit {
+  flex: none;
+  color: var(--blood);
+  text-shadow: 0 0 8px rgba(244, 114, 182, 0.5);
+}
+
+.row--cursor {
+  background: linear-gradient(
+    90deg,
+    rgba(34, 211, 238, 0.14),
+    rgba(34, 211, 238, 0.02) 60%,
+    transparent
+  );
+}
+
+.row--cursor::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--edge);
+  box-shadow: 0 0 12px 1px var(--edge);
+}
+
+.row--selected {
+  background: rgba(244, 114, 182, 0.1);
+}
+
+.row--match .row__title {
+  color: var(--rust);
+}
+
+.row__edit {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--jade);
+  font: inherit;
+  line-height: inherit;
+  caret-color: var(--jade);
+  padding: 0;
+}
+
+.row__edit::placeholder {
+  color: var(--ash-dim);
+}
+
+/* An unsaved row: same shape as a real one so the list doesn't jump
+   when it commits, but the number is a `+` since it hasn't got one. */
+.row--draft .row__num {
+  color: var(--jade);
+}
+
+/*
+ * The signature: completing a task cuts it. A single cyan-to-magenta
+ * stroke sweeps the row once, then the line-through is what remains.
+ */
+.row--cut::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    104deg,
+    transparent 0 42%,
+    rgba(34, 211, 238, 0.9) 49%,
+    #fff 50%,
+    rgba(244, 114, 182, 0.9) 51%,
+    transparent 58% 100%
+  );
+  background-size: 260% 100%;
+  animation: cut 340ms ease-out forwards;
+}
+
+@keyframes cut {
+  from {
+    background-position: 130% 0;
+    opacity: 1;
+  }
+  to {
+    background-position: -60% 0;
+    opacity: 0;
+  }
+}
+
+.empty {
+  padding: 12vh var(--gutter);
+  text-align: center;
+  color: var(--ash);
+}
+
+.empty b {
+  color: var(--edge);
+  font-weight: 500;
+}
+
+/* ---- gantt ------------------------------------------------------- */
+
+.gantt {
+  position: relative;
+  min-width: 100%;
+  width: max-content;
+}
+
+.gantt__head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--panel);
+  border-bottom: 1px solid var(--grid-strong);
+  height: calc(var(--row-h) * 2);
+}
+
+.gantt__month {
+  position: absolute;
+  top: 0;
+  height: var(--row-h);
+  padding-left: 5px;
+  color: var(--ash);
+  border-left: 1px solid var(--grid-strong);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.gantt__day {
+  position: absolute;
+  top: var(--row-h);
+  height: var(--row-h);
+  text-align: center;
+  color: var(--ash-dim);
+  font-size: 10px;
+  overflow: hidden;
+}
+
+.gantt__day--weekend {
+  color: var(--ash-dim);
+  opacity: 0.55;
+}
+
+.gantt__day--today {
+  color: var(--edge);
+}
+
+.gantt__body {
+  position: relative;
+}
+
+.gantt__weekend {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.gantt__today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--edge);
+  box-shadow: 0 0 10px var(--edge);
+  opacity: 0.75;
+  z-index: 2;
+}
+
+.gantt__row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--row-h);
+}
+
+.gantt__row--cursor {
+  background: rgba(34, 211, 238, 0.07);
+}
+
+.gantt__bar {
+  position: absolute;
+  top: 4px;
+  height: calc(var(--row-h) - 9px);
+  border-radius: 2px;
+  background: rgba(34, 211, 238, 0.16);
+  border: 1px solid var(--edge-dim);
+  overflow: hidden;
+}
+
+.gantt__bar--critical {
+  border-color: var(--blood);
+  background: rgba(244, 114, 182, 0.14);
+  box-shadow: 0 0 12px rgba(244, 114, 182, 0.28);
+}
+
+.gantt__bar--done {
+  border-color: var(--jade);
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.gantt__bar--blocked {
+  border-style: dashed;
+}
+
+.gantt__bar--overdue {
+  border-color: var(--rust);
+}
+
+.gantt__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(34, 211, 238, 0.34);
+}
+
+.gantt__bar--critical .gantt__fill {
+  background: rgba(244, 114, 182, 0.34);
+}
+
+.gantt__bar--done .gantt__fill {
+  background: rgba(52, 211, 153, 0.3);
+}
+
+.gantt__label {
+  position: absolute;
+  top: 3px;
+  height: calc(var(--row-h) - 7px);
+  padding-left: 6px;
+  color: var(--ash);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.gantt__row--cursor .gantt__label {
+  color: var(--steel);
+}
+
+.gantt__links {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.gantt__link {
+  fill: none;
+  stroke: var(--edge-dim);
+  stroke-width: 1;
+}
+
+.gantt__link--critical {
+  stroke: var(--blood);
+  stroke-width: 1.4;
+  filter: drop-shadow(0 0 3px rgba(244, 114, 182, 0.7));
+}
+
+.gantt__link--focus {
+  stroke: var(--edge);
+  stroke-width: 1.6;
+  filter: drop-shadow(0 0 4px var(--edge));
+}
+
+.gantt__arrow {
+  fill: var(--edge-dim);
+}
+
+.gantt__arrow--critical {
+  fill: var(--blood);
+}
+
+.gantt__arrow--focus {
+  fill: var(--edge);
+}
+
+/* ---- status line ------------------------------------------------- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 var(--gutter);
+  height: calc(var(--row-h) + 2px);
+  border-top: 1px solid var(--grid-strong);
+  background: var(--panel);
+  white-space: nowrap;
+}
+
+.status__cmd {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.status__prompt {
+  color: var(--rust);
+  flex: none;
+}
+
+.status__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--steel);
+  font: inherit;
+  line-height: inherit;
+  caret-color: var(--rust);
+  padding: 0;
+}
+
+.status__msg {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ash);
+}
+
+.status__msg--error {
+  color: var(--rust);
+}
+
+.status__msg--ok {
+  color: var(--jade);
+}
+
+.status__hint {
+  color: var(--ash-dim);
+}
+
+.status__pending {
+  color: var(--edge);
+  min-width: 4ch;
+  text-align: right;
+}
+
+/* ---- help -------------------------------------------------------- */
+
+.help {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 7, 13, 0.86);
+  backdrop-filter: blur(2px);
+}
+
+.help__panel {
+  width: min(920px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  padding: 20px 24px 24px;
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.12),
+    0 20px 70px rgba(0, 0, 0, 0.7);
+}
+
+.help__title {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--edge);
+}
+
+.help__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 6px 28px;
+}
+
+.help__group {
+  margin-bottom: 12px;
+  break-inside: avoid;
+}
+
+.help__head {
+  color: var(--blood);
+  letter-spacing: 0.2em;
+  border-bottom: 1px solid var(--grid-strong);
+  margin-bottom: 4px;
+}
+
+.help__row {
+  display: flex;
+  gap: 10px;
+}
+
+.help__key {
+  flex: none;
+  width: 10ch;
+  color: var(--edge);
+  /* Command names like `:tag +a -b` must not wrap into the
+     description column. */
+  white-space: nowrap;
+}
+
+.help__desc {
+  color: var(--ash);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.help__foot {
+  margin-top: 8px;
+  color: var(--ash-dim);
+}
+
+/* ---- boot sequence ----------------------------------------------- */
+
+/* One pass of the blade across the shell on load, then never again. */
+.app::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 45%,
+    rgba(34, 211, 238, 0.5) 50%,
+    transparent 55%
+  );
+  background-size: 300% 100%;
+  animation: boot 700ms ease-out forwards;
+}
+
+@keyframes boot {
+  from {
+    background-position: 120% 0;
+    opacity: 1;
+  }
+  to {
+    background-position: -80% 0;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app::before,
+  .row--cut::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* Keyboard-driven app, but never trap a tab user without a focus ring. */
+:focus-visible {
+  outline: 1px solid var(--edge);
+  outline-offset: 1px;
+}
