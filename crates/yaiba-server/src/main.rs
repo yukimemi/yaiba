@@ -6,8 +6,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
+use yaiba::updater::{self, UpdateMode};
 use yaiba::{api, app};
 use yaiba_core::Store;
 
@@ -23,6 +24,11 @@ const DEFAULT_PORT: u16 = 8188;
     long_about = None
 )]
 struct Cli {
+    /// Optional subcommand. Without one, `yaiba` starts the server —
+    /// which is what you want the overwhelming majority of the time.
+    #[command(subcommand)]
+    command: Option<Command>,
+
     /// Port to listen on.
     #[arg(short, long, default_value_t = DEFAULT_PORT, env = "YAIBA_PORT")]
     port: u16,
@@ -49,6 +55,28 @@ struct Cli {
     /// Run fully local: no peer-to-peer endpoint is bound at all.
     #[arg(long)]
     no_sync: bool,
+
+    /// What to do when a newer release exists: install it quietly in the
+    /// background, only say so, or never look. `YAIBA_NO_AUTOUPDATE`
+    /// overrides this to off.
+    #[arg(long, value_enum, default_value_t, env = "YAIBA_UPDATE")]
+    update: UpdateMode,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Update yaiba to the latest release.
+    SelfUpdate {
+        /// Report whether an update exists, then exit without installing.
+        #[arg(long)]
+        check: bool,
+        /// Install without asking.
+        #[arg(long, short)]
+        yes: bool,
+        /// Never prompt. Combine with `--yes` to install unattended.
+        #[arg(long)]
+        non_interactive: bool,
+    },
 }
 
 #[tokio::main]
@@ -61,6 +89,20 @@ async fn main() -> Result<()> {
         )
         .with_target(false)
         .init();
+
+    // Subcommands run instead of the server, not alongside it.
+    if let Some(Command::SelfUpdate {
+        check,
+        yes,
+        non_interactive,
+    }) = cli.command
+    {
+        return updater::run_self_update(yes, check, non_interactive).await;
+    }
+
+    // Kick the update check off before the slower startup work so it
+    // overlaps with opening the database and binding sockets.
+    updater::spawn(cli.update);
 
     let db_path = match cli.db {
         Some(path) => path,

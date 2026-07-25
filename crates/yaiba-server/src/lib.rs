@@ -6,6 +6,7 @@
 //! guessing at its readiness.
 
 pub mod api;
+pub mod updater;
 pub mod web;
 
 use axum::Router;

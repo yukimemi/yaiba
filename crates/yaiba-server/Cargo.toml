@@ -33,6 +33,7 @@ axum               = { workspace = true }
 chrono             = { workspace = true }
 clap               = { workspace = true }
 dirs               = { workspace = true }
+kaishin            = { workspace = true }
 mime_guess         = { workspace = true }
 rust-embed         = { workspace = true }
 serde              = { workspace = true }

@@ -51,6 +51,23 @@ yaiba --no-sync              # fully local, no peer endpoint at all
 yaiba --host 0.0.0.0         # expose the UI on your LAN (no auth — trusted networks only)
 ```
 
+### Staying current
+
+`yaiba` updates itself. On launch it quietly checks GitHub for a newer
+release and, if there is one, downloads and swaps its own binary in the
+background — the running process keeps the old one, so an update never
+pulls the floor out from under an open UI. The new version applies next
+time you start it.
+
+```sh
+yaiba --update notify        # tell me, don't touch the binary
+yaiba --update off           # never look
+YAIBA_NO_AUTOUPDATE=1 yaiba  # same, from the environment
+
+yaiba self-update            # do it now, interactively
+yaiba self-update --check    # just tell me whether one exists
+```
+
 ## Keys
 
 `?` shows the full list in the app. The shape of it:
