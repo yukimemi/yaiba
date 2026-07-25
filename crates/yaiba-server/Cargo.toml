@@ -25,8 +25,8 @@ homepage.workspace     = true
 authors.workspace      = true
 
 [dependencies]
-yaiba-core = { path = "../yaiba-core", version = "0.1.0" }
-yaiba-sync = { path = "../yaiba-sync", version = "0.1.0" }
+yaiba-core = { path = "../yaiba-core", version = "0.1.1" }
+yaiba-sync = { path = "../yaiba-sync", version = "0.1.1" }
 
 anyhow             = { workspace = true }
 axum               = { workspace = true }
