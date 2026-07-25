@@ -136,13 +136,13 @@ rather than an error it can refuse.
 cargo make check         # fmt + clippy + test + lock-check — the pre-push gate
 cargo make dev           # server against a scratch db
 cargo make web-dev       # Vite dev server, /api proxied to the above
-cargo make build-web     # rebuild the embedded bundle
+cargo make web-build     # rebuild the embedded bundle
 cargo make smoke         # release smoke: sqlite, embedded UI, iroh endpoint
 ```
 
 The SPA lives under `crates/yaiba-server/web/` — inside the crate,
 because `rust-embed` bakes `web/dist/` into the binary at compile time.
-A release built without `cargo make build-web` still compiles and still
+A release built without `cargo make web-build` still compiles and still
 starts; it just serves an empty shell. `cargo make smoke` exists to
 catch exactly that.
 
@@ -150,7 +150,11 @@ catch exactly that.
 |---|---|
 | `yaiba-core` | model, CRDT store, dependency scheduling |
 | `yaiba-sync` | iroh transport and the sync protocol |
-| `yaiba-server` | HTTP API, embedded SPA, CLI |
+| `yaiba` (in `crates/yaiba-server/`) | HTTP API, embedded SPA, CLI |
+
+The binary crate is named `yaiba` so that `cargo install yaiba` gives you
+`yaiba`; its directory keeps the `-server` suffix to say what it holds
+next to `-core` and `-sync`.
 
 ## License
 

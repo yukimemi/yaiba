@@ -1,6 +1,8 @@
 [package]
 name        = "yaiba-sync"
 description = "Peer-to-peer replication for yaiba over iroh QUIC — no server in the middle"
+keywords    = ["crdt", "p2p", "iroh", "sync", "replication"]
+categories  = ["network-programming"]
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true

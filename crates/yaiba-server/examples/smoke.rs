@@ -10,7 +10,7 @@
 //!    silently linked the wrong thing fails here rather than on a
 //!    user's first launch.
 //! 2. **The embedded SPA is actually in the binary.** A release built
-//!    without `cargo make build-web` still compiles and still starts —
+//!    without `cargo make web-build` still compiles and still starts —
 //!    it just serves an empty shell. This is the single most likely way
 //!    to ship a broken `yaiba`, so the check asserts on real markup
 //!    from the bundle, not merely on a 200.
@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
     if !index.contains("id=\"root\"") || !index.contains("/assets/") {
         bail!(
             "the embedded web bundle is missing — build it with \
-             `cargo make build-web` before `cargo build --release`"
+             `cargo make web-build` before `cargo build --release`"
         );
     }
 

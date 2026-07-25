@@ -4,6 +4,9 @@
 # `-server` suffix to say what it holds next to `-core` and `-sync`.
 name        = "yaiba"
 description = "Vim-flavoured todo & gantt planner that ships as a single binary with its web UI embedded, and syncs peer-to-peer"
+keywords    = ["todo", "gantt", "vim", "p2p", "crdt"]
+categories  = ["command-line-utilities"]
+readme      = "README.md"
 include = [
     "src/**/*",
     # Only the built SPA bundle — rust-embed reads dist/ at compile

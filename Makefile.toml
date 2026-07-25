@@ -203,7 +203,7 @@ dependencies = ["apm-install", "vcs-fetch"]
 # server — that ordering is what these encode.
 # ---------------------------------------------------------------------
 
-[tasks.build-web]
+[tasks.web-build]
 description = "Build the SPA bundle that rust-embed bakes into the binary"
 script_runner = "@shell"
 # `bun run vite` on Windows swallows vite's stdout (bun bug), so vite is
@@ -236,6 +236,6 @@ args = ["run", "--locked", "--release", "--example", "smoke", "-p", "yaiba-serve
 
 [tasks.release-build]
 description = "Build the shippable single binary (web bundle first, then cargo)"
-dependencies = ["build-web"]
+dependencies = ["web-build"]
 command = "cargo"
 args = ["build", "--locked", "--release"]

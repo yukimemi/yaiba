@@ -41,7 +41,7 @@ pub async fn serve(uri: Uri) -> Response {
         // Only reachable when the bundle wasn't built before compiling.
         None => (
             StatusCode::NOT_FOUND,
-            "yaiba: web assets missing — run `cargo make build-web` and rebuild",
+            "yaiba: web assets missing — run `cargo make web-build` and rebuild",
         )
             .into_response(),
     }
