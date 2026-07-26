@@ -262,12 +262,25 @@ a project **is** a database file, and `yaiba` keeps an index of them.
 
 ```sh
 yaiba                          # the default project
+yaiba new private              # start one of your own, and open it
 yaiba list                     # what's registered, most recent first
 yaiba open work                # open one by name
 yaiba open                     # fuzzy-pick one
 yaiba join <ticket> --as work  # join a peer as a new project, and open it
 yaiba forget work              # drop the name; the database stays on disk
 ```
+
+Keeping apart what should be apart is what `new` is for — a backlog you
+share with someone, and one you don't:
+
+```sh
+yaiba new shared               # hand this one's ticket out
+yaiba new private              # never share this one, and nobody can reach it
+```
+
+Nothing leaves a project until you hand out *its* ticket. Each has its own
+database, its own sync room and its own identity, so sharing one says
+nothing about the others.
 
 Whatever you open is registered as you go, `--db` paths included, so the
 picker fills itself in without any setup step. Your default database is
