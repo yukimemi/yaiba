@@ -270,8 +270,10 @@ yaiba forget work              # drop the name; the database stays on disk
 ```
 
 Whatever you open is registered as you go, `--db` paths included, so the
-picker fills itself in without any setup step. The index is a TOML file
-meant to survive being hand-edited:
+picker fills itself in without any setup step. Your default database is
+adopted the moment it exists, so `yaiba list` and the picker already know
+about it before you have opened anything. The index is a TOML file meant
+to survive being hand-edited:
 
 | path | |
 | --- | --- |

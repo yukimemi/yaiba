@@ -216,6 +216,49 @@ impl Registry {
         Ok(name)
     }
 
+    /// Adopt the default database if it exists on disk but isn't listed.
+    ///
+    /// Registration otherwise only happens when the server starts, which
+    /// left everyone who had been using yaiba before the registry existed
+    /// looking at `yaiba list` claiming they had no projects while their
+    /// tasks sat in the default database — and at an empty picker, which
+    /// is the one thing the picker must never be.
+    ///
+    /// `last_opened` comes from the file's mtime. For a SQLite database
+    /// that is when yaiba last wrote to it, which is what the field means
+    /// and orders the picker correctly from the first run.
+    pub fn seed_default(&mut self) -> bool {
+        match Self::default_db() {
+            Ok(db) => self.seed(&db, DEFAULT_NAME),
+            Err(_) => false,
+        }
+    }
+
+    /// The testable half of [`seed_default`], free of the platform data
+    /// directory (and therefore of `YAIBA_DATA_DIR`, which tests must not
+    /// mutate — the process environment is shared across parallel tests).
+    fn seed(&mut self, db: &Path, name: &str) -> bool {
+        let Ok(meta) = std::fs::metadata(db) else {
+            return false;
+        };
+        if self.find_by_db(db).is_some() {
+            return false;
+        }
+        self.file.projects.push(Project {
+            name: self.unique_name(name),
+            db: normalize(db),
+            joined_from: None,
+            last_opened: meta.modified().ok().map(DateTime::<Utc>::from),
+        });
+        true
+    }
+
+    /// Whether `name` refers to the default database, which [`seed_default`]
+    /// re-adopts on the next run.
+    pub fn is_default_db(&self, project: &Project) -> bool {
+        Self::default_db().is_ok_and(|db| same_path(&db, &project.db))
+    }
+
     /// Drop an entry. The database file itself is never touched — a name
     /// is metadata, and deleting someone's tasks is not what "forget" means.
     pub fn forget(&mut self, name: &str) -> Option<Project> {
@@ -297,7 +340,10 @@ pub fn name_from_ticket(ticket: &str) -> String {
 /// saying which name to pass.
 pub fn pick<'a>(projects: &[&'a Project]) -> Result<&'a Project> {
     if projects.is_empty() {
-        bail!("no projects are registered yet — run `yaiba` once, or `yaiba join <ticket>`");
+        // Reaching here means there is no default database either, since
+        // one on disk would already have been adopted. So this is a first
+        // run, not a registration that hasn't happened yet.
+        bail!("no projects yet — run `yaiba` to start one, or `yaiba join <ticket>`");
     }
     if !std::io::stdin().is_terminal() {
         bail!(
@@ -431,6 +477,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("yaiba-reg-{}", uuid_ish()));
         std::fs::create_dir_all(&dir).unwrap();
         Registry::load_from(dir.join(REGISTRY_FILE)).unwrap()
+    }
+
+    /// An existing database file to seed from.
+    fn touch_db(registry: &Registry, name: &str) -> PathBuf {
+        let path = registry.path().parent().unwrap().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"pretend this is sqlite").unwrap();
+        path
     }
 
     /// Enough entropy to keep parallel test runs off each other's files,
@@ -595,6 +649,55 @@ mod tests {
             "whatever"
         );
         assert!(registry.find_by_db(Path::new("/tmp/beta.db")).is_none());
+    }
+
+    /// The gap this fixes: a database that exists but was never opened
+    /// *since the registry landed* left `yaiba list` claiming there were no
+    /// projects, and the picker empty.
+    #[test]
+    fn an_existing_database_is_adopted_without_having_been_opened() {
+        let mut registry = temp_registry();
+        let db = touch_db(&registry, "yaiba.db");
+        assert!(registry.is_empty());
+
+        assert!(registry.seed(&db, DEFAULT_NAME));
+        assert_eq!(registry.names(), vec![DEFAULT_NAME]);
+        let project = registry.find(DEFAULT_NAME).unwrap();
+        assert!(same_path(&project.db, &db));
+        // From the file's mtime, so the picker orders correctly on run one.
+        assert!(project.last_opened.is_some());
+        assert!(project.joined_from.is_none());
+    }
+
+    #[test]
+    fn seeding_twice_adds_nothing() {
+        let mut registry = temp_registry();
+        let db = touch_db(&registry, "yaiba.db");
+        assert!(registry.seed(&db, DEFAULT_NAME));
+        assert!(!registry.seed(&db, DEFAULT_NAME));
+        assert_eq!(registry.names().len(), 1);
+    }
+
+    /// Seeding must not invent a project for a database that isn't there —
+    /// a genuinely fresh install has nothing to adopt.
+    #[test]
+    fn nothing_is_seeded_when_the_database_does_not_exist() {
+        let mut registry = temp_registry();
+        let absent = registry.path().parent().unwrap().join("yaiba.db");
+        assert!(!registry.seed(&absent, DEFAULT_NAME));
+        assert!(registry.is_empty());
+    }
+
+    /// Identity is still the path: a database already filed under another
+    /// name must not gain a second entry called `default`.
+    #[test]
+    fn seeding_respects_a_database_already_registered_under_another_name() {
+        let mut registry = temp_registry();
+        let db = touch_db(&registry, "yaiba.db");
+        registry.remember(&db, Some("mine"), None).unwrap();
+
+        assert!(!registry.seed(&db, DEFAULT_NAME));
+        assert_eq!(registry.names(), vec!["mine"]);
     }
 
     #[test]

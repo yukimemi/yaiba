@@ -225,7 +225,7 @@ async fn main() -> Result<()> {
     // A registry failure is only fatal for the commands that need one —
     // `yaiba --db <path>` has to keep working on a machine where the
     // platform data directory can't be resolved at all.
-    let registry = Registry::load();
+    let registry = load_registry();
     let target = resolve_target(&cli, &registry)?;
 
     let store = Store::open(&target.db)
@@ -451,7 +451,7 @@ fn parse_ticket(raw: &str) -> Result<Ticket> {
 fn unknown_project(registry: &Registry, name: &str) -> anyhow::Error {
     if registry.is_empty() {
         anyhow!(
-            "no projects are registered yet — run `yaiba` once, or \
+            "no projects yet — run `yaiba` to start one, or \
              `yaiba join <ticket> --as {name}`"
         )
     } else {
@@ -460,6 +460,31 @@ fn unknown_project(registry: &Registry, name: &str) -> anyhow::Error {
             registry.names().join(", ")
         )
     }
+}
+
+/// Load the registry and adopt the default database if it is on disk but
+/// unlisted.
+///
+/// Every entry point goes through this. Registration used to happen only
+/// when the server started, so a fresh install saw `yaiba list` report
+/// nothing and `yaiba open` open an empty picker until they had run the
+/// server once — with their tasks sitting in the default database the
+/// whole time.
+fn load_registry() -> Result<Registry> {
+    let mut registry = Registry::load()?;
+    // Persist the adoption rather than only displaying it. The index is
+    // meant to be hand-edited, and you cannot rename an entry that exists
+    // only in memory — leaving it unsaved would reintroduce "run the
+    // server once first" for anyone wanting to rename their default.
+    // Best-effort: a registry that cannot be written still lists and opens
+    // correctly, so a read-only home directory costs a warning, not the
+    // command.
+    if registry.seed_default()
+        && let Err(e) = registry.save()
+    {
+        tracing::warn!("could not save the project registry: {e:#}");
+    }
+    Ok(registry)
 }
 
 fn registry_ref(registry: &Result<Registry>) -> Result<&Registry> {
@@ -503,12 +528,11 @@ fn remember(registry: Result<Registry>, target: &Target) -> Option<String> {
 }
 
 fn list_projects() -> Result<()> {
-    let registry = Registry::load()?;
+    let registry = load_registry()?;
     if registry.is_empty() {
         println!(
-            "no projects registered yet.\n  \
-             run `yaiba` once to register the default one, or \
-             `yaiba join <ticket>` to add a peer's."
+            "no projects yet.\n  \
+             run `yaiba` to start one, or `yaiba join <ticket>` to add a peer's."
         );
         return Ok(());
     }
@@ -536,15 +560,26 @@ fn list_projects() -> Result<()> {
 }
 
 fn forget_project(name: &str) -> Result<()> {
-    let mut registry = Registry::load()?;
+    let mut registry = load_registry()?;
     let Some(project) = registry.forget(name) else {
         return Err(unknown_project(&registry, name));
     };
+    let was_default = registry.is_default_db(&project);
     registry.save()?;
     println!(
         "forgot {name:?}. Its database is still at {}",
         project.db.display()
     );
+    // Say so rather than let it look like the forget failed: the default
+    // database is re-adopted by `seed_default` on the very next command.
+    // Adoption keys off the file existing, and nothing else — `--db`
+    // changes which database *you* open, so it does not suppress this.
+    if was_default {
+        println!(
+            "  (that is the default database, so any yaiba command adopts it \
+             again — move the file itself to keep it out of the list)"
+        );
+    }
     Ok(())
 }
 
