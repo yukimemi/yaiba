@@ -389,8 +389,10 @@ protocol would still ship every row of it.
   env = "…")]` on a `bool` runs the environment value through clap's
   bool parser, so `=1`, `=0` and `=` (empty) all make yaiba *exit* with
   "invalid value" instead of starting — and `1` is what everyone types.
-  `Cli::relay_only()` reads presence with `var_os`, the same way
-  `updater::disabled_by_env` does for `YAIBA_NO_AUTOUPDATE`. Only
+  `Cli::relay_only()` reads a *non-empty* value with `var_os`, the same
+  way `updater::disabled_by_env` does for `YAIBA_NO_AUTOUPDATE` — bare
+  `.is_some()` would make `YAIBA_RELAY_ONLY=` mean *on*, against both
+  that precedent and what clearing a variable means anywhere else. Only
   `YAIBA_UPDATE` can afford clap's `env`: its values are the enum's.
 
 ### The firewall prompt on startup is the sync endpoint's
@@ -407,8 +409,9 @@ it returns forever — is `SyncNode::start`, via iroh.
 - **Verify it by looking at the sockets, not the dialog.** A machine
   that has already been answered once never shows the prompt again, so
   the prompt is not the test — `Get-NetUDPEndpoint -OwningProcess <pid>`
-  is. Direct binds two, relay-only binds zero, and the only listener
-  left is loopback TCP.
+  is. Direct binds two UDP sockets, relay-only binds none, and what is
+  left in both is the UI's loopback TCP listener, which is not what the
+  firewall was ever asking about.
 - **Relay-only still syncs, and the ticket is unchanged.** A peer dials
   a public key; which transport answers is not part of the ticket, so
   relay-only and direct replicas pair up in either direction.

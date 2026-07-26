@@ -74,14 +74,16 @@ struct Cli {
     #[arg(long, global = true)]
     no_sync: bool,
 
-    /// Sync through relays only, binding no socket of our own.
+    /// Sync through relays only, binding no UDP socket to do it.
     ///
     /// For a machine without administrator rights: the normal endpoint
     /// listens on every interface and probes the router, and Windows
     /// answers that with a firewall prompt on every start that nobody
     /// there can dismiss for good. Set `YAIBA_RELAY_ONLY` to make it
-    /// permanent. The direct peer-to-peer path is what this gives up —
-    /// syncing keeps working, it just always goes the long way round.
+    /// permanent. The UI keeps its loopback listener either way — a
+    /// firewall has never had anything to say about that one. The direct
+    /// peer-to-peer path is what this gives up: syncing keeps working,
+    /// it just always goes the long way round.
     #[arg(long, global = true)]
     relay_only: bool,
 
@@ -95,12 +97,17 @@ struct Cli {
 impl Cli {
     /// `--relay-only`, or the environment variable standing in for it.
     ///
-    /// Read for presence like `YAIBA_NO_AUTOUPDATE`, not through clap's
-    /// `env`: clap parses a flag's environment value as a bool, so
-    /// `YAIBA_RELAY_ONLY=1` — the spelling everyone reaches for, and the
-    /// one an admin-less machine would set once and forget — refuses to
-    /// *start* with "invalid value '1'". Failing to launch is a far
-    /// worse answer than accepting a loose truthy value.
+    /// Set means *set to something*, matching how
+    /// `updater::disabled_by_env` reads `YAIBA_NO_AUTOUPDATE`: an empty
+    /// `YAIBA_RELAY_ONLY=` is off, which is what clearing a variable
+    /// means everywhere else, and two environment flags in one binary
+    /// disagreeing about that would be its own trap.
+    ///
+    /// Not clap's `env`, which parses a flag's environment value as a
+    /// bool: `YAIBA_RELAY_ONLY=1` — the spelling everyone reaches for,
+    /// and the one an admin-less machine would set once and forget —
+    /// refuses to *start* with "invalid value '1'". Failing to launch is
+    /// a far worse answer than accepting a loose truthy value.
     fn relay_only(&self) -> bool {
         self.relay_only || std::env::var_os("YAIBA_RELAY_ONLY").is_some_and(|v| !v.is_empty())
     }
