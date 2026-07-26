@@ -433,7 +433,18 @@ fn unknown_project(registry: &Registry, name: &str) -> anyhow::Error {
 /// whole time.
 fn load_registry() -> Result<Registry> {
     let mut registry = Registry::load()?;
-    registry.seed_default();
+    // Persist the adoption rather than only displaying it. The index is
+    // meant to be hand-edited, and you cannot rename an entry that exists
+    // only in memory — leaving it unsaved would reintroduce "run the
+    // server once first" for anyone wanting to rename their default.
+    // Best-effort: a registry that cannot be written still lists and opens
+    // correctly, so a read-only home directory costs a warning, not the
+    // command.
+    if registry.seed_default()
+        && let Err(e) = registry.save()
+    {
+        tracing::warn!("could not save the project registry: {e:#}");
+    }
     Ok(registry)
 }
 
@@ -522,10 +533,12 @@ fn forget_project(name: &str) -> Result<()> {
     );
     // Say so rather than let it look like the forget failed: the default
     // database is re-adopted by `seed_default` on the very next command.
+    // Adoption keys off the file existing, and nothing else — `--db`
+    // changes which database *you* open, so it does not suppress this.
     if was_default {
         println!(
-            "  (that is the default database, so it comes back on the next \
-             run — pass --db to keep a project out of the list)"
+            "  (that is the default database, so any yaiba command adopts it \
+             again — move the file itself to keep it out of the list)"
         );
     }
     Ok(())
