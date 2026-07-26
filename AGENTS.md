@@ -293,6 +293,36 @@ and survives `kata apply` — the base and rust blocks are
 `how = "merge-section"`, so only the bytes between their markers are
 replaced.
 
+### `main` is protected, and two checks are deliberately not required
+
+`main` requires the eleven gating CI contexts: `check`, `test` and
+`clippy` across all three OSes, plus `rustfmt` and
+`cargo lockfile in sync`. Until this existed, `gh pr merge --auto` had
+nothing to wait for and merged immediately — it reads as "merge when
+green" and was in fact "merge now".
+
+Two checks are **excluded on purpose**. Adding either deadlocks the
+repo's own automation:
+
+- **`review`** (`claude-review.yml`) has a job-level `if:` that skips
+  release bumps, `kata-apply/auto`, `apm-bump/auto`, Renovate/Dependabot
+  and drafts. A skipped job never reports its context, and a required
+  context that never reports blocks the PR *forever* — precisely on the
+  PRs the repo relies on auto-merging, including every release.
+- **`coverage`** sets `fail_ci_if_error: false` specifically so a flaky
+  Codecov upload can't gate merges. Requiring it would take that back.
+
+Other settings and why: `strict` is **off**, so a merge to `main` doesn't
+force every other open PR to update first — with stacked branches that is
+pure churn. `enforce_admins` is **off**, leaving an escape hatch when CI
+itself is broken. No required reviewers: on a solo repo that would block
+every merge, since you cannot approve your own PR.
+
+Nothing pushes to `main` directly — `auto-tag.yml` pushes a *tag*, which
+branch protection does not cover, and `kata-apply` / `apm-bump` open PRs.
+So the protection costs the automation nothing beyond making its
+`--auto` merges honest.
+
 ### Building the web UI
 
 The UI is compiled into the binary with `rust-embed`, so a stale or
