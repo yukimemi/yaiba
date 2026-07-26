@@ -219,6 +219,10 @@ export function App() {
    */
   const switchTo = (name: string) => {
     setShowProjects(false);
+    // Landing on the project you are already looking at must not cost you
+    // your filter and folds: an <enter> straight out of the palette is a
+    // no-op, not a reset.
+    if (name === projects.active) return;
     void api
       .switchProject(name)
       .then((info) => {
@@ -226,6 +230,11 @@ export function App() {
         setCursorId(null);
         setAnchorId(null);
         setFocus(null);
+        // Both halves of the folding state. `foldLevel` is a raw depth
+        // compared against each project's own tree, so carrying it over
+        // hides everything deeper in the new one — the same failure the
+        // filter reset above exists to prevent.
+        setFoldLevel(null);
         setCollapsed(new Set());
         setFilter("");
         return load();

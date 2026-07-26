@@ -38,7 +38,14 @@ function score(name: string, query: string): number | null {
 
 export function ProjectPalette({ projects, active, onPick, onClose }: Props) {
   const [query, setQuery] = useState("");
-  const [cursor, setCursor] = useState(0);
+  // Start on the project you are looking at, not on row 0. An empty query
+  // scores every project the same, so the list arrives in server order and
+  // row 0 is whichever project happens to be first — a blind <enter>
+  // would then switch you somewhere arbitrary.
+  const [cursor, setCursor] = useState(() => {
+    const at = projects.findIndex((p) => p.name === active);
+    return at === -1 ? 0 : at;
+  });
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
