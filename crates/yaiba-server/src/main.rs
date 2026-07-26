@@ -330,6 +330,10 @@ async fn main() -> Result<()> {
     }
 
     let open_count = projects.len();
+    // Counted, not inferred from the active project's ticket: a
+    // background project whose endpoint failed to bind is open but not
+    // replicating, and the banner must not fold it into "all syncing".
+    let syncing_count = projects.iter().filter(|p| p.sync.is_some()).count();
     let state = api::AppState::with_projects(projects);
     for project in state.projects() {
         if let Some(sync) = &project.sync {
@@ -359,15 +363,16 @@ async fn main() -> Result<()> {
     };
     let url = format!("http://{display_host}:{}", cli.port);
 
-    banner(
-        &url,
-        &target.db,
-        Some(active_name.as_str()),
+    banner(Banner {
+        url: &url,
+        db_path: &target.db,
+        project: Some(active_name.as_str()),
         open_count,
+        syncing_count,
         node_id,
-        ticket.as_deref(),
-        cli.relay_only(),
-    );
+        ticket: ticket.as_deref(),
+        relay_only: cli.relay_only(),
+    });
     if !cli.no_open {
         open_browser(&url);
     }
@@ -694,14 +699,33 @@ fn forget_project(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn banner(
-    url: &str,
-    db_path: &std::path::Path,
-    project: Option<&str>,
+/// What the startup banner has to say.
+///
+/// A struct rather than eight positional arguments: two `Option<&str>`
+/// and two `usize` next to each other are trivially swappable at the call
+/// site, and nothing would catch it.
+struct Banner<'a> {
+    url: &'a str,
+    db_path: &'a std::path::Path,
+    project: Option<&'a str>,
     open_count: usize,
+    syncing_count: usize,
     node_id: yaiba_core::NodeId,
-    ticket: Option<&str>,
+    ticket: Option<&'a str>,
     relay_only: bool,
+}
+
+fn banner(
+    Banner {
+        url,
+        db_path,
+        project,
+        open_count,
+        syncing_count,
+        node_id,
+        ticket,
+        relay_only,
+    }: Banner<'_>,
 ) {
     const CYAN: &str = "\x1b[38;5;51m";
     const MAGENTA: &str = "\x1b[38;5;207m";
@@ -729,17 +753,20 @@ fn banner(
             Some(name) => format!(
                 "  {CYAN}▸{RESET} pj   {MAGENTA}{name}{RESET}{others}\n",
                 // Say how many others are live, so the background
-                // replication isn't invisible. Only claim they are syncing
-                // when they are: under --no-sync nothing is.
+                // replication isn't invisible — and only claim they are
+                // syncing when they are. `--no-sync` leaves none of them
+                // replicating, and a background endpoint that failed to
+                // bind is warned about and skipped, so a count is the only
+                // honest source for this.
                 others = match open_count {
                     0 | 1 => String::new(),
                     n => format!(
                         "{DIM}  +{} more open{} · :proj{RESET}",
                         n - 1,
-                        if ticket.is_some() {
-                            ", all syncing"
-                        } else {
-                            ""
+                        match syncing_count {
+                            0 => String::new(),
+                            s if s == n => ", all syncing".to_string(),
+                            s => format!(", {s} of {n} syncing"),
                         }
                     ),
                 }
@@ -886,6 +913,75 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         Registry::load_from(dir.join("projects.toml"))
+    }
+
+    fn names(projects: &[api::OpenProject]) -> Vec<&str> {
+        projects.iter().map(|p| p.name.as_str()).collect()
+    }
+
+    /// A real database on disk for the registry to point at.
+    fn seed_db(registry: &Registry, name: &str) -> PathBuf {
+        let path = registry.path().parent().unwrap().join(format!("{name}.db"));
+        Store::open(&path).unwrap();
+        path
+    }
+
+    /// The active database is already open as index 0. Opening it again
+    /// would give one project two SQLite handles and set it replicating
+    /// against itself.
+    #[test]
+    fn the_active_database_is_not_opened_twice() {
+        let mut registry = scratch_registry().unwrap();
+        let active = seed_db(&registry, "yaiba");
+        registry.remember(&active, Some("default"), None).unwrap();
+
+        let opened = open_others(Some(&registry), &active, false);
+        assert!(opened.is_empty(), "opened {:?}", names(&opened));
+    }
+
+    /// The claim the launch rests on: a stale registry line costs a
+    /// warning, never the startup.
+    #[test]
+    fn a_registered_database_that_is_gone_is_skipped() {
+        let mut registry = scratch_registry().unwrap();
+        let here = seed_db(&registry, "here");
+        let vanished = registry.path().parent().unwrap().join("vanished.db");
+        registry.remember(&here, Some("here"), None).unwrap();
+        registry
+            .remember(&vanished, Some("vanished"), None)
+            .unwrap();
+
+        let opened = open_others(Some(&registry), &PathBuf::from("elsewhere.db"), false);
+        assert_eq!(names(&opened), vec!["here"]);
+    }
+
+    /// A path that exists but is not a database — a directory left where a
+    /// file used to be — must not take the launch down either.
+    #[test]
+    fn a_database_that_will_not_open_is_skipped() {
+        let mut registry = scratch_registry().unwrap();
+        let good = seed_db(&registry, "good");
+        let bad = registry.path().parent().unwrap().join("bad.db");
+        std::fs::create_dir_all(&bad).unwrap();
+        registry.remember(&good, Some("good"), None).unwrap();
+        registry.remember(&bad, Some("bad"), None).unwrap();
+
+        let opened = open_others(Some(&registry), &PathBuf::from("elsewhere.db"), false);
+        assert_eq!(names(&opened), vec!["good"]);
+    }
+
+    #[test]
+    fn only_active_opens_nothing_else() {
+        let mut registry = scratch_registry().unwrap();
+        let other = seed_db(&registry, "other");
+        registry.remember(&other, Some("other"), None).unwrap();
+
+        assert!(open_others(Some(&registry), &PathBuf::from("elsewhere.db"), true).is_empty());
+    }
+
+    #[test]
+    fn no_registry_means_only_the_active_project() {
+        assert!(open_others(None, &PathBuf::from("elsewhere.db"), false).is_empty());
     }
 
     #[test]
