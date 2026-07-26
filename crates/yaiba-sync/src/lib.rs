@@ -7,6 +7,11 @@
 //! When hole punching fails the connection falls back to a relay, which
 //! only forwards already-encrypted QUIC and cannot read the contents.
 //!
+//! Hole punching does still bind a socket on every interface, and that
+//! is what a desktop firewall asks about on startup.
+//! [`Transport::RelayOnly`] gives the direct path up to keep the prompt
+//! away.
+//!
 //! Membership is a shared 32-byte *room key*, handed around inside a
 //! ticket. A peer that can't present it is dropped before any data
 //! moves.
@@ -19,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use iroh::endpoint::Connection;
+use iroh::endpoint::{Connection, PortmapperConfig};
 use iroh::{Endpoint, EndpointId, SecretKey};
 use tokio::sync::Notify;
 use yaiba_core::Store;
@@ -71,6 +76,29 @@ impl FromStr for Ticket {
     }
 }
 
+/// How the endpoint puts itself on the network.
+///
+/// The distinction only matters on a machine where the user cannot
+/// answer a firewall prompt — see [`Transport::RelayOnly`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Transport {
+    /// Bind UDP on every interface and ask the gateway for a port
+    /// mapping. Hole punching gets a direct path when it can, and the
+    /// relay picks up the rest.
+    #[default]
+    Direct,
+    /// Bind no UDP socket and skip the gateway probe, so everything
+    /// rides the relay over an outbound connection.
+    ///
+    /// Slower — every byte takes the long way round — but nothing ever
+    /// listens on a real interface. That is what a machine without
+    /// administrator rights needs: binding `0.0.0.0` and the UPnP
+    /// discovery multicast are each enough to make Windows raise a
+    /// firewall prompt that only an administrator can answer, and one
+    /// that is dismissed comes straight back on the next start.
+    RelayOnly,
+}
+
 pub struct SyncNode {
     endpoint: Endpoint,
     store: Arc<Mutex<Store>>,
@@ -83,6 +111,13 @@ impl SyncNode {
     /// Bind an endpoint and start serving. Identity is persisted, so a
     /// restart rejoins as the same peer with the same ticket.
     pub async fn start(store: Arc<Mutex<Store>>) -> Result<Arc<Self>> {
+        Self::start_with(store, Transport::Direct).await
+    }
+
+    /// [`SyncNode::start`], choosing how the endpoint reaches the
+    /// network. The ticket is the same either way: a peer dials by
+    /// public key and never learns which transport answered.
+    pub async fn start_with(store: Arc<Mutex<Store>>, transport: Transport) -> Result<Arc<Self>> {
         let (secret, room) = {
             let db = store.lock().unwrap_or_else(|e| e.into_inner());
             let secret = match db.meta(META_SECRET)? {
@@ -108,9 +143,19 @@ impl SyncNode {
             (secret, room)
         };
 
-        let endpoint = Endpoint::builder(iroh::endpoint::presets::N0)
+        let mut builder = Endpoint::builder(iroh::endpoint::presets::N0)
             .secret_key(secret)
-            .alpns(vec![ALPN.to_vec()])
+            .alpns(vec![ALPN.to_vec()]);
+        if transport == Transport::RelayOnly {
+            // Both halves are needed: dropping the IP transports stops
+            // the `0.0.0.0` / `[::]` binds, and disabling the portmapper
+            // stops the SSDP multicast that probes for a gateway. Either
+            // one alone still trips the firewall.
+            builder = builder
+                .clear_ip_transports()
+                .portmapper_config(PortmapperConfig::Disabled);
+        }
+        let endpoint = builder
             .bind()
             .await
             .context("failed to bind the iroh endpoint")?;

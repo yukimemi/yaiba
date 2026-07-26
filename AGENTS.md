@@ -385,6 +385,33 @@ protocol would still ship every row of it.
   The flag merges the current replica into the peer's room (mutual, no
   undo); the subcommand opens theirs as a separate project. `:join` in
   the UI is the flag's behaviour — one server, one database.
+- **A `bool` flag's clap `env` is parsed, not sensed.** `#[arg(long,
+  env = "…")]` on a `bool` runs the environment value through clap's
+  bool parser, so `=1`, `=0` and `=` (empty) all make yaiba *exit* with
+  "invalid value" instead of starting — and `1` is what everyone types.
+  `Cli::relay_only()` reads presence with `var_os`, the same way
+  `updater::disabled_by_env` does for `YAIBA_NO_AUTOUPDATE`. Only
+  `YAIBA_UPDATE` can afford clap's `env`: its values are the enum's.
+
+### The firewall prompt on startup is the sync endpoint's
+
+The HTTP listener defaults to loopback, which no desktop firewall asks
+about. What raises the Windows dialog on every start — the one wanting
+an administrator, which a locked-down machine's user cannot supply, so
+it returns forever — is `SyncNode::start`, via iroh.
+
+- **Two separate causes, and stopping one is not enough.** iroh binds
+  UDP on `0.0.0.0` *and* `[::]`, and its portmapper probes the gateway
+  with SSDP multicast. `Transport::RelayOnly` therefore pairs
+  `clear_ip_transports()` with `PortmapperConfig::Disabled`.
+- **Verify it by looking at the sockets, not the dialog.** A machine
+  that has already been answered once never shows the prompt again, so
+  the prompt is not the test — `Get-NetUDPEndpoint -OwningProcess <pid>`
+  is. Direct binds two, relay-only binds zero, and the only listener
+  left is loopback TCP.
+- **Relay-only still syncs, and the ticket is unchanged.** A peer dials
+  a public key; which transport answers is not part of the ticket, so
+  relay-only and direct replicas pair up in either direction.
 
 ### Invariants worth knowing before changing the graph
 

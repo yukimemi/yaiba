@@ -33,6 +33,8 @@ The UI opens at `http://localhost:8188`. Press `?` for keys.
   their own rather than mixing them into theirs. Edits merge through a
   field-level CRDT, so concurrent changes to the same task both survive.
   Needs outbound UDP only: no port forwarding, no inbound firewall rule.
+  `--relay-only` binds no socket at all, for a machine where a firewall
+  prompt wants an administrator you don't have.
 - **Many projects** — `yaiba list`, `yaiba open <name>`, or bare
   `yaiba open` for a fuzzy picker over them.
 
