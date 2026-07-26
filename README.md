@@ -290,8 +290,11 @@ still opens with `yaiba --db <path>`, registered or not.
 **One yaiba holds them all.** Starting it opens every registered project,
 not only the one you asked for, and each one replicates on its own —
 so a project is up to date when you turn to it, rather than starting to
-catch up at that moment. `/api/projects` lists what is open and switches
-between them; there is no second process and no second port.
+catch up at that moment. There is no second process and no second port.
+
+Switch from inside the app: **`:proj`** opens a fuzzy picker over what is
+open — `^n` / `^p` to move, enter to switch, esc to cancel. `:proj <name>`
+goes straight there, and `<tab>` completes the name.
 
 A registry entry whose database has gone is skipped with a warning rather
 than stopping the launch. If opening everything costs more than it is

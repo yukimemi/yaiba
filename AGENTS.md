@@ -453,6 +453,22 @@ it returns forever — is `SyncNode::start`, via iroh.
   a public key; which transport answers is not part of the ticket, so
   relay-only and direct replicas pair up in either direction.
 
+### The project palette
+
+- **Switching clears everything derived from the old project.** Cursor,
+  visual anchor, `:only` focus, folds and the filter all name things that
+  do not exist in the project being switched to — a filter carried across
+  would silently hide the new project's tasks and read as the switch
+  having lost them.
+- **The palette owns the keyboard while it is up.** `onKey` returns early
+  on `showProjects`, the same way it does for insert / command / search,
+  and the palette's own handler calls `preventDefault` *and*
+  `stopPropagation` on every branch it handles. Without that the task
+  cursor moves behind the overlay while you are picking.
+- **The cursor is clamped against the filtered list, not stored into it.**
+  Filtering to fewer rows than the cursor index would otherwise leave
+  `<enter>` picking nothing, which reads as the palette ignoring you.
+
 ### Invariants worth knowing before changing the graph
 
 - **Cycles are refused server-side.** `Store::add_dep` calls

@@ -90,6 +90,13 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    title: "PROJECTS",
+    keys: [
+      [":proj", "pick one — every open project is syncing"],
+      [":proj ⟨n⟩", "switch straight to it"],
+    ],
+  },
+  {
     title: ": AS OF",
     keys: [
       [":asof ⟨d⟩", "see the plan as it stood then"],

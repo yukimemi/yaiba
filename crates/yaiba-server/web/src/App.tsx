@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { api, type PeersInfo } from "./api";
+import { api, type PeersInfo, type ProjectsInfo } from "./api";
 import { runCommand, type UiPatch, type View, type Zoom } from "./commands";
 import {
   completionLine,
@@ -10,6 +10,7 @@ import {
 } from "./completion";
 import { Gantt } from "./components/Gantt";
 import { Help } from "./components/Help";
+import { ProjectPalette } from "./components/ProjectPalette";
 import { Hud } from "./components/Hud";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
@@ -74,6 +75,9 @@ export function App() {
   const [showHelp, setShowHelp] = useState(false);
 
   const [peers, setPeers] = useState<PeersInfo>({ ticket: null, peers: [] });
+
+  const [projects, setProjects] = useState<ProjectsInfo>({ projects: [], active: "" });
+  const [showProjects, setShowProjects] = useState(false);
 
   const [view, setView] = useState<View>("split");
   const [zoom, setZoom] = useState<Zoom>("day");
@@ -194,11 +198,50 @@ export function App() {
   // Peer roster, for the HUD. Slower than the data poll — peers come and
   // go on a human timescale.
   useEffect(() => {
-    const read = () => void api.getPeers().then(setPeers).catch(() => undefined);
+    const read = () => {
+      void api.getPeers().then(setPeers).catch(() => undefined);
+      // Rides the same timer: the peer counts the project palette shows
+      // move on the same human timescale as the HUD's.
+      void api.getProjects().then(setProjects).catch(() => undefined);
+    };
     read();
     const timer = setInterval(read, PEERS_MS);
     return () => clearInterval(timer);
   }, []);
+
+  /**
+   * Point the server at another project and re-read.
+   *
+   * Everything derived from the old project has to go with it: the cursor
+   * names a task id that does not exist over there, and a filter or a
+   * focused subtree carried across would silently hide the new project's
+   * tasks and read as "the switch lost my data".
+   */
+  const switchTo = (name: string) => {
+    setShowProjects(false);
+    // Landing on the project you are already looking at must not cost you
+    // your filter and folds: an <enter> straight out of the palette is a
+    // no-op, not a reset.
+    if (name === projects.active) return;
+    void api
+      .switchProject(name)
+      .then((info) => {
+        setProjects(info);
+        setCursorId(null);
+        setAnchorId(null);
+        setFocus(null);
+        // Both halves of the folding state. `foldLevel` is a raw depth
+        // compared against each project's own tree, so carrying it over
+        // hides everything deeper in the new one — the same failure the
+        // filter reset above exists to prevent.
+        setFoldLevel(null);
+        setCollapsed(new Set());
+        setFilter("");
+        return load();
+      })
+      .then(() => say(`project · ${name}`, "ok"))
+      .catch((e: Error) => say(e.message, "error"));
+  };
 
   const say = (text: string, kind: Message["kind"] = "info") =>
     setMessage({ text, kind });
@@ -805,6 +848,9 @@ export function App() {
   const onKey = (e: KeyboardEvent) => {
     // Read the ref, not the state: see enterMode.
     const activeMode = modeRef.current;
+    // The palette runs its own input and owns every key while it is up,
+    // exactly as insert / command / search do.
+    if (showProjects) return;
     if (showHelp) {
       if (e.key === "Escape" || e.key === "?" || e.key === "Enter") {
         setShowHelp(false);
@@ -1182,7 +1228,7 @@ export function App() {
    */
   const cycleCompletion = (step: number) => {
     if (!data) return;
-    const from = completion ?? startCompletion(cmdline, { data });
+    const from = completion ?? startCompletion(cmdline, { data, projects: projects.projects.map((p) => p.name) });
     if (!from) return;
     const next = stepCompletion(from, step);
     setCompletion(next);
@@ -1287,6 +1333,14 @@ export function App() {
         })
         .catch((e: Error) => say(e.message, "error"));
     }
+    if (result.project?.pick) {
+      if (projects.projects.length < 2) {
+        say("only one project is open — `yaiba join <ticket>` adds another", "info");
+      } else {
+        setShowProjects(true);
+      }
+    }
+    if (result.project?.switch) switchTo(result.project.switch);
     if (result.ops) {
       void run(result.ops, result.undoOps ?? [], result.label ?? line);
     }
@@ -1420,6 +1474,14 @@ export function App() {
       />
 
       {showHelp && <Help onClose={() => setShowHelp(false)} />}
+      {showProjects && (
+        <ProjectPalette
+          projects={projects.projects}
+          active={projects.active}
+          onPick={switchTo}
+          onClose={() => setShowProjects(false)}
+        />
+      )}
     </div>
   );
 }
