@@ -340,7 +340,10 @@ pub fn name_from_ticket(ticket: &str) -> String {
 /// saying which name to pass.
 pub fn pick<'a>(projects: &[&'a Project]) -> Result<&'a Project> {
     if projects.is_empty() {
-        bail!("no projects are registered yet — run `yaiba` once, or `yaiba join <ticket>`");
+        // Reaching here means there is no default database either, since
+        // one on disk would already have been adopted. So this is a first
+        // run, not a registration that hasn't happened yet.
+        bail!("no projects yet — run `yaiba` to start one, or `yaiba join <ticket>`");
     }
     if !std::io::stdin().is_terminal() {
         bail!(

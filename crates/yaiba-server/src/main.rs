@@ -412,7 +412,7 @@ fn parse_ticket(raw: &str) -> Result<Ticket> {
 fn unknown_project(registry: &Registry, name: &str) -> anyhow::Error {
     if registry.is_empty() {
         anyhow!(
-            "no projects are registered yet — run `yaiba` once, or \
+            "no projects yet — run `yaiba` to start one, or \
              `yaiba join <ticket> --as {name}`"
         )
     } else {
