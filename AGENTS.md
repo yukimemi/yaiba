@@ -311,6 +311,17 @@ failing.
   directly when you need to see output: `node
   node_modules/vite/bin/vite.js build`, `node
   node_modules/typescript/bin/tsc -b`.
+- **Anything that produces a shippable binary depends on `web-build`.**
+  That is `release-build` and `install`. A bare `cargo install --path .`
+  skips it and installs a working binary serving an empty UI — no error,
+  because the missing bundle is exactly the silent case above.
+
+### The binary crate is `yaiba`, not `yaiba-server`
+
+Only the directory carries the suffix, so `-p yaiba-server` fails with
+"package ID specification did not match any packages". `cargo make dev`
+and `cargo make smoke` both shipped broken for exactly this reason —
+neither runs in CI, so nothing caught it.
 
 ### The palette is load-bearing
 

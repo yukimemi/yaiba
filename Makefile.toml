@@ -224,18 +224,36 @@ bun install
 node node_modules/vite/bin/vite.js
 '''
 
+# The crate that carries the binary is named `yaiba`, not `yaiba-server`
+# — only its directory has the suffix (see crates/yaiba-server/Cargo.toml).
+# `-p yaiba-server` fails with "package ID specification did not match any
+# packages", so every -p below names the package.
+
 [tasks.dev]
 description = "Run the server against a scratch database, without opening a browser"
 command = "cargo"
-args = ["run", "-p", "yaiba-server", "--", "--no-open"]
+args = ["run", "-p", "yaiba", "--", "--no-open"]
 
 [tasks.smoke]
 description = "Release smoke test — sqlite, the embedded bundle, and the iroh endpoint"
 command = "cargo"
-args = ["run", "--locked", "--release", "--example", "smoke", "-p", "yaiba-server"]
+args = ["run", "--locked", "--release", "--example", "smoke", "-p", "yaiba"]
 
 [tasks.release-build]
 description = "Build the shippable single binary (web bundle first, then cargo)"
 dependencies = ["web-build"]
 command = "cargo"
 args = ["build", "--locked", "--release"]
+
+[tasks.install]
+description = "Install yaiba into ~/.cargo/bin from this checkout (web bundle first, then cargo install)"
+# Same ordering rule as release-build: rust-embed reads web/dist at
+# compile time, and a missing bundle ships silently rather than failing,
+# so `cargo install` on its own would happily install an empty UI.
+dependencies = ["web-build"]
+command = "cargo"
+# --force because the version rarely changes between local builds, and
+# without it cargo refuses with "package `yaiba` is already installed" —
+# which would make this task a no-op exactly when you re-run it to pick
+# up your own changes.
+args = ["install", "--locked", "--force", "--path", "crates/yaiba-server"]
