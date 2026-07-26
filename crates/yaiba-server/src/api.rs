@@ -56,24 +56,40 @@ impl OpenProject {
 
 #[derive(Clone)]
 pub struct AppState {
-    /// The open set, which now grows and shrinks while the server runs.
+    /// The open set and which one is being looked at, under **one** lock.
     ///
-    /// Handles rather than values, and a name rather than an index for
-    /// `active`: removing a project shifts every index after it, so an
-    /// index would quietly come to mean a different project. A name keeps
-    /// meaning the same thing or stops resolving, and the second is a
-    /// state that can be handled.
-    /// Lock order, where both are taken: `projects` then `active`, never
-    /// the other way. Only `remove` holds one while taking the other, and
-    /// it must, so that no request can see an active name that resolves to
-    /// nothing. Everything else releases the first before taking the
-    /// second.
-    projects: Arc<Mutex<Vec<Arc<OpenProject>>>>,
-    active: Arc<Mutex<String>>,
+    /// They started as two locks with a documented acquisition order, and
+    /// that was wrong: "is it open?" and "make it active" have to be a
+    /// single critical section, or a concurrent removal lands between them
+    /// and `active` is left naming a project that is gone. One lock makes
+    /// that unrepresentable instead of merely documented.
+    open: Arc<Mutex<Open>>,
+    /// Serializes project *creation*, which spans an `.await` — binding an
+    /// endpoint — and so cannot hold `open` throughout. Without it two
+    /// requests for the same new name both clear the collision checks, and
+    /// the loser leaves a database, a registry entry and a running sync
+    /// task behind after its 409.
+    creating: Arc<tokio::sync::Mutex<()>>,
     /// How a project created at runtime gets its replication, so it comes
     /// up the same way one opened at startup did. `None` under
     /// `--no-sync`, which is the whole reason this is an `Option`.
     transport: Option<yaiba_sync::Transport>,
+}
+
+/// The open projects, and the name of the one being looked at.
+///
+/// A name rather than an index: removing a project shifts every index
+/// after it, so an index would quietly come to mean a different project,
+/// while a name either keeps meaning the same thing or stops resolving.
+struct Open {
+    projects: Vec<Arc<OpenProject>>,
+    active: String,
+}
+
+impl Open {
+    fn has(&self, name: &str) -> bool {
+        self.projects.iter().any(|p| p.name == name)
+    }
 }
 
 impl AppState {
@@ -99,8 +115,11 @@ impl AppState {
             "a server needs at least one open project"
         );
         Self {
-            active: Arc::new(Mutex::new(projects[0].name.clone())),
-            projects: Arc::new(Mutex::new(projects.into_iter().map(Arc::new).collect())),
+            open: Arc::new(Mutex::new(Open {
+                active: projects[0].name.clone(),
+                projects: projects.into_iter().map(Arc::new).collect(),
+            })),
+            creating: Arc::new(tokio::sync::Mutex::new(())),
             transport,
         }
     }
@@ -109,67 +128,71 @@ impl AppState {
         self.transport
     }
 
-    fn open(&self) -> std::sync::MutexGuard<'_, Vec<Arc<OpenProject>>> {
-        self.projects.lock().unwrap_or_else(|e| e.into_inner())
+    fn open(&self) -> std::sync::MutexGuard<'_, Open> {
+        self.open.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn active_name(&self) -> std::sync::MutexGuard<'_, String> {
-        self.active.lock().unwrap_or_else(|e| e.into_inner())
+    /// Held for the whole of a create, which is why it is async: the
+    /// creation path awaits an endpoint bind and a `std` guard cannot be
+    /// held across that.
+    pub async fn creating(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.creating.lock().await
     }
 
     /// Point the server at a different open project. `false` if no project
     /// goes by that name.
+    ///
+    /// The check and the write share one critical section: split, a
+    /// concurrent `remove` between them makes this activate a project that
+    /// no longer exists.
     pub fn switch(&self, name: &str) -> bool {
-        if !self.open().iter().any(|p| p.name == name) {
+        let mut open = self.open();
+        if !open.has(name) {
             return false;
         }
-        *self.active_name() = name.to_string();
+        open.active = name.to_string();
         true
     }
 
     /// The project being looked at.
     ///
-    /// Returns a handle rather than a reference: the vector it lives in is
-    /// behind a lock now, and holding that lock for as long as a caller
-    /// wants the project would serialize every request against every
-    /// other one.
+    /// Returns a handle rather than a reference, so the lock is released
+    /// before the caller goes on to take the store's — holding it for as
+    /// long as a caller wants the project would serialize every request
+    /// against every other one.
     ///
     /// # Panics
-    /// If the active name resolves to nothing, which would mean a project
-    /// was removed without the active pointer being moved off it — a bug
-    /// in `remove`, not a reachable state.
+    /// If the active name resolves to nothing. Every mutation of the set
+    /// happens under the same lock as `active`, so that is a bug in this
+    /// type rather than a reachable state.
     pub fn active(&self) -> Arc<OpenProject> {
-        let name = self.active_name().clone();
-        self.find(&name)
-            .unwrap_or_else(|| panic!("the active project {name:?} is not open"))
-    }
-
-    pub fn find(&self, name: &str) -> Option<Arc<OpenProject>> {
-        self.open().iter().find(|p| p.name == name).cloned()
+        let open = self.open();
+        open.projects
+            .iter()
+            .find(|p| p.name == open.active)
+            .cloned()
+            .unwrap_or_else(|| panic!("the active project {:?} is not open", open.active))
     }
 
     pub fn projects(&self) -> Vec<Arc<OpenProject>> {
-        self.open().clone()
+        self.open().projects.clone()
     }
 
     pub fn is_open(&self, name: &str) -> bool {
-        self.open().iter().any(|p| p.name == name)
+        self.open().has(name)
     }
 
     /// Take a newly created project into the open set and look at it.
     ///
-    /// `false` if the name is already open, which the caller should have
-    /// refused earlier — two projects under one name would make `switch`
-    /// and `remove` ambiguous.
+    /// `false` if the name is already open — two projects under one name
+    /// would make `switch`, `rename` and `remove` ambiguous.
     pub fn insert(&self, project: OpenProject) -> bool {
         let mut open = self.open();
-        if open.iter().any(|p| p.name == project.name) {
+        if open.has(&project.name) {
             return false;
         }
-        let name = project.name.clone();
-        open.push(Arc::new(project));
-        drop(open);
-        *self.active_name() = name;
+        open.active = project.name.clone();
+        open.projects.push(Arc::new(project));
         true
     }
 
@@ -180,19 +203,49 @@ impl AppState {
     /// to serve and every endpoint would have nothing to answer with.
     pub fn remove(&self, name: &str) -> Option<String> {
         let mut open = self.open();
-        if open.len() <= 1 {
+        if open.projects.len() <= 1 {
             return None;
         }
-        let at = open.iter().position(|p| p.name == name)?;
-        open.remove(at);
-        // Move off it *before* releasing the lock, so no request can
-        // observe an active name that resolves to nothing.
-        let mut active = self.active_name();
-        if *active == name {
+        let at = open.projects.iter().position(|p| p.name == name)?;
+        open.projects.remove(at);
+        if open.active == name {
             // The one that took its place, or the last if it was last.
-            *active = open[at.min(open.len() - 1)].name.clone();
+            let next = at.min(open.projects.len() - 1);
+            open.active = open.projects[next].name.clone();
         }
-        Some(active.clone())
+        Some(open.active.clone())
+    }
+
+    /// Rename an open project. `false` if it isn't open, or if the new
+    /// name is already taken by another one.
+    ///
+    /// Only the name moves — the database keeps the path it was created
+    /// with, because identity here *is* the path and moving a live SQLite
+    /// file (with its WAL and shm siblings, possibly open elsewhere) buys
+    /// nothing but tidiness.
+    pub fn rename(&self, from: &str, to: &str) -> bool {
+        let mut open = self.open();
+        if !open.has(from) || open.has(to) {
+            return false;
+        }
+        let Some(at) = open.projects.iter().position(|p| p.name == from) else {
+            return false;
+        };
+        // `OpenProject` sits behind an `Arc` shared with the sync task, so
+        // rebuild the entry rather than mutating through it.
+        let old = &open.projects[at];
+        let renamed = Arc::new(OpenProject {
+            name: to.to_string(),
+            db: old.db.clone(),
+            store: Arc::clone(&old.store),
+            notify: Arc::clone(&old.notify),
+            sync: old.sync.clone(),
+        });
+        open.projects[at] = renamed;
+        if open.active == from {
+            open.active = to.to_string();
+        }
+        true
     }
 }
 
@@ -245,7 +298,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/projects/new", post(create_project))
         .route(
             "/api/projects/{name}",
-            axum::routing::delete(forget_project),
+            axum::routing::delete(forget_project).patch(rename_project),
         )
         .with_state(state)
 }
@@ -301,6 +354,12 @@ async fn create_project(
     State(state): State<AppState>,
     Json(req): Json<SwitchRequest>,
 ) -> ApiResult<Json<ProjectsResponse>> {
+    // Held across the whole check-create-insert, which spans an await.
+    // Two requests for the same name would otherwise both pass the checks
+    // and the loser would 409 having already left a database, a registry
+    // entry and a sync task behind.
+    let _creating = state.creating().await;
+
     let name = crate::projects::validate_name(&req.name)
         .map_err(|e| ApiError::message(StatusCode::BAD_REQUEST, e.to_string()))?
         .to_string();
@@ -309,31 +368,16 @@ async fn create_project(
         .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
     // `is_open` as well as the registry: a project opened from a path the
     // registry has never heard of is still a name in use here.
-    if registry.find(&name).is_some() || state.is_open(&name) {
+    if state.is_open(&name) {
         return Err(ApiError::message(
             StatusCode::CONFLICT,
-            format!("a project named {name:?} already exists"),
+            format!("a project named {name:?} is already open"),
         ));
     }
-    let db = registry
-        .joined_db_path(&name)
-        .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
-    if let Some(existing) = registry.find_by_db(&db) {
-        return Err(ApiError::message(
-            StatusCode::CONFLICT,
-            format!(
-                "{name:?} would share a database with {:?} — pick a name that differs \
-                 by more than punctuation",
-                existing.name
-            ),
-        ));
-    }
-    if db.exists() {
-        return Err(ApiError::message(
-            StatusCode::CONFLICT,
-            format!("{} already exists — pick another name", db.display()),
-        ));
-    }
+    // The same rules the CLI's `new` and `join` use, from the same
+    // function — a second way in must not be a way around them.
+    let db = crate::projects::db_for_new_project(&registry, &name, None, "a different name")
+        .map_err(|e| ApiError::message(StatusCode::CONFLICT, format!("{e:#}")))?;
 
     let store = Store::open(&db).map_err(|e| {
         ApiError::message(
@@ -369,6 +413,57 @@ async fn create_project(
             StatusCode::CONFLICT,
             format!("a project named {name:?} is already open"),
         ));
+    }
+    Ok(Json(projects_response(&state)))
+}
+
+#[derive(Deserialize)]
+struct RenameRequest {
+    to: String,
+}
+
+/// Rename a project. Only the name moves.
+///
+/// The database keeps the path it was created with — identity here *is*
+/// the path, and moving a live SQLite file with its WAL and shm siblings
+/// buys nothing but tidiness. So a project renamed from `private` to
+/// `personal` still lives in `projects/private.db`, and a later
+/// `new private` is refused because that file is taken.
+async fn rename_project(
+    State(state): State<AppState>,
+    Path(from): Path<String>,
+    Json(req): Json<RenameRequest>,
+) -> ApiResult<Json<ProjectsResponse>> {
+    let to = crate::projects::validate_name(&req.to)
+        .map_err(|e| ApiError::message(StatusCode::BAD_REQUEST, e.to_string()))?
+        .to_string();
+    if !state.is_open(&from) {
+        return Err(ApiError::message(
+            StatusCode::NOT_FOUND,
+            format!("no open project named {from:?}"),
+        ));
+    }
+    if from == to {
+        return Ok(Json(projects_response(&state)));
+    }
+    if !state.rename(&from, &to) {
+        return Err(ApiError::message(
+            StatusCode::CONFLICT,
+            format!("a project named {to:?} is already open"),
+        ));
+    }
+
+    // The registry is the durable half; without this the old name is back
+    // on the next start.
+    match crate::projects::Registry::load() {
+        Ok(mut registry) => {
+            if let Err(e) = registry.rename(&from, &to) {
+                tracing::warn!("renamed in memory only: {e:#}");
+            } else if let Err(e) = registry.save() {
+                tracing::warn!("could not save the project registry: {e:#}");
+            }
+        }
+        Err(e) => tracing::warn!("could not read the project registry: {e:#}"),
     }
     Ok(Json(projects_response(&state)))
 }
@@ -779,6 +874,32 @@ mod tests {
         let state = AppState::with_projects(vec![project("a")], None);
         assert!(!state.insert(project("a")));
         assert_eq!(state.projects().len(), 1);
+    }
+
+    #[test]
+    fn renaming_carries_the_store_and_the_view() {
+        let state = AppState::with_projects(vec![project("a"), project("b")], None);
+        let store = Arc::as_ptr(&state.active().store);
+
+        assert!(state.rename("a", "alpha"));
+        assert_eq!(state.active().name, "alpha", "the view follows the rename");
+        // Same database behind the new name — a rename must not look like
+        // a switch to the handlers.
+        assert_eq!(Arc::as_ptr(&state.active().store), store);
+        assert!(!state.is_open("a"));
+    }
+
+    #[test]
+    fn renaming_onto_an_open_name_is_refused() {
+        let state = AppState::with_projects(vec![project("a"), project("b")], None);
+        assert!(!state.rename("a", "b"));
+        assert!(state.is_open("a") && state.is_open("b"));
+    }
+
+    #[test]
+    fn renaming_a_project_that_is_not_open_is_refused() {
+        let state = AppState::with_projects(vec![project("a")], None);
+        assert!(!state.rename("nope", "x"));
     }
 
     #[test]

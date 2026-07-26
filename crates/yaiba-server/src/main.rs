@@ -167,6 +167,18 @@ enum Command {
     /// List registered projects.
     List,
 
+    /// Give a project a different name.
+    ///
+    /// Only the name changes: the database keeps the file it was created
+    /// with, so a project renamed away from `work` still lives in
+    /// `projects/work.db`, and that filename stays claimed.
+    Rename {
+        /// The name it has now, as shown by `yaiba list`.
+        from: String,
+        /// What to call it instead.
+        to: String,
+    },
+
     /// Drop a project from the registry. Its database is left on disk.
     Forget {
         /// Project name, as shown by `yaiba list`.
@@ -232,6 +244,7 @@ async fn main() -> Result<()> {
             non_interactive,
         }) => return updater::run_self_update(*yes, *check, *non_interactive).await,
         Some(Command::List) => return list_projects(),
+        Some(Command::Rename { from, to }) => return rename_project(from, to),
         Some(Command::Forget { name }) => return forget_project(name),
         _ => {}
     }
@@ -454,7 +467,12 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 Some(given) => projects::validate_name(given)?.to_string(),
                 None => projects::name_from_ticket(ticket),
             };
-            let db = db_for_new_project(cli, registry, &name, "another name with --as")?;
+            let db = projects::db_for_new_project(
+                registry,
+                &name,
+                cli.db.as_deref(),
+                "another name with --as",
+            )?;
             Ok(Target {
                 db,
                 peer: Some(Peer::Adopt(peer)),
@@ -465,7 +483,12 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
         Some(Command::New { name }) => {
             let name = projects::validate_name(name)?.to_string();
             let registry = registry_ref(registry)?;
-            let db = db_for_new_project(cli, registry, &name, "a different name")?;
+            let db = projects::db_for_new_project(
+                registry,
+                &name,
+                cli.db.as_deref(),
+                "a different name",
+            )?;
             Ok(Target {
                 db,
                 peer: None,
@@ -503,58 +526,6 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
             })
         }
     }
-}
-
-/// Where a brand-new project's database goes, refusing every path that
-/// would land it on an existing one.
-///
-/// Shared by `join` and `new` because the hazard is the same either way:
-/// a free *name* is not a free *file*. The path is `slug(name)`, so
-/// "work" and "work!" both become projects/work.db, and opening an
-/// existing database as if it were new would either fuse two projects or
-/// — for `join` — overwrite the room key and cut its peer off.
-///
-/// `escape` is a full noun phrase, not a flag name: it lands inside
-/// "or choose {escape}", where a bare `--as` reads as a dangling flag
-/// rather than an instruction. `join` says "another name with --as",
-/// `new` says "a different name".
-fn db_for_new_project(cli: &Cli, registry: &Registry, name: &str, escape: &str) -> Result<PathBuf> {
-    if let Some(existing) = registry.find(name) {
-        bail!(
-            "a project named {name:?} is already registered ({}) — open it with \
-             `yaiba open {name}`, or choose {escape}",
-            existing.db.display()
-        );
-    }
-    // An explicit --db is the user naming the file themselves, which is a
-    // deliberate choice rather than a collision.
-    if let Some(path) = &cli.db {
-        return Ok(path.clone());
-    }
-
-    let path = registry.joined_db_path(name)?;
-    if let Some(existing) = registry.find_by_db(&path) {
-        bail!(
-            "{name:?} would share a database with the project {:?} ({}) — open that \
-             one with `yaiba open {}`, or choose a name that differs by more than \
-             punctuation",
-            existing.name,
-            // The registered path, not the one just built: it is
-            // normalized, so it reads as a real path.
-            existing.db.display(),
-            existing.name
-        );
-    }
-    if path.exists() {
-        bail!(
-            "{} already exists but no project is registered for it (forgotten \
-             earlier?). Choose {escape}, or pass --db {} to use that database \
-             deliberately",
-            path.display(),
-            path.display()
-        );
-    }
-    Ok(path)
 }
 
 fn parse_ticket(raw: &str) -> Result<Ticket> {
@@ -721,6 +692,23 @@ fn list_projects() -> Result<()> {
         );
     }
     println!("\nregistry: {}", registry.path().display());
+    Ok(())
+}
+
+fn rename_project(from: &str, to: &str) -> Result<()> {
+    let mut registry = load_registry()?;
+    if registry.find(from).is_none() {
+        return Err(unknown_project(&registry, from));
+    }
+    registry.rename(from, to)?;
+    registry.save()?;
+    let renamed = registry.find(to.trim()).map(|p| p.db.display().to_string());
+    println!("renamed {from:?} to {:?}", to.trim());
+    // Say it plainly rather than let someone discover it when `new work`
+    // is refused later: the file keeps the old name.
+    if let Some(db) = renamed {
+        println!("  its database is still {db}");
+    }
     Ok(())
 }
 
