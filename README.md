@@ -207,12 +207,16 @@ inside the app. Hand it to someone:
 
 ```sh
 # them
-yaiba --join <ticket>
+yaiba join <ticket>
 ```
 
 That's the whole setup. From then on both sides sync automatically —
 immediately on every edit, and on a timer to catch up after being
 offline.
+
+Their tasks arrive as a **project of their own** — a separate database,
+listed under a name you can pick with `--as` — so joining someone never
+mixes their backlog into yours. See [Projects](#projects).
 
 **No port forwarding, no inbound firewall rule.** iroh dials by public
 key and hole-punches, so outbound UDP is all that's needed. If hole
@@ -222,6 +226,54 @@ same network connect directly and never touch it.
 
 The ticket carries a 32-byte room key. A peer that can't present it is
 dropped before any data moves.
+
+## Projects
+
+A `yaiba` database is one task set, one sync room, one identity — nothing
+in the replication layer scopes tasks to a project *inside* a database. So
+a project **is** a database file, and `yaiba` keeps an index of them.
+
+```sh
+yaiba                          # the default project
+yaiba list                     # what's registered, most recent first
+yaiba open work                # open one by name
+yaiba open                     # fuzzy-pick one
+yaiba join <ticket> --as work  # join a peer as a new project, and open it
+yaiba forget work              # drop the name; the database stays on disk
+```
+
+Whatever you open is registered as you go, `--db` paths included, so the
+picker fills itself in without any setup step. The index is a TOML file
+meant to survive being hand-edited:
+
+| path | |
+| --- | --- |
+| `<data dir>/yaiba/projects.toml` | the index |
+| `<data dir>/yaiba/yaiba.db` | the default project |
+| `<data dir>/yaiba/projects/<name>.db` | projects you joined |
+
+`YAIBA_DATA_DIR` moves that whole root — one variable for a
+self-contained yaiba on a synced folder or a stick.
+
+Losing the index costs names and ordering, never tasks: every database
+still opens with `yaiba --db <path>`, registered or not.
+
+**One port per project.** Two open at once are two processes, so the
+second needs its own `--port`.
+
+### `--join` is not `join`
+
+The `--join <ticket>` *flag* predates projects and still does what it
+always did: it **merges the project you are opening into the peer's
+group**. Both task sets end up on both sides, and this replica leaves its
+own sync room for theirs. That move has no undo — the old room key is
+overwritten, so anyone holding your previous ticket is dropped on their
+next sync.
+
+The `join` *subcommand* is what you almost always want. The flag stays for
+the case it is actually right for: deliberately fusing two replicas that
+should have been one all along. `:join` in the UI is the flag's
+behaviour, not the subcommand's — one running server has one database.
 
 ## How it works
 
