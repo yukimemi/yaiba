@@ -405,6 +405,18 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                  opposite things; pass only one"
             );
         }
+        // `new` builds a project with no peer, so the ticket would be
+        // accepted, warned about, and then quietly dropped. Asking for an
+        // empty project that immediately merges into someone's room is
+        // spelled `yaiba join <ticket> --as <name>` — which does it
+        // properly rather than by accident.
+        if let Some(Command::New { name }) = &cli.command {
+            bail!(
+                "--join has nothing to merge into a project that does not exist yet. \
+                 To take a peer's tasks as a new project, use \
+                 `yaiba join <ticket> --as {name}`"
+            );
+        }
         if cli.no_sync {
             bail!("--no-sync and --join ask for opposite things");
         }
@@ -438,7 +450,7 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 Some(given) => projects::validate_name(given)?.to_string(),
                 None => projects::name_from_ticket(ticket),
             };
-            let db = db_for_new_project(cli, registry, &name, "--as")?;
+            let db = db_for_new_project(cli, registry, &name, "another name with --as")?;
             Ok(Target {
                 db,
                 peer: Some(Peer::Adopt(peer)),
@@ -498,8 +510,10 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
 /// existing database as if it were new would either fuse two projects or
 /// — for `join` — overwrite the room key and cut its peer off.
 ///
-/// `escape` names the way out in the caller's own vocabulary, since
-/// `--as` exists on `join` and not on `new`.
+/// `escape` is a full noun phrase, not a flag name: it lands inside
+/// "or choose {escape}", where a bare `--as` reads as a dangling flag
+/// rather than an instruction. `join` says "another name with --as",
+/// `new` says "a different name".
 fn db_for_new_project(cli: &Cli, registry: &Registry, name: &str, escape: &str) -> Result<PathBuf> {
     if let Some(existing) = registry.find(name) {
         bail!(
@@ -1013,6 +1027,37 @@ mod tests {
     #[test]
     fn no_registry_means_only_the_active_project() {
         assert!(open_others(None, &PathBuf::from("elsewhere.db"), false).is_empty());
+    }
+
+    /// `new` builds a project with no peer, so a ticket handed to it was
+    /// warned about and then silently dropped — the user asked to join
+    /// someone and got a plain local project.
+    #[test]
+    fn the_flag_and_new_together_are_refused() {
+        let cli = Cli::parse_from(["yaiba", "--join", TICKET, "new", "work"]);
+        let err = resolve_target(&cli, &scratch_registry()).unwrap_err();
+        assert!(err.to_string().contains("nothing to merge"), "{err}");
+        // The message has to name the command that does what they meant.
+        assert!(err.to_string().contains("join <ticket> --as work"), "{err}");
+    }
+
+    /// `escape` lands inside "or choose {escape}", so a bare flag name
+    /// reads as a dangling fragment. Nothing pinned `join`'s wording, which
+    /// is how sharing the helper regressed it in the first place.
+    #[test]
+    fn both_callers_word_their_refusal_as_a_sentence() {
+        let mut registry = scratch_registry().unwrap();
+        let db = registry.joined_db_path("work").unwrap();
+        registry.remember(&db, Some("work"), None).unwrap();
+        let registry = Ok(registry);
+
+        let join = Cli::parse_from(["yaiba", "join", TICKET, "--as", "work"]);
+        let err = resolve_target(&join, &registry).unwrap_err().to_string();
+        assert!(err.contains("choose another name with --as"), "{err}");
+
+        let new = Cli::parse_from(["yaiba", "new", "work"]);
+        let err = resolve_target(&new, &registry).unwrap_err().to_string();
+        assert!(err.contains("choose a different name"), "{err}");
     }
 
     /// The gap this closes: before `new`, starting a project of your own
