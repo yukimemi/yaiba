@@ -9,6 +9,7 @@ categories  = ["command-line-utilities"]
 readme      = "README.md"
 include = [
     "src/**/*",
+    "build.rs",
     # Only the built SPA bundle — rust-embed reads dist/ at compile
     # time. node_modules/ and the Vite sources under web/src/ don't
     # ship to crates.io; release CI rebuilds the bundle before publish
