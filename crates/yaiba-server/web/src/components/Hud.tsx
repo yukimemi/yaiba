@@ -11,6 +11,8 @@ interface Props {
   projectEnd: string;
   peerCount: number;
   syncOn: boolean;
+  /** Set when viewing a past date rather than now. */
+  asof: string | null;
   /** Null when every level is shown. */
   foldLevel: number | null;
   focusTitle: string | null;
@@ -29,6 +31,7 @@ export function Hud({
   projectEnd,
   peerCount,
   syncOn,
+  asof,
   foldLevel,
   focusTitle,
 }: Props) {
@@ -48,6 +51,9 @@ export function Hud({
 
       <span className="hud__spacer" />
 
+      {asof && (
+        <span className="hud__asof">as of {asof}</span>
+      )}
       {focusTitle && (
         <span className="hud__stat">
           only <b>{focusTitle}</b>

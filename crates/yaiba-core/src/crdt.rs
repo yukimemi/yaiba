@@ -29,6 +29,8 @@ pub const FIELD_PRIORITY: &str = "priority";
 pub const FIELD_START: &str = "start";
 pub const FIELD_DURATION: &str = "duration";
 pub const FIELD_DUE: &str = "due";
+pub const FIELD_ACTUAL_START: &str = "actual_start";
+pub const FIELD_ACTUAL_END: &str = "actual_end";
 pub const FIELD_PROGRESS: &str = "progress";
 pub const FIELD_POSITION: &str = "position";
 pub const FIELD_CREATED: &str = "created";
@@ -36,6 +38,28 @@ pub const FIELD_DELETED: &str = "deleted";
 pub const FIELD_EXISTS: &str = "exists";
 /// Prefix for the per-tag boolean entries.
 pub const TAG_PREFIX: &str = "tag:";
+
+/// Key of one day's observation of a task's progress:
+/// `log:<uuid>:<YYYY-MM-DD>`.
+///
+/// LWW keeps only the latest value per key, which erases history — fine
+/// for "what is the due date now", useless for "where was this on the
+/// 20th". Giving each *day* its own key sidesteps that: entries never
+/// overwrite each other across days, so the series survives, while two
+/// edits on the same day still collapse to that day's final value.
+///
+/// This rides the existing version-vector sync untouched — a log entry
+/// is an ordinary CRDT entry, so peers exchange history for free.
+pub fn log_key(id: Uuid, day: &str) -> String {
+    format!("log:{id}:{day}")
+}
+
+/// Inverse of [`log_key`]: the task and the day it observed.
+pub fn parse_log_key(key: &str) -> Option<(Uuid, String)> {
+    let rest = key.strip_prefix("log:")?;
+    let (id, day) = rest.split_once(':')?;
+    Some((id.parse().ok()?, day.to_string()))
+}
 
 /// Key of the entity an entry belongs to: `task:<uuid>` or
 /// `dep:<from>><to>`.
@@ -166,6 +190,17 @@ mod tests {
 
         assert_eq!(parse_task_key("dep:x>y"), None);
         assert_eq!(parse_dep_key(&task_key(id)), None);
+    }
+
+    #[test]
+    fn log_keys_round_trip_and_stay_distinct_per_day() {
+        let id = Uuid::new_v4();
+        let key = log_key(id, "2026-07-20");
+        assert_eq!(parse_log_key(&key), Some((id, "2026-07-20".to_string())));
+        // The whole point: two days are two keys, so neither overwrites
+        // the other under last-writer-wins.
+        assert_ne!(key, log_key(id, "2026-07-21"));
+        assert_eq!(parse_log_key(&task_key(id)), None);
     }
 
     #[test]

@@ -12,6 +12,8 @@ export interface UiPatch {
   focus?: string | null;
   /** Hide anything deeper than this; null shows every level. */
   foldLevel?: number | null;
+  /** Reference date; null means now. */
+  asof?: string | null;
   zoom?: Zoom;
   filter?: string;
   sort?: SortKey;
@@ -264,6 +266,17 @@ export function runCommand(
         label: "unlink",
         message: `unlinked from “${target.title}”`,
       };
+    }
+
+    // ---- the reference date ---------------------------------------
+    case "asof":
+    case "as": {
+      if (!arg || ["today", "now", "none", "-"].includes(arg)) {
+        return { ui: { asof: null }, message: "reference date: today" };
+      }
+      const date = parseDateExpr(arg, data.today);
+      if (!date) return { error: `bad date: ${arg}` };
+      return { ui: { asof: date }, message: `as of ${date}` };
     }
 
     // ---- the work breakdown ---------------------------------------

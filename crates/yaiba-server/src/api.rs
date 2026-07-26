@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -50,10 +50,24 @@ pub struct StateResponse {
     tasks: Vec<Task>,
     deps: Vec<Dep>,
     schedule: Schedule,
+    /// The date everything here is computed against — `asof` when one
+    /// was given, otherwise today.
     today: NaiveDate,
+    /// True when `today` is not the actual current date, so the UI can
+    /// say so instead of quietly showing numbers that are not current.
+    as_of: bool,
     /// This replica's id — shown in the UI so you can tell whose peer
     /// list you are looking at.
     node_id: NodeId,
+}
+
+#[derive(Deserialize)]
+pub struct StateQuery {
+    /// Report the plan as it stood on this date. Progress and status
+    /// come from the recorded history; fields that keep no history
+    /// (titles, dates, the breakdown) are shown as they are now.
+    #[serde(default)]
+    asof: Option<NaiveDate>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -129,21 +143,38 @@ async fn join_peer(
 
 /// Read the store and fold in a freshly computed schedule.
 fn respond(store: &Store) -> ApiResult<Json<StateResponse>> {
-    let snapshot = store.snapshot()?;
-    let today = Local::now().date_naive();
+    respond_at(store, None)
+}
+
+/// As [`respond`], but reporting the plan as of a chosen date.
+fn respond_at(store: &Store, asof: Option<NaiveDate>) -> ApiResult<Json<StateResponse>> {
+    let today = asof.unwrap_or_else(|| Local::now().date_naive());
+    let snapshot = match asof {
+        Some(date) => store.snapshot_at(date)?,
+        None => store.snapshot()?,
+    };
+    // Scheduling against the as-of date is what makes the whole view
+    // consistent: bars, slack and the progress line all agree on which
+    // day "now" is.
     let schedule = schedule(&snapshot.tasks, &snapshot.deps, today);
     Ok(Json(StateResponse {
         tasks: snapshot.tasks,
         deps: snapshot.deps,
         schedule,
         today,
+        // "A date was supplied" is not the same as "this isn't now":
+        // `:asof today` supplies one and is still the live view.
+        as_of: today != Local::now().date_naive(),
         node_id: store.node_id(),
     }))
 }
 
-async fn get_state(State(state): State<AppState>) -> ApiResult<Json<StateResponse>> {
+async fn get_state(
+    State(state): State<AppState>,
+    Query(query): Query<StateQuery>,
+) -> ApiResult<Json<StateResponse>> {
     let store = lock(&state);
-    respond(&store)
+    respond_at(&store, query.asof)
 }
 
 async fn create_task(

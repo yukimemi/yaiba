@@ -76,18 +76,32 @@ export function snapshotPatch(task: Task): Required<TaskPatch> {
     start: task.start,
     duration_days: task.duration_days,
     due: task.due,
+    actual_start: task.actual_start,
+    actual_end: task.actual_end,
     progress: task.progress,
     tags: [...task.tags],
   };
 }
 
-/** Restrict a full snapshot to the keys a forward patch touched. */
+/**
+ * Restrict a full snapshot to the keys a forward patch touched.
+ *
+ * A status change is the exception: the server stamps `actual_start` /
+ * `actual_end` as a side effect of it, and those keys are not in the
+ * forward patch. Undoing without them reverts the status but leaves the
+ * dates behind, so a task looks untouched in the list while quietly
+ * carrying a start date from the edit you just undid.
+ */
 export function inversePatch(task: Task, forward: TaskPatch): TaskPatch {
   const full = snapshotPatch(task);
   const inverse: TaskPatch = {};
   for (const key of Object.keys(forward) as (keyof TaskPatch)[]) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (inverse as any)[key] = full[key];
+  }
+  if ("status" in forward) {
+    inverse.actual_start = task.actual_start;
+    inverse.actual_end = task.actual_end;
   }
   return inverse;
 }

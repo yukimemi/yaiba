@@ -21,6 +21,8 @@ interface Props {
   onlyPane: boolean;
   paneRef: React.RefObject<HTMLDivElement | null>;
   onScroll: () => void;
+  /** Draw the progress line (イナズマ線) against the reference date. */
+  showProgressLine: boolean;
 }
 
 export function Gantt({
@@ -35,6 +37,7 @@ export function Gantt({
   onlyPane,
   paneRef,
   onScroll,
+  showProgressLine,
 }: Props) {
   const cursorTask = tasks[cursor];
   const dayW = DAY_W[zoom];
@@ -123,7 +126,10 @@ export function Gantt({
               ) : null,
             )}
 
-          <div className="gantt__today" style={{ left: x(today) }} />
+          <div
+            className={`gantt__today${showProgressLine ? "" : " gantt__today--plain"}`}
+            style={{ left: x(today) }}
+          />
 
           {tasks.map((task, index) => {
             const sched = bySchedule.get(task.id);
@@ -233,9 +239,68 @@ export function Gantt({
                 </g>
               );
             })}
+
+            {showProgressLine && (
+              <polyline
+                className="gantt__progress-line"
+                points={progressLinePoints(tasks, bySchedule, x, dayW, today)}
+              />
+            )}
           </svg>
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * The progress line — イナズマ線.
+ *
+ * Starts on the reference date and, for each row, steps horizontally by
+ * how far that task deviates from where it *should* be, then down to the
+ * next row. Bulges right are ahead of plan, notches left are behind, and
+ * a straight line means everything is exactly on schedule. The shape is
+ * the report — project health without reading a number.
+ *
+ * The deviation is what matters, not the absolute position. Plotting
+ * "how far along the bar is it" instead puts a task that finished last
+ * week far to the *left* of the reference date, which reads as badly
+ * late when it is the opposite. So each row is offset by
+ * (actual − planned) × its own duration: a task finished on time lands
+ * exactly on the line, and so does one that has not started and is not
+ * yet due to.
+ */
+function progressLinePoints(
+  tasks: Task[],
+  bySchedule: Map<string, Scheduled>,
+  x: (iso: string) => number,
+  dayW: number,
+  reference: string,
+): string {
+  const refX = x(reference);
+  const points: string[] = [`${refX},0`];
+
+  tasks.forEach((task, index) => {
+    const sched = bySchedule.get(task.id);
+    const top = index * ROW_H;
+    const bottom = top + ROW_H;
+    if (!sched) {
+      points.push(`${refX},${bottom}`);
+      return;
+    }
+
+    const spanDays = Math.max(diffDays(sched.start, sched.end) + 1, 1);
+    // Where the plan says it should be by the reference date.
+    const elapsed = diffDays(sched.start, reference) + 1;
+    const planned = Math.min(Math.max(elapsed / spanDays, 0), 1);
+    const actual = (task.status === "done" ? 100 : sched.progress) / 100;
+    // Scaled by the task's own duration, so a week of slippage on a
+    // 2-month task doesn't look like a week on a 3-day one.
+    const reached = refX + (actual - planned) * spanDays * dayW;
+
+    points.push(`${reached},${top}`, `${reached},${bottom}`);
+  });
+
+  points.push(`${refX},${tasks.length * ROW_H}`);
+  return points.join(" ");
 }

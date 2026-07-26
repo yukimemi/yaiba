@@ -75,6 +75,13 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    title: ": AS OF",
+    keys: [
+      [":asof ⟨d⟩", "see the plan as it stood then"],
+      [":asof today", "back to now"],
+    ],
+  },
+  {
     title: ": BREAKDOWN",
     keys: [
       [":level ⟨n⟩", "show down to level n (bare = all)"],

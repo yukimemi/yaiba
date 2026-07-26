@@ -73,8 +73,16 @@ export function App() {
   const [foldLevel, setFoldLevel] = useState<number | null>(null);
   /** Show only this subtree — :only / zf. */
   const [focus, setFocus] = useState<string | null>(null);
+  /**
+   * The date the whole view is computed against. `null` means now.
+   *
+   * Kept in a ref as well because `load` runs from an interval and a
+   * stale closure would silently snap the view back to today.
+   */
+  const [, setAsof] = useState<string | null>(null);
 
   const modeRef = useRef<Mode>("normal");
+  const asofRef = useRef<string | null>(null);
   const listPane = useRef<HTMLDivElement>(null);
   const ganttPane = useRef<HTMLDivElement>(null);
   const syncingScroll = useRef(false);
@@ -104,6 +112,10 @@ export function App() {
     [data, bySchedule, filter, sort, collapsed, foldLevel, focus],
   );
 
+  /** The progress line is noise on an empty plan; show it once there is
+   *  something to compare. */
+  const showProgressLine = (data?.tasks.length ?? 0) > 0;
+
   /** Deepest level present, so zr knows when it has fully unfolded. */
   const maxLevel = useMemo(
     () =>
@@ -132,7 +144,7 @@ export function App() {
 
   const load = useCallback(async () => {
     try {
-      const next = await api.getState();
+      const next = await api.getState(asofRef.current);
       setData(next);
       return next;
     } catch (e) {
@@ -183,6 +195,16 @@ export function App() {
     setMode(next);
   }, []);
 
+  /** Move the reference date, then reload against it. */
+  const setReferenceDate = useCallback(
+    (date: string | null) => {
+      asofRef.current = date;
+      setAsof(date);
+      void load();
+    },
+    [load],
+  );
+
   /**
    * Mirror one pane's vertical scroll onto the other.
    *
@@ -205,9 +227,27 @@ export function App() {
     [],
   );
 
+  /**
+   * Refuse writes while the view is pinned to another date.
+   *
+   * Editing then would apply a change computed from stale values to the
+   * live store — pressing `x` on a row that was todo back then but is
+   * done now would silently reopen it. The historical view is a report;
+   * come back to now to act on it.
+   *
+   * Every write path calls this. Guarding only `run()` left `o`,
+   * `p`, `u` and `^r` open, because they reach the API directly.
+   */
+  const liveOnly = useCallback((): boolean => {
+    if (!asofRef.current) return true;
+    say("viewing the past — :asof today to make changes", "error");
+    return false;
+  }, []);
+
   /** Run ops, record them for undo, and refresh from the response. */
   const run = useCallback(
     async (ops: Op[], undo: Op[], label: string): Promise<AppData | null> => {
+      if (!liveOnly()) return null;
       try {
         const next = await applyOps(ops);
         setData(next);
@@ -220,7 +260,7 @@ export function App() {
         return null;
       }
     },
-    [load],
+    [load, liveOnly],
   );
 
   const patchAll = useCallback(
@@ -325,6 +365,7 @@ export function App() {
    */
   const createTask = useCallback(
     async (title: string, after: string | null, label: string) => {
+      if (!liveOnly()) return null;
       const known = new Set((data?.tasks ?? []).map((t) => t.id));
       try {
         const next = await api.createTask({ title, after });
@@ -344,7 +385,7 @@ export function App() {
         return null;
       }
     },
-    [data],
+    [data, liveOnly],
   );
 
   /**
@@ -465,6 +506,7 @@ export function App() {
 
   const paste = useCallback(
     async (after: string | null) => {
+      if (!liveOnly()) return;
       if (!register.current.length) {
         say("nothing yanked", "error");
         return;
@@ -489,10 +531,11 @@ export function App() {
       }
       say(`pasted ${register.current.length}`, "ok");
     },
-    [createTask],
+    [createTask, liveOnly],
   );
 
   const undo = useCallback(async () => {
+    if (!liveOnly()) return;
     const step = undoStack.current.pop();
     if (!step) {
       say("already at the oldest change");
@@ -506,9 +549,10 @@ export function App() {
       setMessage({ text: (e as Error).message, kind: "error" });
       void load();
     }
-  }, [load]);
+  }, [load, liveOnly]);
 
   const redo = useCallback(async () => {
+    if (!liveOnly()) return;
     const step = redoStack.current.pop();
     if (!step) {
       say("already at the newest change");
@@ -522,7 +566,7 @@ export function App() {
       setMessage({ text: (e as Error).message, kind: "error" });
       void load();
     }
-  }, [load]);
+  }, [load, liveOnly]);
 
   const jumpToMatch = useCallback(
     (term: string, from: number, direction: 1 | -1) => {
@@ -548,6 +592,7 @@ export function App() {
   const applyUi = useCallback((ui: UiPatch) => {
     if (ui.view) setView(ui.view);
     if (ui.focus !== undefined) setFocus(ui.focus);
+    if (ui.asof !== undefined) setReferenceDate(ui.asof);
     if (ui.foldLevel !== undefined) setFoldLevel(ui.foldLevel);
     if (ui.zoom) setZoom(ui.zoom);
     if (ui.filter !== undefined) setFilter(ui.filter);
@@ -1083,6 +1128,7 @@ export function App() {
         projectEnd={data.schedule.end}
         peerCount={peers.peers.length}
         syncOn={peers.ticket !== null}
+        asof={data.as_of ? data.today : null}
         foldLevel={foldLevel}
         focusTitle={
           focus ? (data.tasks.find((t) => t.id === focus)?.title ?? null) : null
@@ -1133,6 +1179,7 @@ export function App() {
             onlyPane={view === "gantt"}
             paneRef={ganttPane}
             onScroll={syncScroll(ganttPane)}
+            showProgressLine={showProgressLine}
           />
         )}
       </div>
