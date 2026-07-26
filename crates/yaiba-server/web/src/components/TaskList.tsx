@@ -28,6 +28,16 @@ interface Props {
   collapsed: Set<string>;
   paneRef: React.RefObject<HTMLDivElement | null>;
   onScroll: () => void;
+  /** Click a row to put the cursor on it. */
+  onPick: (id: string) => void;
+  /** Click the checkbox to complete. */
+  onToggleDone: (id: string) => void;
+  /** Click the ▾/▸ marker to fold. */
+  onToggleFold: (id: string) => void;
+  /** Double-click the title to edit it. */
+  onEditTitle: (id: string) => void;
+  /** Drag a row onto another to reorder. */
+  onDropRow: (draggedId: string, targetId: string) => void;
 }
 
 const BOX = { todo: "[ ]", doing: "[~]", done: "[x]" } as const;
@@ -54,6 +64,11 @@ export function TaskList({
   collapsed,
   paneRef,
   onScroll,
+  onPick,
+  onToggleDone,
+  onToggleFold,
+  onEditTitle,
+  onDropRow,
 }: Props) {
   const cursorRef = useRef<HTMLDivElement>(null);
 
@@ -153,7 +168,31 @@ export function TaskList({
             return (
               <Fragment key={task.id}>
                 {index === draftIndex && draftRow}
-                <div className={classes} ref={isCursor ? cursorRef : undefined}>
+                <div
+                  className={classes}
+                  ref={isCursor ? cursorRef : undefined}
+                  // The row is the click target for "put the cursor
+                  // here"; the controls inside it stop propagation so a
+                  // click on the checkbox doesn't also move the cursor
+                  // somewhere the user didn't ask for.
+                  onMouseDown={() => onPick(task.id)}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/plain", task.id);
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const dragged = e.dataTransfer.getData("text/plain");
+                    if (dragged && dragged !== task.id) {
+                      onDropRow(dragged, task.id);
+                    }
+                  }}
+                >
                   <span className="row__num">{index + 1}</span>
                   {/* Indent by position in the work breakdown, and mark
                       summaries so a collapsed one is obviously hiding
@@ -161,11 +200,27 @@ export function TaskList({
                   <span className="row__indent">
                     {"  ".repeat(Math.min(sched?.level ?? 0, 8))}
                   </span>
-                  <span className="row__fold">
+                  <span
+                    className={`row__fold${sched?.summary ? " row__fold--active" : ""}`}
+                    onMouseDown={(e) => {
+                      if (!sched?.summary) return;
+                      e.stopPropagation();
+                      onToggleFold(task.id);
+                    }}
+                  >
                     {sched?.summary ? (collapsed.has(task.id) ? "▸" : "▾") : " "}
                   </span>
                   <span className="row__caret">▸</span>
-                  <span className="row__box">{BOX[task.status]}</span>
+                  <span
+                    className="row__box row__box--clickable"
+                    title="complete / reopen"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      onToggleDone(task.id);
+                    }}
+                  >
+                    {BOX[task.status]}
+                  </span>
 
                   {editing?.id === task.id ? (
                     <input
@@ -184,7 +239,12 @@ export function TaskList({
                       }
                     />
                   ) : (
-                    <span className="row__title">{task.title || "…"}</span>
+                    <span
+                      className="row__title"
+                      onDoubleClick={() => onEditTitle(task.id)}
+                    >
+                      {task.title || "…"}
+                    </span>
                   )}
 
                   {task.tags.map((tag) => (

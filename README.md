@@ -103,6 +103,42 @@ yaiba self-update --check    # just tell me whether one exists
 | `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |
 | `za` | fold this row · `zf` focus its subtree, `zF` to come back |
 
+## Two modes, and a mouse
+
+`yaiba` ships a second theme for the times a neon HUD is the wrong
+thing to have open — a meeting room, a shared screen, a status deck.
+Office mode drops the glow, the scanlines and the completion sweep
+entirely, and swaps cyan/magenta for the blue/red/amber a reader already
+knows from every other planning tool. It prints.
+
+```
+gt              office mode <-> neon mode
+:theme light    or by name
+```
+
+The choice is remembered, and a fresh install follows your OS
+preference.
+
+The keyboard remains the point, but every common action has a mouse
+equivalent, because handing the screen to someone else should not
+require handing over the keybindings too:
+
+| | |
+|---|---|
+| click a row | put the cursor on it |
+| click `[ ]` | complete / reopen |
+| click `▾` | fold a summary |
+| double-click | edit the title |
+| drag a row | reorder |
+| drag a bar | move its start date |
+| drag its right edge | change the duration |
+| drag the dot past its end onto another bar | make that task wait for this one |
+
+Dragging a bar pins its start: a task placed by its dependencies gets an
+explicit date, which is what makes the gesture survive the next
+recompute. Summary bars cannot be dragged — their dates are a
+consequence of what is inside them.
+
 ## Projects, and the level you look at them from
 
 There is no separate "project" object: a task with no parent *is* a

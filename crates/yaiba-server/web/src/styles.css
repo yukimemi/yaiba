@@ -28,7 +28,44 @@
   --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SFMono-Regular",
     Consolas, "Noto Sans Mono CJK JP", "Yu Gothic UI", monospace;
 
+  /* Every glow, scanline and sweep is multiplied by this, so office
+     mode switches the whole lot off by setting it to 0 — one number
+     instead of a parallel stylesheet. */
+  --glow: 1;
+
   color-scheme: dark;
+}
+
+/*
+ * Office mode.
+ *
+ * Not a tinted copy of the dark theme — a different intent. This one has
+ * to survive being read over your shoulder in an open-plan office and
+ * pasted into a status deck, so the neon is gone entirely: no glow, no
+ * scanlines, no sweep on completion. What remains is a thin grid,
+ * near-black text, and colour only where it carries meaning — in hues a
+ * reader already knows from every other planning tool, and which stay
+ * distinguishable on a projector or in greyscale.
+ */
+:root[data-theme="light"] {
+  --void: #ffffff;
+  --panel: #f6f7f9;
+  --grid: #eceef1;
+  --grid-strong: #d5d9df;
+
+  --edge: #0b5cad;
+  --edge-dim: #7ea6cc;
+  --blood: #c62828;
+  --rust: #a15c00;
+  --jade: #1b7f3b;
+
+  --steel: #1f2328;
+  --ash: #5c6570;
+  --ash-dim: #98a0aa;
+
+  --glow: 0;
+
+  color-scheme: light;
 }
 
 * {
@@ -68,6 +105,7 @@ body::after {
   inset: 0;
   pointer-events: none;
   z-index: 100;
+  opacity: var(--glow);
   background: repeating-linear-gradient(
     0deg,
     rgba(34, 211, 238, 0.06) 0 1px,
@@ -108,14 +146,23 @@ body::after {
   letter-spacing: 0.34em;
   font-weight: 700;
   color: var(--edge);
-  text-shadow: 0 0 12px rgba(34, 211, 238, 0.55);
+  text-shadow: 0 0 calc(12px * var(--glow)) rgba(34, 211, 238, 0.55);
 }
 
 .hud__kanji {
   letter-spacing: 0;
   font-size: 15px;
   color: var(--blood);
-  text-shadow: 0 0 14px rgba(244, 114, 182, 0.5);
+  text-shadow: 0 0 calc(14px * var(--glow)) rgba(244, 114, 182, 0.5);
+}
+
+/* Office mode drops the kanji entirely. In neon mode the blade is the
+   sign lighting up and belongs there; in a meeting room, on a shared
+   screen, it is a flourish nobody asked to explain — and in this
+   palette its magenta means critical path, so it reads as an alert on
+   top of that. What is left is a plain wordmark. */
+:root[data-theme="light"] .hud__kanji {
+  display: none;
 }
 
 .hud__mode {
@@ -180,13 +227,29 @@ body::after {
   font-weight: 700;
 }
 
+/* Reads as one more HUD readout that happens to be clickable, rather
+   than a form control parked in the middle of the status bar. */
+.hud__theme {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  line-height: inherit;
+  color: var(--ash);
+  cursor: pointer;
+}
+
+.hud__theme:hover {
+  color: var(--edge);
+}
+
 .hud__peers {
   color: var(--edge-dim);
 }
 
 .hud__peers[data-live="true"] {
   color: var(--edge);
-  text-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+  text-shadow: 0 0 calc(10px * var(--glow)) rgba(34, 211, 238, 0.6);
 }
 
 /* ---- panes ------------------------------------------------------- */
@@ -320,12 +383,28 @@ body::after {
 
 .row--cursor .row__caret {
   color: var(--edge);
-  text-shadow: 0 0 8px var(--edge);
+  text-shadow: 0 0 calc(8px * var(--glow)) var(--edge);
 }
 
 .row__box {
   flex: none;
   color: var(--ash);
+}
+
+/* Anything clickable says so on hover — with the keyboard as the primary
+   interface, the mouse targets are not otherwise discoverable. */
+.row__box--clickable:hover {
+  color: var(--edge);
+  cursor: pointer;
+}
+
+.row__fold--active:hover {
+  color: var(--edge);
+  cursor: pointer;
+}
+
+.row__title {
+  cursor: default;
 }
 
 .row--done .row__box {
@@ -369,7 +448,7 @@ body::after {
 
 .row__meta--overdue {
   color: var(--rust);
-  text-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
+  text-shadow: 0 0 calc(10px * var(--glow)) rgba(251, 191, 36, 0.4);
 }
 
 .row__prio {
@@ -381,7 +460,7 @@ body::after {
 .row__crit {
   flex: none;
   color: var(--blood);
-  text-shadow: 0 0 8px rgba(244, 114, 182, 0.5);
+  text-shadow: 0 0 calc(8px * var(--glow)) rgba(244, 114, 182, 0.5);
 }
 
 .row--cursor {
@@ -401,7 +480,7 @@ body::after {
   bottom: 0;
   width: 2px;
   background: var(--edge);
-  box-shadow: 0 0 12px 1px var(--edge);
+  box-shadow: 0 0 calc(12px * var(--glow)) 1px var(--edge);
 }
 
 .row--selected {
@@ -542,7 +621,7 @@ body::after {
   bottom: 0;
   width: 1px;
   background: var(--edge);
-  box-shadow: 0 0 10px var(--edge);
+  box-shadow: 0 0 calc(10px * var(--glow)) var(--edge);
   opacity: 0.75;
   z-index: 2;
 }
@@ -587,6 +666,57 @@ body::after {
   );
 }
 
+/* Handles appear on hover only. With the keyboard as the primary
+   interface, permanently visible grips would clutter every bar for a
+   gesture most sessions never use. */
+.gantt__bar {
+  cursor: grab;
+}
+
+/* A summary's dates come from its children, so there is nothing here to
+   drag. */
+.gantt__bar--summary {
+  cursor: default;
+}
+
+.gantt__bar--dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  outline: 1px dashed var(--edge);
+  outline-offset: 1px;
+}
+
+/* Positioned in the row rather than the bar, so `left` comes inline
+   from the bar's live geometry and the grips follow a drag preview. */
+.gantt__handle {
+  position: absolute;
+  top: 4px;
+  height: calc(var(--row-h) - 9px);
+  width: 7px;
+  opacity: 0;
+}
+
+.gantt__handle--resize {
+  cursor: ew-resize;
+  background: var(--edge);
+}
+
+/* Sits just past the right edge — the natural place to pull a
+   finish-to-start arrow from. */
+.gantt__handle--link {
+  width: 8px;
+  cursor: crosshair;
+  background: radial-gradient(circle, var(--edge) 40%, transparent 45%);
+}
+
+/* Sibling combinator, not descendant — the grips left the bar. The
+   `:hover` on the grip itself keeps it lit once the pointer steps off
+   the bar and onto it. */
+.gantt__bar:hover ~ .gantt__handle,
+.gantt__handle:hover {
+  opacity: 0.9;
+}
+
 .gantt__bar--summary.gantt__bar--critical {
   background: var(--blood);
   box-shadow: none;
@@ -599,7 +729,7 @@ body::after {
 .gantt__bar--critical {
   border-color: var(--blood);
   background: rgba(244, 114, 182, 0.14);
-  box-shadow: 0 0 12px rgba(244, 114, 182, 0.28);
+  box-shadow: 0 0 calc(12px * var(--glow)) rgba(244, 114, 182, 0.28);
 }
 
 .gantt__bar--done {
@@ -673,6 +803,80 @@ body::after {
   fill: none;
   stroke: var(--edge-dim);
   stroke-width: 1;
+}
+
+/* ---- linking in progress ----------------------------------------- */
+
+/* While a link is being pulled the crosshair follows the whole chart,
+   not just the grip it started from — the gesture is about where it
+   lands, and the cursor should say so the whole way across. */
+.gantt__body--linking,
+.gantt__body--linking * {
+  cursor: crosshair;
+}
+
+/* Dashed because it is a proposal, not a dependency: it matches the
+   committed arrows in shape so the result is predictable, and differs
+   in weight so the two are never confused mid-drag. */
+.gantt__draft-line {
+  fill: none;
+  stroke: var(--edge-dim);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.gantt__draft-tip {
+  fill: var(--edge-dim);
+}
+
+/* Armed: releasing here makes the edge. Brightening the tether as well
+   as the target means the answer is visible without looking away from
+   the cursor. */
+.gantt__draft-line--armed {
+  stroke: var(--edge);
+  stroke-width: 2;
+}
+
+.gantt__draft-tip--armed {
+  fill: var(--edge);
+}
+
+/* The bar a release would land on. */
+.gantt__bar--drop {
+  border-color: var(--edge);
+  background: rgba(34, 211, 238, 0.32);
+  box-shadow: 0 0 calc(10px * var(--glow)) rgba(34, 211, 238, 0.55);
+}
+
+:root[data-theme="light"] .gantt__bar--drop {
+  background: rgba(11, 92, 173, 0.22);
+}
+
+/* The clickable width of a dependency. `pointer-events: stroke` opts
+   this one path back in — the whole `.gantt__links` layer is inert so
+   the arrows never steal a click meant for a bar underneath. */
+.gantt__link-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 11;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+/* Cutting is destructive, so say so before the click rather than
+   after. Not in red: magenta means critical path and nothing else, so
+   on the very edges most worth thinking twice about it would have said
+   nothing at all. Instead the edge previews its own absence — it fades
+   to grey and breaks into dashes, which reads the same over a cyan,
+   magenta or dimmed link, and in either theme. */
+.gantt__link-hit:hover ~ .gantt__link {
+  stroke: var(--ash-dim);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+.gantt__link-hit:hover ~ .gantt__arrow {
+  fill: var(--ash-dim);
 }
 
 .gantt__link--critical {
@@ -841,6 +1045,7 @@ body::after {
 /* One pass of the blade across the shell on load, then never again. */
 .app::before {
   content: "";
+  opacity: var(--glow);
   position: fixed;
   inset: 0;
   z-index: 90;
@@ -872,6 +1077,25 @@ body::after {
     animation: none;
     opacity: 0;
   }
+}
+
+/* Office mode: no sweep, no scanlines, no glow. The line-through that
+   the cut leaves behind is the part that carries information, and that
+   stays. */
+:root[data-theme="light"] .app::before,
+:root[data-theme="light"] .row--cut::after {
+  animation: none;
+  opacity: 0;
+}
+
+:root[data-theme="light"] body {
+  background-image: none;
+}
+
+/* A white pane needs its own separation from the page rather than the
+   dark theme's glow. */
+:root[data-theme="light"] .hud {
+  background: var(--panel);
 }
 
 /* Keyboard-driven app, but never trap a tab user without a focus ring. */

@@ -10,8 +10,9 @@ import { TaskList } from "./components/TaskList";
 import { addDays } from "./dates";
 import { visibleTasks, type SortKey } from "./filter";
 import { MODE_HINT, type Mode } from "./mode";
+import { applyTheme, initialTheme, type Theme } from "./theme";
 import { applyOps, inversePatch, type Op, type Step } from "./ops";
-import type { AppData, Status, Task, TaskPatch } from "./types";
+import type { AppData, Dep, Status, Task, TaskPatch } from "./types";
 
 /** How often to pick up edits merged in from peers. */
 const REFRESH_MS = 3000;
@@ -67,6 +68,7 @@ export function App() {
   const [zoom, setZoom] = useState<Zoom>("day");
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("manual");
+  const [theme, setTheme] = useState<Theme>(initialTheme);
   /** Rows folded one at a time with za / zc. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /** Hide anything deeper than this; null shows every level. */
@@ -82,6 +84,14 @@ export function App() {
   const [, setAsof] = useState<string | null>(null);
 
   const modeRef = useRef<Mode>("normal");
+  /**
+   * The half-typed key sequence, mirrored out of state for the same
+   * reason as `modeRef`: `g` then `t` arrive faster than React
+   * re-renders, so reading the state would still see "" on the second
+   * key and `gt` would be lost. Two-key commands are exactly the ones
+   * typed fastest.
+   */
+  const pendingRef = useRef("");
   const asofRef = useRef<string | null>(null);
   const listPane = useRef<HTMLDivElement>(null);
   const ganttPane = useRef<HTMLDivElement>(null);
@@ -193,6 +203,12 @@ export function App() {
   const enterMode = useCallback((next: Mode) => {
     modeRef.current = next;
     setMode(next);
+  }, []);
+
+  /** Set the pending key sequence, keeping the ref in lockstep. */
+  const setPendingKeys = useCallback((next: string) => {
+    pendingRef.current = next;
+    setPending(next);
   }, []);
 
   /** Move the reference date, then reload against it. */
@@ -593,6 +609,15 @@ export function App() {
     if (ui.view) setView(ui.view);
     if (ui.focus !== undefined) setFocus(ui.focus);
     if (ui.asof !== undefined) setReferenceDate(ui.asof);
+    if (ui.theme) {
+      setTheme((prev) => {
+        const next =
+          ui.theme === "toggle" ? (prev === "dark" ? "light" : "dark") : ui.theme!;
+        applyTheme(next);
+        say(next === "light" ? "office mode" : "neon mode");
+        return next;
+      });
+    }
     if (ui.foldLevel !== undefined) setFoldLevel(ui.foldLevel);
     if (ui.zoom) setZoom(ui.zoom);
     if (ui.filter !== undefined) setFilter(ui.filter);
@@ -639,6 +664,131 @@ export function App() {
     [linkAnchor, current, data, run],
   );
 
+  // ---- mouse ------------------------------------------------------
+  //
+  // Every one of these maps onto a key: clicking a row is `j`/`k` to it,
+  // the checkbox is `x`, the marker is `za`, a double-click is `i`, and
+  // dragging a row is `J`/`K`. Sharing the same actions keeps the two
+  // input methods from drifting apart.
+
+  const onPick = useCallback((id: string) => setCursorId(id), []);
+
+  const onToggleDone = useCallback(
+    (id: string) => {
+      const task = visible.find((t) => t.id === id);
+      if (task) toggleDone([task]);
+    },
+    [visible, toggleDone],
+  );
+
+  const onToggleFold = useCallback((id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const onEditTitle = useCallback(
+    (id: string) => {
+      const task = visible.find((t) => t.id === id);
+      if (!task) return;
+      setCursorId(id);
+      setEditing({ id, value: task.title });
+      enterMode("insert");
+    },
+    [visible, enterMode],
+  );
+
+  /** Drop `dragged` where `target` sits in the manual order. */
+  const onDropRow = useCallback(
+    (draggedId: string, targetId: string) => {
+      if (!data) return;
+      if (sort !== "manual") {
+        say("rows only move in manual order — :sort manual", "error");
+        return;
+      }
+      const ids = data.tasks.map((t) => t.id);
+      const from = ids.indexOf(draggedId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0 || from === to) return;
+      const next = [...ids];
+      next.splice(to, 0, ...next.splice(from, 1));
+      void run(
+        [{ kind: "reorder", ids: next }],
+        [{ kind: "reorder", ids }],
+        "move",
+      );
+    },
+    [data, sort, run],
+  );
+
+  /**
+   * Drag a bar sideways: pin its start.
+   *
+   * The bar may have had no `start` of its own — it was placed by its
+   * dependencies. Dragging it means "I want it here", so the computed
+   * date becomes an explicit pin, which is also what makes the gesture
+   * survive the next recompute.
+   */
+  const onMoveBar = useCallback(
+    (id: string, days: number) => {
+      const task = visible.find((t) => t.id === id);
+      const sched = bySchedule.get(id);
+      if (!task || !sched) return;
+      const next = addDays(sched.start, days);
+      void run(
+        [{ kind: "patch", id, patch: { start: next } }],
+        [{ kind: "patch", id, patch: { start: task.start } }],
+        `start ${next}`,
+      );
+    },
+    [visible, bySchedule, run],
+  );
+
+  const onResizeBar = useCallback(
+    (id: string, days: number) => {
+      const task = visible.find((t) => t.id === id);
+      if (!task) return;
+      const next = Math.max(task.duration_days + days, 1);
+      if (next === task.duration_days) return;
+      void run(
+        [{ kind: "patch", id, patch: { duration_days: next } }],
+        [{ kind: "patch", id, patch: { duration_days: task.duration_days } }],
+        `${next}d`,
+      );
+    },
+    [visible, run],
+  );
+
+  const onLinkBars = useCallback(
+    (from: string, to: string) => {
+      const dep = { from, to };
+      if (data?.deps.some((d) => d.from === from && d.to === to)) {
+        say("already linked", "error");
+        return;
+      }
+      void run(
+        [{ kind: "addDep", dep }],
+        [{ kind: "removeDep", dep }],
+        "link",
+      );
+    },
+    [data, run],
+  );
+
+  const onUnlinkDep = useCallback(
+    (dep: Dep) => {
+      void run(
+        [{ kind: "removeDep", dep }],
+        [{ kind: "addDep", dep }],
+        "unlink",
+      );
+    },
+    [run],
+  );
+
   // ---- key handling -----------------------------------------------
 
   const onKey = (e: KeyboardEvent) => {
@@ -670,7 +820,7 @@ export function App() {
     const key = NORMALIZE[e.key] ?? e.key;
     if (key.length > 1 && !key.startsWith("<")) return;
 
-    const buf = pending + key;
+    const buf = pendingRef.current + key;
     const match = /^([1-9]\d*)?(.*)$/.exec(buf);
     const count = match?.[1] ? Number(match[1]) : 1;
     const cmd = match?.[2] ?? "";
@@ -678,10 +828,10 @@ export function App() {
     e.preventDefault();
 
     if (cmd === "" || (cmd.length === 1 && PREFIXES.has(cmd))) {
-      setPending(buf);
+      setPendingKeys(buf);
       return;
     }
-    setPending("");
+    setPendingKeys("");
     setMessage(null);
 
     switch (cmd) {
@@ -942,6 +1092,10 @@ export function App() {
         outdent(selection);
         break;
 
+      case "gt":
+        applyUi({ theme: "toggle" });
+        break;
+
       case "R":
         void load();
         say("reloaded", "ok");
@@ -1130,6 +1284,8 @@ export function App() {
         syncOn={peers.ticket !== null}
         asof={data.as_of ? data.today : null}
         foldLevel={foldLevel}
+        theme={theme}
+        onToggleTheme={() => applyUi({ theme: "toggle" })}
         focusTitle={
           focus ? (data.tasks.find((t) => t.id === focus)?.title ?? null) : null
         }
@@ -1164,6 +1320,11 @@ export function App() {
             collapsed={collapsed}
             paneRef={listPane}
             onScroll={syncScroll(listPane)}
+            onPick={onPick}
+            onToggleDone={onToggleDone}
+            onToggleFold={onToggleFold}
+            onEditTitle={onEditTitle}
+            onDropRow={onDropRow}
           />
         )}
         {view !== "list" && (
@@ -1180,6 +1341,11 @@ export function App() {
             paneRef={ganttPane}
             onScroll={syncScroll(ganttPane)}
             showProgressLine={showProgressLine}
+            onPick={onPick}
+            onMoveBar={onMoveBar}
+            onResizeBar={onResizeBar}
+            onLinkBars={onLinkBars}
+            onUnlinkDep={onUnlinkDep}
           />
         )}
       </div>

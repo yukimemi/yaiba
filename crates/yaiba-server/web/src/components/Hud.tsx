@@ -1,4 +1,5 @@
 import type { Mode } from "../mode";
+import type { Theme } from "../theme";
 import type { Task } from "../types";
 
 interface Props {
@@ -16,6 +17,9 @@ interface Props {
   /** Null when every level is shown. */
   foldLevel: number | null;
   focusTitle: string | null;
+  theme: Theme;
+  /** Flip between the neon HUD and office mode. */
+  onToggleTheme: () => void;
 }
 
 const METER_CELLS = 10;
@@ -34,6 +38,8 @@ export function Hud({
   asof,
   foldLevel,
   focusTitle,
+  theme,
+  onToggleTheme,
 }: Props) {
   const done = tasks.filter((t) => t.status === "done").length;
   const filled = tasks.length
@@ -82,6 +88,21 @@ export function Hud({
         </span>
         {done}/{tasks.length}
       </span>
+      {/* `gt` toggles the theme, but office mode is the one setting a
+          mouse-only user is most likely to want and least likely to
+          find in `?`. */}
+      <button
+        type="button"
+        className="hud__theme"
+        onClick={onToggleTheme}
+        title={
+          theme === "dark"
+            ? "office mode — light, no glow (gt)"
+            : "neon mode (gt)"
+        }
+      >
+        {theme === "dark" ? "◐ neon" : "◑ office"}
+      </button>
       <span
         className="hud__peers"
         data-live={peerCount > 0}

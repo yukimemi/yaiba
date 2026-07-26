@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Zoom } from "../commands";
 import { addDays, diffDays, isWeekend, monthLabel, weekdayLabel } from "../dates";
@@ -23,6 +23,15 @@ interface Props {
   onScroll: () => void;
   /** Draw the progress line (イナズマ線) against the reference date. */
   showProgressLine: boolean;
+  onPick: (id: string) => void;
+  /** Drag a bar sideways: pin a new start date. */
+  onMoveBar: (id: string, days: number) => void;
+  /** Drag a bar's right edge: change its duration. */
+  onResizeBar: (id: string, days: number) => void;
+  /** Drag from one bar's edge onto another: `from` must finish first. */
+  onLinkBars: (from: string, to: string) => void;
+  /** Click a dependency arrow to cut it. */
+  onUnlinkDep: (dep: Dep) => void;
 }
 
 export function Gantt({
@@ -38,15 +47,67 @@ export function Gantt({
   paneRef,
   onScroll,
   showProgressLine,
+  onPick,
+  onMoveBar,
+  onResizeBar,
+  onLinkBars,
+  onUnlinkDep,
 }: Props) {
   const cursorTask = tasks[cursor];
   const dayW = DAY_W[zoom];
+
+  /**
+   * In-flight drag. Kept in state so the bar can preview where it will
+   * land, and in a ref so the window listeners — which outlive any one
+   * render — always read the current gesture.
+   *
+   * `days` is quantised to whole days as it goes: a gantt has no meaning
+   * between two columns, and snapping while dragging makes the result
+   * predictable rather than something to be corrected afterwards.
+   */
+  const [drag, setDrag] = useState<{
+    kind: "move" | "resize" | "link";
+    id: string;
+    days: number;
+    x: number;
+    y: number;
+    /** Cursor in body coordinates — only tracked for a link drag. */
+    px: number;
+    py: number;
+    /** Row under the cursor, so it can be lit as the drop target. */
+    over: string | null;
+  } | null>(null);
+  const dragRef = useRef<typeof drag>(null);
+  dragRef.current = drag;
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  // The window listeners are installed once per drag, so they close
+  // over whatever these props were at pointerdown. Each is memoised on
+  // the polled data, so a refresh mid-drag replaces them — commit
+  // through a ref and the release lands on the current schedule
+  // instead of re-applying a stale one and filing an undo entry that
+  // restores a value nobody holds any more.
+  const commitRef = useRef({ onMoveBar, onResizeBar, onLinkBars });
+  commitRef.current = { onMoveBar, onResizeBar, onLinkBars };
   const totalDays = Math.max(diffDays(rangeStart, rangeEnd) + 1, 1);
   const width = totalDays * dayW;
   const bodyH = Math.max(tasks.length * ROW_H, ROW_H);
 
   const x = (iso: string) => diffDays(rangeStart, iso) * dayW;
   const rowIndex = new Map(tasks.map((t, i) => [t.id, i]));
+
+  const linking = drag?.kind === "link" ? drag : null;
+  // Light a row only where a release would actually achieve something:
+  // linking a task to itself is meaningless, and a second edge between
+  // the same pair is refused on commit — better to say so beforehand
+  // than to answer "already linked" after the gesture is spent.
+  const dropTarget =
+    linking &&
+    linking.over &&
+    linking.over !== linking.id &&
+    !deps.some((d) => d.from === linking.id && d.to === linking.over)
+      ? linking.over
+      : null;
 
   // Follow the cursor horizontally so a task scheduled months out
   // doesn't require hunting for its bar.
@@ -63,6 +124,72 @@ export function Gantt({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, cursorTask?.id, zoom, rangeStart]);
+
+  useEffect(() => {
+    if (!drag) return;
+    const startX = drag.x;
+
+    const onMove = (e: PointerEvent) => {
+      const current = dragRef.current;
+      if (!current) return;
+      let px = current.px;
+      let py = current.py;
+      let over = current.over;
+      if (current.kind === "link") {
+        // Same hit-test as the release, so what lights up under the
+        // cursor is exactly what a release would link to.
+        const box = bodyRef.current?.getBoundingClientRect();
+        px = box ? e.clientX - box.left : px;
+        py = box ? e.clientY - box.top : py;
+        const row = document
+          .elementFromPoint(e.clientX, e.clientY)
+          ?.closest("[data-task-id]");
+        over = row?.getAttribute("data-task-id") ?? null;
+      }
+      setDrag({
+        ...current,
+        days: Math.round((e.clientX - startX) / dayW),
+        x: startX,
+        y: e.clientY,
+        px,
+        py,
+        over,
+      });
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const current = dragRef.current;
+      setDrag(null);
+      if (!current) return;
+
+      if (current.kind === "link") {
+        // Hit-test the release point rather than trusting `e.target`.
+        // Touch and pen implicitly capture the pointer on whatever
+        // received `pointerdown`, so `e.target` at release is the drag
+        // handle itself — the link would silently never be made.
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        const to = under
+          ?.closest("[data-task-id]")
+          ?.getAttribute("data-task-id");
+        if (to && to !== current.id) {
+          commitRef.current.onLinkBars(current.id, to);
+        }
+        return;
+      }
+      if (current.days === 0) return;
+      const commit = commitRef.current;
+      if (current.kind === "move") commit.onMoveBar(current.id, current.days);
+      else commit.onResizeBar(current.id, current.days);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag?.kind, drag?.id, dayW]);
 
   const days: string[] = [];
   for (let i = 0; i < totalDays; i += 1) days.push(addDays(rangeStart, i));
@@ -114,7 +241,11 @@ export function Gantt({
             )}
         </div>
 
-        <div className="gantt__body" style={{ width, height: bodyH }}>
+        <div
+          className={`gantt__body${linking ? " gantt__body--linking" : ""}`}
+          ref={bodyRef}
+          style={{ width, height: bodyH }}
+        >
           {zoom === "day" &&
             days.map((iso) =>
               isWeekend(iso) ? (
@@ -139,11 +270,24 @@ export function Gantt({
               (diffDays(sched.start, sched.end) + 1) * dayW - 2,
               3,
             );
-            return (
+              // A live drag shifts the preview; the commit happens on
+              // release. Only the dragged bar moves — dependents settle
+              // when the server recomputes.
+              const dragging = drag?.id === task.id ? drag : null;
+              const previewLeft =
+                dragging?.kind === "move" ? left + dragging.days * dayW : left;
+              const previewW =
+                dragging?.kind === "resize"
+                  ? Math.max(barW + dragging.days * dayW, dayW - 2)
+                  : barW;
+
+              return (
               <div
                 key={task.id}
+                data-task-id={task.id}
                 className={`gantt__row${index === cursor ? " gantt__row--cursor" : ""}`}
                 style={{ top: index * ROW_H }}
+                onMouseDown={() => onPick(task.id)}
               >
                 <div
                   className={[
@@ -156,10 +300,31 @@ export function Gantt({
                     task.status === "done" && "gantt__bar--done",
                     sched.blocked && "gantt__bar--blocked",
                     sched.overdue && "gantt__bar--overdue",
+                    dragging && "gantt__bar--dragging",
+                    dropTarget === task.id && "gantt__bar--drop",
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  style={{ left, width: barW }}
+                  style={{ left: previewLeft, width: previewW }}
+                  onPointerDown={(e) => {
+                    // A summary's dates are a consequence of its
+                    // children; dragging it would be a lie the next
+                    // recompute erases.
+                    if (sched.summary || e.button !== 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onPick(task.id);
+                    setDrag({
+                      kind: "move",
+                      id: task.id,
+                      days: 0,
+                      x: e.clientX,
+                      y: e.clientY,
+                      px: 0,
+                      py: 0,
+                      over: null,
+                    });
+                  }}
                   title={`${task.title}\n${sched.start} → ${sched.end}${
                     sched.summary ? ` · ${sched.children} inside` : ""
                   }${
@@ -175,6 +340,55 @@ export function Gantt({
                     }}
                   />
                 </div>
+                {/* Siblings of the bar, not children: the bar clips its
+                    overflow to keep the progress fill inside its rounded
+                    corners, and the link grip sits just past the right
+                    edge — inside, it was clipped away entirely and could
+                    be neither seen nor hit. */}
+                {!sched.summary && (
+                  <>
+                    <span
+                      className="gantt__handle gantt__handle--resize"
+                      style={{ left: previewLeft + previewW - 6 }}
+                      title="drag to change the duration"
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDrag({
+                          kind: "resize",
+                          id: task.id,
+                          days: 0,
+                          x: e.clientX,
+                          y: e.clientY,
+                          px: 0,
+                          py: 0,
+                          over: null,
+                        });
+                      }}
+                    />
+                    <span
+                      className="gantt__handle gantt__handle--link"
+                      style={{ left: previewLeft + previewW + 1 }}
+                      title="drag onto another bar to make it wait for this one"
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDrag({
+                          kind: "link",
+                          id: task.id,
+                          days: 0,
+                          x: e.clientX,
+                          y: e.clientY,
+                          px: 0,
+                          py: 0,
+                          over: null,
+                        });
+                      }}
+                    />
+                  </>
+                )}
                 {/* Only in the gantt-only view: alongside the list the
                     titles are already there, and repeating them here
                     collides with the next bar. */}
@@ -226,6 +440,17 @@ export function Gantt({
 
               return (
                 <g key={`${dep.from}-${dep.to}`}>
+                  {/* An invisible fat stroke over the same path: a 1px
+                      line is not something anyone can be asked to hit.
+                      Drawn first so the two visible siblings below can
+                      react to its hover. */}
+                  <path
+                    className="gantt__link-hit"
+                    d={d}
+                    onClick={() => onUnlinkDep(dep)}
+                  >
+                    <title>click to cut this dependency</title>
+                  </path>
                   <path
                     className={`gantt__link ${suffix ? `gantt__link${suffix}` : ""}`}
                     d={d}
@@ -239,6 +464,30 @@ export function Gantt({
                 </g>
               );
             })}
+
+            {/* The edge that does not exist yet. Without it a link drag
+                is invisible: the grip is released somewhere and either
+                an arrow appears or nothing does. */}
+            {linking && (linking.px !== 0 || linking.py !== 0) && (
+              <g className="gantt__draft">
+                <path
+                  className={`gantt__draft-line${
+                    dropTarget ? " gantt__draft-line--armed" : ""
+                  }`}
+                  d={`M${x(bySchedule.get(linking.id)?.end ?? rangeStart) + dayW} ${
+                    (rowIndex.get(linking.id) ?? 0) * ROW_H + ROW_H / 2
+                  } L${linking.px} ${linking.py}`}
+                />
+                <circle
+                  className={`gantt__draft-tip${
+                    dropTarget ? " gantt__draft-tip--armed" : ""
+                  }`}
+                  cx={linking.px}
+                  cy={linking.py}
+                  r={dropTarget ? 4 : 2.5}
+                />
+              </g>
+            )}
 
             {showProgressLine && (
               <polyline
