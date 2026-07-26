@@ -274,12 +274,16 @@ async fn main() -> Result<()> {
     // a reconnect. Bound before the HTTP listener so the ticket is up by
     // the time the UI opens.
     let mut ticket = None;
-    if !cli.no_sync {
-        let transport = if cli.relay_only() {
+    // Carried into `AppState` as well, so a project created from the UI
+    // later comes up replicating the same way these do.
+    let transport = (!cli.no_sync).then(|| {
+        if cli.relay_only() {
             Transport::RelayOnly
         } else {
             Transport::Direct
-        };
+        }
+    });
+    if let Some(transport) = transport {
         // Started concurrently: each endpoint spends most of its setup
         // waiting on a relay handshake, so doing them in sequence would
         // make startup scale with the number of projects.
@@ -344,7 +348,7 @@ async fn main() -> Result<()> {
     // background project whose endpoint failed to bind is open but not
     // replicating, and the banner must not fold it into "all syncing".
     let syncing_count = projects.iter().filter(|p| p.sync.is_some()).count();
-    let state = api::AppState::with_projects(projects);
+    let state = api::AppState::with_projects(projects, transport);
     for project in state.projects() {
         if let Some(sync) = &project.sync {
             tokio::spawn(Arc::clone(sync).run(Arc::clone(&project.notify)));
