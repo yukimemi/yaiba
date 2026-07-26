@@ -2,6 +2,7 @@
 name        = "yaiba-core"
 description = "Domain model, CRDT store and dependency-graph scheduling for yaiba"
 keywords    = ["todo", "gantt", "crdt", "scheduling", "hlc"]
+readme      = "README.md"
 categories  = ["data-structures", "date-and-time"]
 version.workspace      = true
 edition.workspace      = true
