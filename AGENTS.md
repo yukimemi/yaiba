@@ -285,3 +285,103 @@ workflows from tags pushed by the default `GITHUB_TOKEN`, so
 doesn't fire `release.yml`, the missing PAT is the first thing
 to check.
 <!-- kata:agents:rust:end -->
+
+## yaiba specifics
+
+Everything above this line is kata-managed. Everything below is not,
+and survives `kata apply` — the base and rust blocks are
+`how = "merge-section"`, so only the bytes between their markers are
+replaced.
+
+### Building the web UI
+
+The UI is compiled into the binary with `rust-embed`, so a stale or
+missing `crates/yaiba-server/web/dist/` ships silently rather than
+failing.
+
+- **`web/dist/` is gitignored, and `build.rs` creates it.** Without
+  that, `rust-embed` fails on a fresh clone before anything has run
+  the frontend build. Don't remove it because the directory "should"
+  already exist — on CI it doesn't.
+- **`release.yml` greps for `[tasks.web-build]` by name.** Rename the
+  task and the release still succeeds, having embedded an empty
+  bundle. Keep the name.
+- **On Windows, `bun run <script>` swallows vite's stdout** — you get
+  `$ vite` and then nothing, whether it worked or not. Call the tool
+  directly when you need to see output: `node
+  node_modules/vite/bin/vite.js build`, `node
+  node_modules/typescript/bin/tsc -b`.
+
+### The palette is load-bearing
+
+`styles.css` opens with the rule and it is not decorative: cyan is the
+blade (cursor, focus, structure), **magenta means critical path and
+nothing else**, amber means overdue. A new signal has to earn a colour
+or express itself some other way — a hover state that was styled
+`--blood` turned out to be invisible on exactly the critical edges it
+most needed to mark, and had to become a shape change instead.
+
+Office mode is one variable, not a second stylesheet: `--glow` is `1`
+in the dark theme and `0` in the light one, and every shadow is written
+`calc(Npx * var(--glow))`. A new glow that hardcodes its blur stays lit
+in office mode. Office mode also drops the 刃 from the wordmark and the
+tab title — it has to survive a shared screen in a meeting.
+
+### Gantt interaction traps
+
+- **`.gantt__bar` has `overflow: hidden`** to clip the progress fill to
+  its rounded corners. An absolutely positioned child that sits outside
+  the bar's box is therefore clipped away entirely — invisible *and*
+  not hit-testable. This is why the drag grips are siblings of the bar
+  inside `.gantt__row`, with `left` set inline from the bar's live
+  geometry so they follow a drag preview.
+- **`.gantt__links` is `pointer-events: none`** so dependency arrows
+  never steal a click meant for a bar. The one clickable path opts back
+  in with `pointer-events: stroke` over an 11px transparent stroke; a
+  1px line is not something a user can be asked to hit.
+- **Drag listeners live on `window`**, installed per-drag in an effect.
+  Commit through `commitRef`, never the closed-over props: they are
+  memoised on the polled snapshot, so a refresh mid-drag would
+  otherwise commit against a stale schedule and file an undo entry
+  restoring a value nobody holds.
+- **Hit-test a release with `document.elementFromPoint`, not
+  `e.target`.** Touch and pen implicitly capture the pointer on
+  whatever received `pointerdown`, so `e.target` at release is the drag
+  handle. `onMove` uses the same call, so the drop highlight and the
+  commit can never disagree.
+
+### Invariants worth knowing before changing the graph
+
+- **Cycles are refused server-side.** `Store::add_dep` calls
+  `graph::would_cycle` and returns 409; it catches indirect loops, not
+  just the two-node case. Client-side previews are a convenience and
+  must agree with it, never replace it.
+- **A summary is not scheduled.** A task with children takes its span
+  from their union and its progress from a duration-weighted roll-up;
+  only leaves are scheduled from dependencies. Giving a summary its own
+  dates produces a second answer competing with the roll-up.
+- **A malformed graph is a state to survive, not an error to refuse.**
+  Two peers can concurrently close a dependency loop or re-parent into
+  a cycle, so the renderer degrades rather than throwing.
+
+### Verifying UI changes by hand
+
+`cargo make check` will not catch any of the above — every interaction
+bug listed here passed CI.
+
+- **Disable browser extensions that bind keys first.** SurfingKeys
+  captures keystrokes on `localhost` and the symptom is
+  `defaultPrevented=true` with the app's handler never running, which
+  reads like a focus bug and is not one.
+- **Automation screenshots are scaled from CSS pixels.** Derive the
+  factor from the screenshot width over `innerWidth`, and confirm it
+  with a hover probe (`document.querySelectorAll(':hover')`) before
+  driving a drag — a few pixels off silently lands on the resize grip
+  instead of the bar.
+- **Re-measure between gestures.** Committing an edit reflows the
+  schedule, so coordinates captured before it point somewhere else
+  after.
+- **Synthetic events need real gaps.** The drag effect installs its
+  listeners after React commits; firing `pointerdown` and `pointerup`
+  back to back in one tick misses them. Real input never does this, so
+  a failure here is the test's, not the app's.
