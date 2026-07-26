@@ -13,7 +13,7 @@ use yaiba::projects::{self, Registry};
 use yaiba::updater::{self, UpdateMode};
 use yaiba::{api, app};
 use yaiba_core::Store;
-use yaiba_sync::Ticket;
+use yaiba_sync::{Ticket, Transport};
 
 /// `ya-i-ba` → 8-1-8. Arbitrary, but memorable and well clear of the
 /// usual dev-server ports.
@@ -74,11 +74,43 @@ struct Cli {
     #[arg(long, global = true)]
     no_sync: bool,
 
+    /// Sync through relays only, binding no UDP socket to do it.
+    ///
+    /// For a machine without administrator rights: the normal endpoint
+    /// listens on every interface and probes the router, and Windows
+    /// answers that with a firewall prompt on every start that nobody
+    /// there can dismiss for good. Set `YAIBA_RELAY_ONLY` to make it
+    /// permanent. The UI keeps its loopback listener either way — a
+    /// firewall has never had anything to say about that one. The direct
+    /// peer-to-peer path is what this gives up: syncing keeps working,
+    /// it just always goes the long way round.
+    #[arg(long, global = true)]
+    relay_only: bool,
+
     /// What to do when a newer release exists: install it quietly in the
     /// background, only say so, or never look. `YAIBA_NO_AUTOUPDATE`
     /// overrides this to off.
     #[arg(long, global = true, value_enum, default_value_t, env = "YAIBA_UPDATE")]
     update: UpdateMode,
+}
+
+impl Cli {
+    /// `--relay-only`, or the environment variable standing in for it.
+    ///
+    /// Set means *set to something*, matching how
+    /// `updater::disabled_by_env` reads `YAIBA_NO_AUTOUPDATE`: an empty
+    /// `YAIBA_RELAY_ONLY=` is off, which is what clearing a variable
+    /// means everywhere else, and two environment flags in one binary
+    /// disagreeing about that would be its own trap.
+    ///
+    /// Not clap's `env`, which parses a flag's environment value as a
+    /// bool: `YAIBA_RELAY_ONLY=1` — the spelling everyone reaches for,
+    /// and the one an admin-less machine would set once and forget —
+    /// refuses to *start* with "invalid value '1'". Failing to launch is
+    /// a far worse answer than accepting a loose truthy value.
+    fn relay_only(&self) -> bool {
+        self.relay_only || std::env::var_os("YAIBA_RELAY_ONLY").is_some_and(|v| !v.is_empty())
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -211,9 +243,15 @@ async fn main() -> Result<()> {
 
     // Peer-to-peer replication. Bound before the HTTP listener so the
     // ticket is on screen by the time the UI opens.
+    let relay_only = cli.relay_only();
     let mut ticket = None;
     if !cli.no_sync {
-        let sync = yaiba_sync::SyncNode::start(Arc::clone(&state.store))
+        let transport = if relay_only {
+            Transport::RelayOnly
+        } else {
+            Transport::Direct
+        };
+        let sync = yaiba_sync::SyncNode::start_with(Arc::clone(&state.store), transport)
             .await
             .context("failed to start the peer-to-peer sync endpoint")?;
         if let Some(peer) = &target.peer {
@@ -266,6 +304,7 @@ async fn main() -> Result<()> {
         project.as_deref(),
         node_id,
         ticket.as_deref(),
+        relay_only,
     );
     if !cli.no_open {
         open_browser(&url);
@@ -515,6 +554,7 @@ fn banner(
     project: Option<&str>,
     node_id: yaiba_core::NodeId,
     ticket: Option<&str>,
+    relay_only: bool,
 ) {
     const CYAN: &str = "\x1b[38;5;51m";
     const MAGENTA: &str = "\x1b[38;5;207m";
@@ -545,7 +585,12 @@ fn banner(
         peering = match ticket {
             Some(ticket) => format!(
                 "  {CYAN}▸{RESET} share {MAGENTA}{ticket}{RESET}\n       \
-                 {DIM}they run: yaiba join <that ticket>{RESET}"
+                 {DIM}they run: yaiba join <that ticket>{RESET}{relay}",
+                relay = if relay_only {
+                    format!("\n  {DIM}▸ sync  relay-only (--relay-only){RESET}")
+                } else {
+                    String::new()
+                }
             ),
             None => format!("  {DIM}▸ sync  off (--no-sync){RESET}"),
         }
@@ -626,6 +671,20 @@ mod tests {
         let cli = Cli::parse_from(["yaiba", "--join", "a.b", "join", "c.d"]);
         let err = resolve_target(&cli, &Registry::load()).unwrap_err();
         assert!(err.to_string().contains("only one"), "{err}");
+    }
+
+    /// Regression guard for the reason `relay_only()` exists: hand the
+    /// variable to clap as a flag `env` instead and `YAIBA_RELAY_ONLY=1`
+    /// makes yaiba refuse to start.
+    #[test]
+    fn relay_only_does_not_parse_its_environment_value_as_a_bool() {
+        let cmd = Cli::command();
+        let arg = cmd
+            .get_arguments()
+            .find(|a| a.get_id() == "relay_only")
+            .expect("--relay-only should be defined");
+        assert!(arg.get_env().is_none(), "presence is read by relay_only()");
+        assert!(Cli::parse_from(["yaiba", "open", "work", "--relay-only"]).relay_only);
     }
 
     #[test]

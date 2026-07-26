@@ -71,6 +71,7 @@ platform data directory (`--db` to move it).
 yaiba --port 9000            # somewhere else
 yaiba --no-open              # don't launch a browser
 yaiba --no-sync              # fully local, no peer endpoint at all
+yaiba --relay-only           # sync without binding a UDP socket — no firewall prompt
 yaiba --host 0.0.0.0         # expose the UI on your LAN (no auth — trusted networks only)
 ```
 
@@ -233,6 +234,22 @@ key and hole-punches, so outbound UDP is all that's needed. If hole
 punching fails the connection falls back to a relay that forwards
 already-encrypted QUIC and cannot read what passes through. Peers on the
 same network connect directly and never touch it.
+
+Hole punching does bind a UDP socket on every interface, and Windows
+greets that with a firewall prompt — which on a locked-down machine asks
+for an administrator who isn't you, and comes back on every start.
+`--relay-only` binds no UDP socket at all:
+
+```sh
+yaiba --relay-only            # sync over the relay, no UDP socket of our own
+YAIBA_RELAY_ONLY=1 yaiba      # same, permanently, from the environment
+```
+
+The UI's listener is unaffected — it is on loopback, which no firewall
+asks about, and that is true in either mode. Everything still syncs and
+the ticket is unchanged: a peer dials your public key and never learns
+which path answered. What you give up is the direct connection, so it is
+slower and it needs the relay to be reachable.
 
 The ticket carries a 32-byte room key. A peer that can't present it is
 dropped before any data moves.

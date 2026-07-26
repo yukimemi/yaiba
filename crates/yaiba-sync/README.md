@@ -19,6 +19,12 @@ nothing else** — no port forwarding, no inbound firewall rule. When hole
 punching fails the connection falls back to a relay, which forwards
 already-encrypted QUIC and cannot read what passes through.
 
+Hole punching binds a UDP socket on every interface, which is what a
+desktop firewall asks about on startup. `SyncNode::start_with` and
+`Transport::RelayOnly` bind no UDP socket at all and let the relay carry
+everything — slower, but there is no prompt to answer, and on a machine
+without administrator rights there is nobody who could answer it.
+
 One bidirectional stream carries a three-message exchange that leaves
 both sides holding the union of each other's writes:
 
