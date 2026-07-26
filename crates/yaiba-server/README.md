@@ -1,4 +1,6 @@
-# yaiba
+<p align="center">
+  <img src="https://raw.githubusercontent.com/yukimemi/yaiba/main/assets/logo.svg" alt="yaiba — vim-flavoured todo &amp; gantt, peer to peer" width="620">
+</p>
 
 > 刃 — *the blade*. A vim-flavoured todo and gantt planner that runs as a
 > single local binary and syncs directly between people. No server to
@@ -17,6 +19,14 @@ The UI opens at `http://localhost:8188`. Press `?` for keys.
 - **Dependencies are real** — finish-to-start edges feed a
   forward/backward pass that computes earliest start, slack, and the
   critical path.
+- **One outline, every altitude** — tasks nest, and folding to a level
+  changes who the view is for: `zM` is the project list, `zR` is the
+  work. A task with children becomes a summary whose dates and progress
+  roll up from what is inside it.
+- **Plan vs actual** — actual start and finish are stamped as work
+  happens, progress is recorded per day, and `:asof 2026-07-20` shows
+  the plan as it stood then. The gantt draws a progress line (イナズマ線)
+  that bends left where you are behind and right where you are ahead.
 - **One binary** — the web UI is compiled in.
 - **Peer-to-peer** — share the ticket printed at startup; the other side
   runs `yaiba --join <ticket>`. Edits merge through a field-level CRDT,
