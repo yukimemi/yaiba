@@ -54,6 +54,16 @@ cargo make release-build     # builds the web bundle, then the binary
 ./target/release/yaiba
 ```
 
+To put your build on `PATH` instead of running it out of `target/`:
+
+```sh
+cargo make install           # or: makers install
+```
+
+Both go through the web bundle first. Plain `cargo install --path .`
+does not, and the UI is baked in by `rust-embed` at compile time — a
+missing bundle installs an empty one silently rather than failing.
+
 The browser opens on `http://localhost:8188`. The database lives in your
 platform data directory (`--db` to move it).
 
