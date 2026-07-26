@@ -38,6 +38,21 @@ const GROUPS: Group[] = [
       ["X", "remove a dependency"],
       ["[ / ]", "gantt zoom out / in"],
       ["v", "visual line select"],
+      ["gt", "office mode ⇄ neon mode"],
+    ],
+  },
+  {
+    title: "MOUSE",
+    keys: [
+      ["click", "put the cursor on a row"],
+      ["click [ ]", "complete / reopen"],
+      ["click ▾", "fold a summary"],
+      ["dbl-click", "edit the title"],
+      ["drag row", "reorder"],
+      ["drag bar", "move the start date"],
+      ["drag ⟩ edge", "change the duration"],
+      ["drag ● onto", "make that task wait for this one"],
+      ["click arrow", "cut that dependency"],
     ],
   },
   {
@@ -87,6 +102,8 @@ const GROUPS: Group[] = [
       [":level ⟨n⟩", "show down to level n (bare = all)"],
       [":parent ⟨n⟩", "move under row n (bare = top level)"],
       [":only / :all", "focus this subtree / clear"],
+      [":theme ⟨t⟩", "dark / light — bare toggles"],
+      [":office", "straight to office mode"],
     ],
   },
 ];

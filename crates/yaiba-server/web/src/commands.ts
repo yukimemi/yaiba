@@ -1,4 +1,5 @@
 import { parseDateExpr } from "./dates";
+import type { Theme } from "./theme";
 import { SORT_KEYS, type SortKey } from "./filter";
 import { inversePatch, type Op } from "./ops";
 import type { AppData, Task, TaskPatch } from "./types";
@@ -14,6 +15,8 @@ export interface UiPatch {
   foldLevel?: number | null;
   /** Reference date; null means now. */
   asof?: string | null;
+  /** `"toggle"` flips to the other one — what bare `:theme` and `gt` do. */
+  theme?: Theme | "toggle";
   zoom?: Zoom;
   filter?: string;
   sort?: SortKey;
@@ -267,6 +270,18 @@ export function runCommand(
         message: `unlinked from “${target.title}”`,
       };
     }
+
+    // ---- appearance ------------------------------------------------
+    case "theme": {
+      // No message: applyUi announces the resulting theme itself, and
+      // its say() lands after this one, so anything set here is
+      // overwritten before it can be read.
+      if (arg === "dark" || arg === "light") return { ui: { theme: arg } };
+      if (!arg) return { ui: { theme: "toggle" } };
+      return { error: "usage: :theme dark|light  (bare :theme toggles)" };
+    }
+    case "office":
+      return { ui: { theme: "light" } };
 
     // ---- the reference date ---------------------------------------
     case "asof":
