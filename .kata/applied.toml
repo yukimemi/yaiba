@@ -1,5 +1,5 @@
 preset = "github.com/yukimemi/pj-presets:rust-workspace"
-applied_at = "2026-07-25T13:03:27.732876Z"
+applied_at = "2026-07-26T04:25:27.906918704Z"
 
 [[templates]]
 source = "github.com/yukimemi/pj-base"
@@ -8,7 +8,7 @@ version = "0.13.0"
 
 [[templates]]
 source = "github.com/yukimemi/pj-rust"
-rev = "45af1969561402fc213d76ae51372a5853a33512"
+rev = "4431c1cc08174025128ce7a2d7bb68af2dfffa93"
 version = "0.8.0"
 
 [[templates]]
@@ -29,22 +29,22 @@ content_hash = "486c974de88903113ed99b4e643432b7050e88f1031276f5263e8da7b43fe11e
 content_hash = "6d380d1ecc2f882c2011429d548a6f3c774b74f0c757d884453e4667172acc2a"
 
 [files.".github/workflows/apm-bump.yml"]
-content_hash = "d7331ae3c991ee893b97dd182ffeabfc5314798a6c9a8595a4c874b1f9b52ad9"
+content_hash = "85b195e27232805149919455cf3e9906cec9e5c5d82c1b0e9c668db355844ed1"
 
 [files.".github/workflows/auto-tag.yml"]
-content_hash = "94454099b8958373b6a249f5bb173e73460a0abc26e9c62c2cfb19ef3b686e5b"
+content_hash = "406943795e69542d92d37a0d70051f22a899956dc0cbd1d70ebc16aea13d655a"
 
 [files.".github/workflows/ci.yml"]
-content_hash = "754e83749d13e6798a19a9fb8a7b0b5c7025f78568575fad0f7cb7fa56bc88d8"
+content_hash = "ca678bb4447eee0b1de347b1f339d400740e960a408331f73d8dd80a1dca2017"
 
 [files.".github/workflows/claude-review.yml"]
-content_hash = "05a0059d3d38a9915338b054d77d519a7cc4da3702b35da151657aa2f8976208"
+content_hash = "8804c503c1960abdda86578c0bb0bdd727daf41c0d482975d45947d27768b2ec"
 
 [files.".github/workflows/claude.yml"]
-content_hash = "867c8452025d8c75a6922fa939702314e5ca284c1520519e7f394a72cb46a6a5"
+content_hash = "81eb918f932e08a95f3deb8e64c13e57976691bc5723c4d7cb56501d6566994c"
 
 [files.".github/workflows/kata-apply.yml"]
-content_hash = "2256d160721583ff5b6afe5c9a1778761f7ce6fc5ba46dbe27c9cd7d803a0632"
+content_hash = "3e0e0491a0a1bf4dc0fd4e62cb57748278ff578ceca95e9c140f3e82f4cc6e39"
 
 [files.".github/workflows/release.yml"]
 content_hash = "bfcca626928ccfadca91e822bd33407bf5d7d35680285e4ec41b47e908457cd7"
@@ -53,6 +53,7 @@ content_hash = "bfcca626928ccfadca91e822bd33407bf5d7d35680285e4ec41b47e908457cd7
 content_hash = "4bebd1c3417c33f9d1c51f011694f6d82b098bbb1a5a102ba56e97ab01a866ef"
 
 [files.".kata/vars.toml"]
+content_hash = "393b2b94540e792790ef9357e46e5bc259eb3064605794ca2373ae458999cb23"
 once_applied = true
 
 [files."AGENTS.md"]
@@ -83,7 +84,7 @@ once_applied = true
 once_applied = true
 
 [files."clippy.toml"]
-content_hash = "c750cb285075d0cb0c5c9ea77cd67baf7b0c4af864603cbe6c0c6692e75ed6fb"
+content_hash = "089f90baf996c8e39253746a6c46ddc9951ed656364e1ff2a14c1c5ac9c15468"
 
 [files."opencode.json"]
 content_hash = "2ada1cf4347db9e98fadd67ca72cd9e29042c5bf6ab719d666b5d71f97663e81"
