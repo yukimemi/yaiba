@@ -148,6 +148,16 @@ enum Command {
         name: Option<String>,
     },
 
+    /// Start a project of your own, and open it.
+    ///
+    /// For keeping things apart that should be apart — a backlog you
+    /// share with someone and one you don't. Nothing is shared until you
+    /// hand out its ticket.
+    New {
+        /// What to call it. Becomes `projects/<name>.db`.
+        name: String,
+    },
+
     /// Open a registered project. Without a name, pick one interactively.
     Open {
         /// Project name. Omit to fuzzy-pick from the registry.
@@ -395,6 +405,18 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                  opposite things; pass only one"
             );
         }
+        // `new` builds a project with no peer, so the ticket would be
+        // accepted, warned about, and then quietly dropped. Asking for an
+        // empty project that immediately merges into someone's room is
+        // spelled `yaiba join <ticket> --as <name>` — which does it
+        // properly rather than by accident.
+        if let Some(Command::New { name }) = &cli.command {
+            bail!(
+                "--join has nothing to merge into a project that does not exist yet. \
+                 To take a peer's tasks as a new project, use \
+                 `yaiba join <ticket> --as {name}`"
+            );
+        }
         if cli.no_sync {
             bail!("--no-sync and --join ask for opposite things");
         }
@@ -428,50 +450,21 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 Some(given) => projects::validate_name(given)?.to_string(),
                 None => projects::name_from_ticket(ticket),
             };
-            if registry.find(&name).is_some() {
-                bail!(
-                    "a project named {name:?} is already registered — open it with \
-                     `yaiba open {name}`, or choose another name with --as"
-                );
-            }
-
-            let db = match &cli.db {
-                Some(path) => path.clone(),
-                None => {
-                    // A free *name* does not mean a free *file*: the path
-                    // is `slug(name)`, so "work" and "work!" both land on
-                    // projects/work.db. Joining into an existing database
-                    // would overwrite its room key and cut its peer off —
-                    // the exact hazard the subcommand exists to avoid.
-                    let path = registry.joined_db_path(&name)?;
-                    if let Some(existing) = registry.find_by_db(&path) {
-                        bail!(
-                            "{:?} would share a database with the project {:?} ({}) — \
-                             open that one with `yaiba open {}`, or choose a name that \
-                             differs by more than punctuation",
-                            name,
-                            existing.name,
-                            // The registered path, not the one just built:
-                            // it is normalized, so it reads as a real path.
-                            existing.db.display(),
-                            existing.name
-                        );
-                    }
-                    if path.exists() {
-                        bail!(
-                            "{} already exists but no project is registered for it \
-                             (forgotten earlier?). Choose another name with --as, or \
-                             pass --db {} to join into that database deliberately",
-                            path.display(),
-                            path.display()
-                        );
-                    }
-                    path
-                }
-            };
+            let db = db_for_new_project(cli, registry, &name, "another name with --as")?;
             Ok(Target {
                 db,
                 peer: Some(Peer::Adopt(peer)),
+                name_hint: Some(name),
+            })
+        }
+
+        Some(Command::New { name }) => {
+            let name = projects::validate_name(name)?.to_string();
+            let registry = registry_ref(registry)?;
+            let db = db_for_new_project(cli, registry, &name, "a different name")?;
+            Ok(Target {
+                db,
+                peer: None,
                 name_hint: Some(name),
             })
         }
@@ -506,6 +499,58 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
             })
         }
     }
+}
+
+/// Where a brand-new project's database goes, refusing every path that
+/// would land it on an existing one.
+///
+/// Shared by `join` and `new` because the hazard is the same either way:
+/// a free *name* is not a free *file*. The path is `slug(name)`, so
+/// "work" and "work!" both become projects/work.db, and opening an
+/// existing database as if it were new would either fuse two projects or
+/// — for `join` — overwrite the room key and cut its peer off.
+///
+/// `escape` is a full noun phrase, not a flag name: it lands inside
+/// "or choose {escape}", where a bare `--as` reads as a dangling flag
+/// rather than an instruction. `join` says "another name with --as",
+/// `new` says "a different name".
+fn db_for_new_project(cli: &Cli, registry: &Registry, name: &str, escape: &str) -> Result<PathBuf> {
+    if let Some(existing) = registry.find(name) {
+        bail!(
+            "a project named {name:?} is already registered ({}) — open it with \
+             `yaiba open {name}`, or choose {escape}",
+            existing.db.display()
+        );
+    }
+    // An explicit --db is the user naming the file themselves, which is a
+    // deliberate choice rather than a collision.
+    if let Some(path) = &cli.db {
+        return Ok(path.clone());
+    }
+
+    let path = registry.joined_db_path(name)?;
+    if let Some(existing) = registry.find_by_db(&path) {
+        bail!(
+            "{name:?} would share a database with the project {:?} ({}) — open that \
+             one with `yaiba open {}`, or choose a name that differs by more than \
+             punctuation",
+            existing.name,
+            // The registered path, not the one just built: it is
+            // normalized, so it reads as a real path.
+            existing.db.display(),
+            existing.name
+        );
+    }
+    if path.exists() {
+        bail!(
+            "{} already exists but no project is registered for it (forgotten \
+             earlier?). Choose {escape}, or pass --db {} to use that database \
+             deliberately",
+            path.display(),
+            path.display()
+        );
+    }
+    Ok(path)
 }
 
 fn parse_ticket(raw: &str) -> Result<Ticket> {
@@ -982,6 +1027,107 @@ mod tests {
     #[test]
     fn no_registry_means_only_the_active_project() {
         assert!(open_others(None, &PathBuf::from("elsewhere.db"), false).is_empty());
+    }
+
+    /// `new` builds a project with no peer, so a ticket handed to it was
+    /// warned about and then silently dropped — the user asked to join
+    /// someone and got a plain local project.
+    #[test]
+    fn the_flag_and_new_together_are_refused() {
+        let cli = Cli::parse_from(["yaiba", "--join", TICKET, "new", "work"]);
+        let err = resolve_target(&cli, &scratch_registry()).unwrap_err();
+        assert!(err.to_string().contains("nothing to merge"), "{err}");
+        // The message has to name the command that does what they meant.
+        assert!(err.to_string().contains("join <ticket> --as work"), "{err}");
+    }
+
+    /// `escape` lands inside "or choose {escape}", so a bare flag name
+    /// reads as a dangling fragment. Nothing pinned `join`'s wording, which
+    /// is how sharing the helper regressed it in the first place.
+    #[test]
+    fn both_callers_word_their_refusal_as_a_sentence() {
+        let mut registry = scratch_registry().unwrap();
+        let db = registry.joined_db_path("work").unwrap();
+        registry.remember(&db, Some("work"), None).unwrap();
+        let registry = Ok(registry);
+
+        let join = Cli::parse_from(["yaiba", "join", TICKET, "--as", "work"]);
+        let err = resolve_target(&join, &registry).unwrap_err().to_string();
+        assert!(err.contains("choose another name with --as"), "{err}");
+
+        let new = Cli::parse_from(["yaiba", "new", "work"]);
+        let err = resolve_target(&new, &registry).unwrap_err().to_string();
+        assert!(err.contains("choose a different name"), "{err}");
+    }
+
+    /// The gap this closes: before `new`, starting a project of your own
+    /// meant knowing that `--db <path>` quietly registers what it opens.
+    #[test]
+    fn new_starts_a_project_with_no_peer() {
+        let registry = scratch_registry().unwrap();
+        let cli = Cli::parse_from(["yaiba", "new", "private"]);
+        let target = resolve_target(&cli, &Ok(registry)).unwrap();
+
+        assert_eq!(target.name_hint.as_deref(), Some("private"));
+        assert!(target.peer.is_none(), "a new project is nobody's replica");
+        assert!(target.db.ends_with("private.db"));
+        assert!(
+            !target.db.exists(),
+            "the database is created by the open, not here"
+        );
+    }
+
+    /// `new` and `join` share `db_for_new_project`, so they refuse the same
+    /// collisions — a name already taken, and a name whose slug lands on
+    /// another project's file.
+    #[test]
+    fn new_refuses_a_name_that_is_taken() {
+        let mut registry = scratch_registry().unwrap();
+        let db = registry.joined_db_path("private").unwrap();
+        registry.remember(&db, Some("private"), None).unwrap();
+
+        let cli = Cli::parse_from(["yaiba", "new", "private"]);
+        let err = resolve_target(&cli, &Ok(registry)).unwrap_err();
+        assert!(err.to_string().contains("already registered"), "{err}");
+    }
+
+    #[test]
+    fn new_refuses_a_name_that_would_share_a_database() {
+        let mut registry = scratch_registry().unwrap();
+        let db = registry.joined_db_path("private").unwrap();
+        registry.remember(&db, Some("private"), None).unwrap();
+
+        let cli = Cli::parse_from(["yaiba", "new", "private!"]);
+        let err = resolve_target(&cli, &Ok(registry)).unwrap_err();
+        assert!(err.to_string().contains("share a database"), "{err}");
+    }
+
+    #[test]
+    fn new_refuses_an_orphaned_database() {
+        let registry = scratch_registry().unwrap();
+        let db = registry.joined_db_path("ghost").unwrap();
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        std::fs::write(&db, b"pretend this holds tasks").unwrap();
+
+        let cli = Cli::parse_from(["yaiba", "new", "ghost"]);
+        let err = resolve_target(&cli, &Ok(registry)).unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+    }
+
+    /// Naming the file yourself is a choice, not a collision.
+    #[test]
+    fn new_with_db_puts_the_database_where_you_say() {
+        let registry = scratch_registry().unwrap();
+        let cli = Cli::parse_from(["yaiba", "new", "private", "--db", "elsewhere.db"]);
+        let target = resolve_target(&cli, &Ok(registry)).unwrap();
+        assert_eq!(target.db, PathBuf::from("elsewhere.db"));
+    }
+
+    #[test]
+    fn new_rejects_a_name_that_is_not_usable_as_a_file() {
+        let registry = scratch_registry().unwrap();
+        let cli = Cli::parse_from(["yaiba", "new", "a/b"]);
+        assert!(resolve_target(&cli, &Ok(registry)).is_err());
     }
 
     #[test]

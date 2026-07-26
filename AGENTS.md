@@ -438,10 +438,12 @@ protocol would still ship every row of it.
   clap rejects any flag written *after* a subcommand, and every flag
   silently becomes prefix-only.
 - **A free name is not a free file.** `joined_db_path` runs the name
-  through `slug()`, so `work` and `work!` are one database — and joining
-  into an existing one overwrites its room key, which is the hazard the
-  subcommand exists to remove. `Command::Join` therefore checks
-  `find_by_db` and file existence, never just `find`.
+  through `slug()`, so `work` and `work!` are one database — and opening
+  an existing one as if it were new either fuses two projects or, for
+  `join`, overwrites the room key and cuts its peer off. `new` and `join`
+  both go through `db_for_new_project`, which checks `find_by_db` and file
+  existence, never just `find`. Any future "start a project" path has to
+  go through it as well.
 - **`same_path` folds `/` to `\` on Windows.** Both separate there, so a
   byte comparison called `C:/x/a.db` and `C:\x\a.db` two databases. That
   is reachable from one `YAIBA_DATA_DIR` typed two ways, and it silently
