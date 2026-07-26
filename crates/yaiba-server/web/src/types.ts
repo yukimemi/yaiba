@@ -20,6 +20,10 @@ export interface Task {
   start: string | null;
   duration_days: number;
   due: string | null;
+  /** When work actually began; set on the first move off todo. */
+  actual_start: string | null;
+  /** When work actually finished; set on done, cleared on reopen. */
+  actual_end: string | null;
   progress: number;
   position: number;
   tags: string[];
@@ -64,7 +68,10 @@ export interface AppData {
   tasks: Task[];
   deps: Dep[];
   schedule: Schedule;
+  /** The date everything is computed against — the reference date. */
   today: string;
+  /** True when `today` is a chosen past date rather than now. */
+  as_of: boolean;
   /** This replica's id. */
   node_id: string;
 }
@@ -78,6 +85,8 @@ export interface NewTask {
   start?: string | null;
   duration_days?: number;
   due?: string | null;
+  actual_start?: string | null;
+  actual_end?: string | null;
   progress?: number;
   tags?: string[];
   after?: TaskId | null;
@@ -94,6 +103,8 @@ export type TaskPatch = Partial<
     | "start"
     | "duration_days"
     | "due"
+    | "actual_start"
+    | "actual_end"
     | "progress"
     | "tags"
   >

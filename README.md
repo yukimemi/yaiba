@@ -128,6 +128,37 @@ are scheduled from dependencies; summaries follow.
 Commands take dates the way you'd say them: `:due tom`, `:due mon`,
 `:due +3d`, `:due 8/14`. Filters compose: `:f tag:dev open crit`.
 
+## Plan vs actual, and the progress line
+
+Every task carries both sides. The plan is `start` + `duration`; the
+actuals are stamped as work happens — `actual_start` the first time a
+task leaves `todo`, `actual_end` when it is done, both editable if you
+are recording things after the fact. Reopening a task clears its finish,
+because leaving it would quietly corrupt every comparison downstream.
+
+The gantt draws a **progress line** (イナズマ線) from the reference date:
+each row steps left or right by how far it deviates from where the plan
+says it should be. Straight means on schedule, a notch left is behind, a
+bulge right is ahead. You read the project's health from the shape, not
+from a column of numbers.
+
+```sh
+:asof 2026-07-20    # the plan as it stood that day
+:asof -3d           # three days ago
+:asof today         # back to now
+```
+
+Progress and status are recorded per day, so a past reference date shows
+what was known then rather than today's numbers back-projected. The
+recording is one entry per task per day: several edits on one day
+collapse to that day's final value, and a day you didn't touch a task
+costs nothing. A year of active use is a few megabytes.
+
+Fields that keep no history — titles, dates, the breakdown — are shown
+as they are now. That is a real limitation rather than a papered-over
+one: the CRDT keeps only the latest value for those, and inventing a
+past for them would be worse than admitting there isn't one.
+
 ## Working with peers
 
 Each replica prints a ticket at startup, and `:ticket` copies it from

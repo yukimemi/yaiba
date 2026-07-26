@@ -122,7 +122,7 @@ body::after {
   padding: 0 8px;
   font-weight: 700;
   letter-spacing: 0.18em;
-  border: 1px solid currentColor;
+  border: 1px solid currentcolor;
   color: var(--edge);
 }
 
@@ -169,6 +169,15 @@ body::after {
 .hud__stat b {
   color: var(--steel);
   font-weight: 500;
+}
+
+/* Viewing the past is a mode, and an easy one to forget you are in —
+   so it is stated loudly rather than tucked away. */
+.hud__asof {
+  padding: 0 8px;
+  color: var(--rust);
+  border: 1px solid currentcolor;
+  font-weight: 700;
 }
 
 .hud__peers {
@@ -639,6 +648,17 @@ body::after {
 
 .gantt__row--cursor .gantt__label {
   color: var(--steel);
+}
+
+/* The progress line. Amber so it reads against both the cyan bars and
+   the magenta critical path, and thick enough that the zigzag is the
+   first thing the eye lands on. */
+.gantt__progress-line {
+  fill: none;
+  stroke: var(--rust);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.55));
 }
 
 .gantt__links {

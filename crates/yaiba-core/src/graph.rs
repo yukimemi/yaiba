@@ -280,9 +280,19 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
         .iter()
         .filter_map(|(id, late)| es.get(id).map(|early| (*id, (*late - *early).num_days())))
         .collect();
+    // A done task counts as complete whatever its percentage field says.
+    // Without this a finished task rolls up as 0%, which drags its
+    // parent's number down and makes a healthy project look stalled.
     let mut progress: HashMap<TaskId, i64> = tasks
         .iter()
-        .map(|t| (t.id, t.progress.clamp(0, 100)))
+        .map(|t| {
+            let own = if t.status == Status::Done {
+                100
+            } else {
+                t.progress.clamp(0, 100)
+            };
+            (t.id, own)
+        })
         .collect();
     // Weight for the progress roll-up: a leaf counts for its duration, a
     // summary for the sum of its subtree, so a two-week child moves the
@@ -406,6 +416,8 @@ mod tests {
             start,
             duration_days: duration,
             due: None,
+            actual_start: None,
+            actual_end: None,
             progress: 0,
             position: n as f64,
             tags: Vec::new(),
@@ -553,6 +565,24 @@ mod tests {
 
         let s = schedule(&[parent, long_done, short_todo], &[], day(1));
         assert_eq!(find(&s, 1).progress, 90);
+    }
+
+    #[test]
+    fn a_done_child_counts_as_complete_in_the_roll_up() {
+        // Marking a task done without touching its percentage field is
+        // the normal path (`x` does exactly that), so the roll-up has to
+        // treat it as 100 or a finished project reads as barely started.
+        let parent = task(1, 1, None);
+        let mut finished = child(2, 1, 4);
+        finished.start = Some(day(1));
+        finished.status = Status::Done;
+        finished.progress = 0;
+        let mut pending = child(3, 1, 4);
+        pending.start = Some(day(1));
+
+        let s = schedule(&[parent, finished, pending], &[], day(1));
+        assert_eq!(find(&s, 2).progress, 100, "the done leaf itself");
+        assert_eq!(find(&s, 1).progress, 50, "and its half of the parent");
     }
 
     #[test]

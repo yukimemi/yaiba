@@ -10,15 +10,16 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Local, NaiveDate, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::crdt::{
-    Entry, FIELD_CREATED, FIELD_DELETED, FIELD_DUE, FIELD_DURATION, FIELD_EXISTS, FIELD_NOTES,
-    FIELD_PARENT, FIELD_POSITION, FIELD_PRIORITY, FIELD_PROGRESS, FIELD_START, FIELD_STATUS,
-    FIELD_TITLE, TAG_PREFIX, VersionVector, dep_key, parse_dep_key, parse_task_key, task_key,
+    Entry, FIELD_ACTUAL_END, FIELD_ACTUAL_START, FIELD_CREATED, FIELD_DELETED, FIELD_DUE,
+    FIELD_DURATION, FIELD_EXISTS, FIELD_NOTES, FIELD_PARENT, FIELD_POSITION, FIELD_PRIORITY,
+    FIELD_PROGRESS, FIELD_START, FIELD_STATUS, FIELD_TITLE, TAG_PREFIX, VersionVector, dep_key,
+    log_key, parse_dep_key, parse_log_key, parse_task_key, task_key,
 };
 use crate::graph;
 use crate::hlc::{Clock, Hlc, NodeId};
@@ -197,6 +198,71 @@ impl Store {
         Ok(materialize(&self.entries()?))
     }
 
+    /// The dataset as it stood at the end of `date`.
+    ///
+    /// Progress and status come from the day-keyed log: the value that
+    /// was last recorded on or before `date`. A task with no observation
+    /// by then had not been touched, so it reads as todo at 0%, and a
+    /// task created afterwards is absent entirely.
+    ///
+    /// Everything else — titles, dates, the breakdown — is shown as it
+    /// is *now*, not as it was. LWW keeps no history for those fields,
+    /// and inventing one would be worse than the honest limitation.
+    pub fn snapshot_at(&self, date: NaiveDate) -> Result<Snapshot> {
+        let entries = self.entries()?;
+        let mut snapshot = materialize(&entries);
+        let history = history_index(&entries);
+        let cutoff = date.to_string();
+
+        // `created_at` is stamped in UTC but `date` is a local calendar
+        // day, so the two have to be brought into the same frame first.
+        // Comparing them raw drops a task created in the last hours of a
+        // local day west of UTC out of its own ":asof today".
+        snapshot
+            .tasks
+            .retain(|task| task.created_at.with_timezone(&Local).date_naive() <= date);
+        for task in &mut snapshot.tasks {
+            match history
+                .get(&task.id)
+                .and_then(|days| days.range(..=cutoff.clone()).next_back())
+            {
+                Some((_, (progress, status))) => {
+                    task.progress = *progress;
+                    task.status = *status;
+                }
+                None => {
+                    task.progress = 0;
+                    task.status = Status::Todo;
+                }
+            }
+            // An actual date in the future of the as-of point hadn't
+            // happened yet.
+            task.actual_start = task.actual_start.filter(|d| *d <= date);
+            task.actual_end = task.actual_end.filter(|d| *d <= date);
+        }
+
+        let live: HashSet<TaskId> = snapshot.tasks.iter().map(|t| t.id).collect();
+        snapshot
+            .deps
+            .retain(|d| live.contains(&d.from) && live.contains(&d.to));
+        Ok(snapshot)
+    }
+
+    /// Every recorded observation for a task, oldest first.
+    pub fn history(&self, id: TaskId) -> Result<Vec<(NaiveDate, i64, Status)>> {
+        let index = history_index(&self.entries()?);
+        Ok(index
+            .get(&id)
+            .map(|days| {
+                days.iter()
+                    .filter_map(|(day, (progress, status))| {
+                        day.parse().ok().map(|d| (d, *progress, *status))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
     pub fn get_task(&self, id: TaskId) -> Result<Task> {
         self.snapshot()?
             .tasks
@@ -278,6 +344,12 @@ impl Store {
             (key.clone(), FIELD_DUE.into(), json!(new.due)),
             (
                 key.clone(),
+                FIELD_ACTUAL_START.into(),
+                json!(new.actual_start),
+            ),
+            (key.clone(), FIELD_ACTUAL_END.into(), json!(new.actual_end)),
+            (
+                key.clone(),
                 FIELD_PROGRESS.into(),
                 json!(new.progress.clamp(0, 100)),
             ),
@@ -288,6 +360,16 @@ impl Store {
         for tag in normalise_tags(&new.tags) {
             writes.push((key.clone(), format!("{TAG_PREFIX}{tag}"), json!(true)));
         }
+        // Record the creation state too. `NewTask` accepts a non-default
+        // status and progress, and without this entry `snapshot_at` falls
+        // back to "never observed" — reporting a task created as doing/50%
+        // as todo/0% on the very day it was made.
+        writes.extend(observation_writes(
+            id,
+            now.with_timezone(&Local).date_naive(),
+            new.status,
+            new.progress.clamp(0, 100),
+        ));
 
         self.commit(writes)?;
         self.get_task(id)
@@ -332,6 +414,12 @@ impl Store {
             (key.clone(), FIELD_DUE.into(), json!(task.due)),
             (
                 key.clone(),
+                FIELD_ACTUAL_START.into(),
+                json!(task.actual_start),
+            ),
+            (key.clone(), FIELD_ACTUAL_END.into(), json!(task.actual_end)),
+            (
+                key.clone(),
                 FIELD_PROGRESS.into(),
                 json!(task.progress.clamp(0, 100)),
             ),
@@ -350,6 +438,14 @@ impl Store {
                 json!(wanted.contains(tag)),
             ));
         }
+        // Restoring a task re-establishes its state, so today's
+        // observation has to say so as well.
+        writes.extend(observation_writes(
+            task.id,
+            Local::now().date_naive(),
+            task.status,
+            task.progress.clamp(0, 100),
+        ));
 
         self.commit(writes)?;
         self.get_task(task.id)
@@ -398,8 +494,55 @@ impl Store {
         if let Some(v) = patch.due {
             writes.push((key.clone(), FIELD_DUE.into(), json!(v)));
         }
+        if let Some(v) = patch.actual_start {
+            writes.push((key.clone(), FIELD_ACTUAL_START.into(), json!(v)));
+        }
+        if let Some(v) = patch.actual_end {
+            writes.push((key.clone(), FIELD_ACTUAL_END.into(), json!(v)));
+        }
         if let Some(v) = patch.progress {
             writes.push((key.clone(), FIELD_PROGRESS.into(), json!(v.clamp(0, 100))));
+        }
+
+        // Stamp the actual dates from the status transition, unless the
+        // caller set them explicitly in this same patch. Recording when
+        // work started is the kind of thing nobody remembers to do by
+        // hand, and the status change already says it.
+        let today = Local::now().date_naive();
+        let next_status = patch.status.unwrap_or(current.status);
+        if next_status != Status::Todo
+            && current.actual_start.is_none()
+            && patch.actual_start.is_none()
+        {
+            writes.push((key.clone(), FIELD_ACTUAL_START.into(), json!(today)));
+        }
+        if next_status == Status::Done && current.actual_end.is_none() && patch.actual_end.is_none()
+        {
+            writes.push((key.clone(), FIELD_ACTUAL_END.into(), json!(today)));
+        }
+        // Reopening clears the finish: a task being worked on again has
+        // not finished, and leaving the old date would quietly corrupt
+        // every plan-vs-actual comparison.
+        //
+        // This tests the *transition*, not just the resulting status.
+        // Checking `next_status != Done` alone meant that once someone
+        // backdated `actual_end` on a not-yet-done task, the very next
+        // unrelated patch — a retitle, a tag — silently erased it.
+        if patch.status.is_some()
+            && current.status == Status::Done
+            && next_status != Status::Done
+            && patch.actual_end.is_none()
+        {
+            writes.push((key.clone(), FIELD_ACTUAL_END.into(), Value::Null));
+        }
+
+        // One observation per task per day. Same-day edits collapse to
+        // that day's final value; different days never overwrite each
+        // other, which is what makes "where was this on the 20th"
+        // answerable at all.
+        if patch.progress.is_some() || patch.status.is_some() {
+            let progress = patch.progress.map_or(current.progress, |p| p.clamp(0, 100));
+            writes.extend(observation_writes(id, today, next_status, progress));
         }
         if let Some(tags) = patch.tags {
             // Per-tag booleans, not a replaced array: two peers adding
@@ -590,6 +733,63 @@ fn observe(tx: &rusqlite::Transaction<'_>, node: NodeId, seq: u64) -> Result<()>
     Ok(())
 }
 
+/// The day's observation of a task: one entry per field, under the
+/// day-keyed log.
+///
+/// A done task records 100 whatever its percentage field says, so the
+/// history matches what the UI shows — `x` sets status without touching
+/// the number, and that is the common path.
+fn observation_writes(
+    id: TaskId,
+    day: NaiveDate,
+    status: Status,
+    progress: i64,
+) -> Vec<(String, String, Value)> {
+    let key = log_key(id, &day.to_string());
+    let observed = if status == Status::Done {
+        100
+    } else {
+        progress.clamp(0, 100)
+    };
+    vec![
+        (key.clone(), FIELD_PROGRESS.to_string(), json!(observed)),
+        (key, FIELD_STATUS.to_string(), json!(status.as_str())),
+    ]
+}
+
+/// Fold the day-keyed log entries into `task -> day -> (progress, status)`.
+///
+/// `BTreeMap` on the ISO day string is what makes "the last observation
+/// on or before D" a range query rather than a scan — and ISO dates sort
+/// correctly as text, so no parsing is needed to order them.
+fn history_index(entries: &[Entry]) -> HashMap<TaskId, BTreeMap<String, (i64, Status)>> {
+    let mut out: HashMap<TaskId, BTreeMap<String, (i64, Status)>> = HashMap::new();
+    for entry in entries {
+        let Some((id, day)) = parse_log_key(&entry.key) else {
+            continue;
+        };
+        let slot = out
+            .entry(id)
+            .or_default()
+            .entry(day)
+            .or_insert((0, Status::Todo));
+        match entry.field.as_str() {
+            FIELD_PROGRESS => {
+                if let Some(v) = entry.value.as_i64() {
+                    slot.0 = v.clamp(0, 100);
+                }
+            }
+            FIELD_STATUS => {
+                if let Some(v) = entry.value.as_str() {
+                    slot.1 = Status::parse(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Is `candidate` inside the subtree rooted at `ancestor`?
 ///
 /// Used to refuse a re-parent that would put a task inside its own
@@ -720,6 +920,8 @@ fn materialize(entries: &[Entry]) -> Snapshot {
             start: field_date(fields, FIELD_START),
             duration_days: field_i64(fields, FIELD_DURATION).unwrap_or(1).max(1),
             due: field_date(fields, FIELD_DUE),
+            actual_start: field_date(fields, FIELD_ACTUAL_START),
+            actual_end: field_date(fields, FIELD_ACTUAL_END),
             progress: field_i64(fields, FIELD_PROGRESS).unwrap_or(0).clamp(0, 100),
             position: fields
                 .get(FIELD_POSITION)
@@ -977,6 +1179,264 @@ mod tests {
 
         store.reorder(&[c, a, b]).unwrap();
         assert_eq!(titles(&store), ["c", "a", "b"]);
+    }
+
+    // ---- plan vs actual, and history -------------------------------
+
+    #[test]
+    fn actual_dates_follow_the_status_transitions() {
+        let mut store = Store::open_in_memory().unwrap();
+        let today = Local::now().date_naive();
+        let task = store.create_task(new_task("build it")).unwrap();
+        assert!(task.actual_start.is_none() && task.actual_end.is_none());
+
+        let doing = store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    status: Some(Status::Doing),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(doing.actual_start, Some(today), "starting stamps a start");
+        assert!(doing.actual_end.is_none());
+
+        let done = store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    status: Some(Status::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(done.actual_start, Some(today), "the start is not rewritten");
+        assert_eq!(done.actual_end, Some(today));
+
+        // Reopening must clear the finish, or every plan-vs-actual
+        // comparison downstream quietly compares against a lie.
+        let reopened = store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    status: Some(Status::Doing),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(reopened.actual_end.is_none());
+        assert_eq!(reopened.actual_start, Some(today));
+    }
+
+    #[test]
+    fn an_explicit_actual_date_is_not_overwritten_by_the_transition() {
+        let mut store = Store::open_in_memory().unwrap();
+        let backdated = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
+        let task = store.create_task(new_task("started last week")).unwrap();
+
+        // Recording it after the fact must win over "today".
+        let patched = store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    status: Some(Status::Doing),
+                    actual_start: Some(Some(backdated)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(patched.actual_start, Some(backdated));
+    }
+
+    #[test]
+    fn a_backdated_finish_survives_unrelated_patches() {
+        // Recording `actual_end` on a task that isn't done is supported.
+        // Clearing it on any patch whose *result* isn't done meant the
+        // next retitle silently erased it.
+        let mut store = Store::open_in_memory().unwrap();
+        let recorded = NaiveDate::from_ymd_opt(2026, 3, 3).unwrap();
+        let task = store
+            .create_task(new_task("logged after the fact"))
+            .unwrap();
+        store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    actual_end: Some(Some(recorded)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let after = store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    title: Some("renamed".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(after.actual_end, Some(recorded));
+
+        // A real reopen still clears it.
+        store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    status: Some(Status::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let reopened = store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    status: Some(Status::Doing),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(reopened.actual_end.is_none());
+    }
+
+    #[test]
+    fn the_creation_state_is_in_the_history() {
+        // A task created as doing/40% must not read as todo/0% under
+        // snapshot_at on the day it was created.
+        let mut store = Store::open_in_memory().unwrap();
+        let today = Local::now().date_naive();
+        let created = store
+            .create_task(NewTask {
+                title: "already underway".into(),
+                status: Status::Doing,
+                progress: 40,
+                ..Default::default()
+            })
+            .unwrap();
+
+        let same_day = store.snapshot_at(today).unwrap();
+        let seen = same_day
+            .tasks
+            .iter()
+            .find(|t| t.id == created.id)
+            .expect("created today, so present in today's snapshot");
+        assert_eq!((seen.status, seen.progress), (Status::Doing, 40));
+    }
+
+    #[test]
+    fn a_task_created_today_appears_in_todays_snapshot() {
+        // `created_at` is UTC and the as-of date is local; comparing them
+        // raw dropped tasks created late in the day west of UTC.
+        let mut store = Store::open_in_memory().unwrap();
+        let created = store.create_task(new_task("made just now")).unwrap();
+        let today = Local::now().date_naive();
+        assert!(
+            store
+                .snapshot_at(today)
+                .unwrap()
+                .tasks
+                .iter()
+                .any(|t| t.id == created.id)
+        );
+    }
+
+    #[test]
+    fn progress_changes_are_recorded_once_per_day() {
+        let mut store = Store::open_in_memory().unwrap();
+        let today = Local::now().date_naive();
+        let task = store.create_task(new_task("track me")).unwrap();
+
+        for p in [20, 50, 70] {
+            store
+                .patch_task(
+                    task.id,
+                    TaskPatch {
+                        progress: Some(p),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+
+        let history = store.history(task.id).unwrap();
+        assert_eq!(history.len(), 1, "three edits on one day collapse to one");
+        assert_eq!(
+            history[0],
+            (today, 70, Status::Todo),
+            "the day's final value"
+        );
+    }
+
+    #[test]
+    fn snapshot_at_reports_the_state_of_that_day() {
+        let mut store = Store::open_in_memory().unwrap();
+        let today = Local::now().date_naive();
+        let yesterday = today.pred_opt().unwrap();
+        let task = store.create_task(new_task("in flight")).unwrap();
+        store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    progress: Some(60),
+                    status: Some(Status::Doing),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let now = store.snapshot_at(today).unwrap();
+        assert_eq!(now.tasks[0].progress, 60);
+        assert_eq!(now.tasks[0].status, Status::Doing);
+
+        // Yesterday the work hadn't been recorded yet, so it reads as
+        // untouched rather than inheriting today's number.
+        let before = store.snapshot_at(yesterday).unwrap();
+        assert!(
+            before.tasks.is_empty(),
+            "the task didn't exist yesterday either"
+        );
+    }
+
+    #[test]
+    fn a_done_task_logs_100_regardless_of_the_progress_field() {
+        let mut store = Store::open_in_memory().unwrap();
+        let task = store.create_task(new_task("finish")).unwrap();
+        store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    status: Some(Status::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let history = store.history(task.id).unwrap();
+        assert_eq!(history.last().unwrap().1, 100);
+    }
+
+    #[test]
+    fn history_survives_a_sync() {
+        let mut a = Store::open_in_memory().unwrap();
+        let mut b = Store::open_in_memory().unwrap();
+        let task = a.create_task(new_task("shared work")).unwrap();
+        a.patch_task(
+            task.id,
+            TaskPatch {
+                progress: Some(45),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        sync(&mut a, &mut b);
+
+        // The log rides the ordinary entry sync — no extra transport.
+        assert_eq!(b.history(task.id).unwrap(), a.history(task.id).unwrap());
+        assert_eq!(b.history(task.id).unwrap().len(), 1);
     }
 
     // ---- replication ----------------------------------------------

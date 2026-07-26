@@ -74,6 +74,14 @@ pub struct Task {
     pub duration_days: i64,
     #[serde(default)]
     pub due: Option<NaiveDate>,
+    /// When work actually began. Set automatically the first time the
+    /// task moves off `todo`, and editable afterwards — the plan is
+    /// what you intend, this is what happened.
+    #[serde(default)]
+    pub actual_start: Option<NaiveDate>,
+    /// When work actually finished. Set automatically on `done`.
+    #[serde(default)]
+    pub actual_end: Option<NaiveDate>,
     /// 0..=100.
     #[serde(default)]
     pub progress: i64,
@@ -106,6 +114,10 @@ pub struct NewTask {
     #[serde(default)]
     pub due: Option<NaiveDate>,
     #[serde(default)]
+    pub actual_start: Option<NaiveDate>,
+    #[serde(default)]
+    pub actual_end: Option<NaiveDate>,
+    #[serde(default)]
     pub progress: i64,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -137,6 +149,10 @@ pub struct TaskPatch {
     pub duration_days: Option<i64>,
     #[serde(default, deserialize_with = "double_option")]
     pub due: Option<Option<NaiveDate>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub actual_start: Option<Option<NaiveDate>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub actual_end: Option<Option<NaiveDate>>,
     #[serde(default)]
     pub progress: Option<i64>,
     #[serde(default)]

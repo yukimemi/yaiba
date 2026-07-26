@@ -64,7 +64,9 @@ async function peersRequest(init?: RequestInit): Promise<PeersInfo> {
 }
 
 export const api = {
-  getState: () => request("/api/state"),
+  /** Pass a date to see the plan as it stood then. */
+  getState: (asof?: string | null) =>
+    request(asof ? `/api/state?asof=${asof}` : "/api/state"),
   createTask: (task: NewTask) => request("/api/tasks", json("POST", task)),
   patchTask: (id: string, patch: TaskPatch) =>
     request(`/api/tasks/${id}`, json("PATCH", patch)),
