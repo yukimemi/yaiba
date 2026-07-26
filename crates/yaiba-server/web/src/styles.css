@@ -1148,3 +1148,127 @@ body::after {
   outline: 1px solid var(--edge);
   outline-offset: 1px;
 }
+
+/* ---- project palette --------------------------------------------- */
+
+/* Cyan throughout: the palette is structure and focus, and magenta is
+   reserved for the critical path. Every shadow is scaled by --glow so
+   office mode drops the lot rather than staying lit. */
+
+.palette {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: start center;
+  padding-top: 12vh;
+  background: rgba(5, 7, 13, 0.7);
+  backdrop-filter: blur(2px);
+}
+
+.palette__panel {
+  width: min(720px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, calc(0.12 * var(--glow))),
+    0 20px 70px rgba(0, 0, 0, calc(0.7 * var(--glow)));
+}
+
+.palette__prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--grid-strong);
+}
+
+.palette__sigil {
+  flex: none;
+  color: var(--edge);
+  font-weight: 700;
+}
+
+.palette__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font: inherit;
+}
+
+.palette__input::placeholder {
+  color: var(--ash-dim);
+}
+
+.palette__count {
+  flex: none;
+  color: var(--ash-dim);
+}
+
+.palette__list {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.palette__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+/* A left bar rather than a fill: the row keeps its contrast, and the
+   marker reads at a glance in both themes. */
+.palette__row.is-cursor {
+  background: var(--grid-strong);
+  box-shadow: inset 2px 0 0 var(--edge);
+}
+
+.palette__name {
+  flex: none;
+  min-width: 14ch;
+  color: var(--edge);
+}
+
+.palette__meta {
+  flex: none;
+  min-width: 7ch;
+  color: var(--ash);
+}
+
+.palette__peers {
+  flex: none;
+  min-width: 8ch;
+  color: var(--ash);
+}
+
+/* The path is the disambiguator, so it yields first when space runs
+   out — the name and the peer count never do. */
+.palette__db {
+  flex: 1;
+  min-width: 0;
+  color: var(--ash-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.palette__empty {
+  padding: 3px 12px;
+  color: var(--ash-dim);
+}
+
+.palette__foot {
+  padding: 6px 12px;
+  border-top: 1px solid var(--grid-strong);
+  color: var(--ash-dim);
+}

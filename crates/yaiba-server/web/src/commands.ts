@@ -47,6 +47,8 @@ export interface CommandResult {
   ui?: UiPatch;
   /** Peer-to-peer actions the app performs against /api/peers. */
   peer?: { join?: string; showTicket?: boolean };
+  /** Project actions the app performs against /api/projects. */
+  project?: { switch?: string; pick?: boolean };
 }
 
 // ---- the command table, for <tab> completion ---------------------
@@ -58,6 +60,8 @@ export interface CommandResult {
 
 export interface ArgContext {
   data: AppData;
+  /** Names of the projects the server holds open, for `:proj`. */
+  projects: string[];
 }
 
 export interface CommandSpec {
@@ -160,6 +164,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "parent" },
   { name: "ticket", aliases: ["share"] },
   { name: "join" },
+  { name: "proj", aliases: ["project"], args: first((ctx) => ctx.projects) },
 ];
 
 /** Apply the same patch to every selected row, with its inverse. */
@@ -461,6 +466,13 @@ export function runCommand(
       if (!arg) return { error: "usage: :join <ticket>" };
       return { peer: { join: arg } };
     }
+
+    // ---- projects ------------------------------------------------
+    case "proj":
+    case "project":
+      // No argument opens the picker, which is the usual way in: the
+      // list is short and filtering it beats recalling a name exactly.
+      return arg ? { project: { switch: arg } } : { project: { pick: true } };
 
     default:
       return { error: `not a command: ${head}  (try :help)` };

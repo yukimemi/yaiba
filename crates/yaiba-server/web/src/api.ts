@@ -63,6 +63,37 @@ async function peersRequest(init?: RequestInit): Promise<PeersInfo> {
   return (await res.json()) as PeersInfo;
 }
 
+export interface ProjectInfo {
+  name: string;
+  db: string;
+  /** Null when this replica runs with `--no-sync`. */
+  ticket: string | null;
+  peers: number;
+}
+
+export interface ProjectsInfo {
+  projects: ProjectInfo[];
+  active: string;
+}
+
+async function projectsRequest(init?: RequestInit): Promise<ProjectsInfo> {
+  const res = await fetch("/api/projects", {
+    ...init,
+    headers: init?.body ? { "content-type": "application/json" } : undefined,
+  });
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(message, res.status);
+  }
+  return (await res.json()) as ProjectsInfo;
+}
+
 export const api = {
   /** Pass a date to see the plan as it stood then. */
   getState: (asof?: string | null) =>
@@ -83,4 +114,13 @@ export const api = {
   /** Adopt a peer's ticket; the server syncs before answering. */
   joinPeer: (ticket: string) =>
     peersRequest({ method: "POST", body: JSON.stringify({ ticket }) }),
+  getProjects: () => projectsRequest(),
+  /**
+   * Point the server at another open project.
+   *
+   * Only a change of view — every open project is already replicating,
+   * so there is nothing to start and nothing to wait for.
+   */
+  switchProject: (name: string) =>
+    projectsRequest({ method: "POST", body: JSON.stringify({ name }) }),
 };
