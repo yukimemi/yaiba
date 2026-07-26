@@ -164,6 +164,11 @@ are scheduled from dependencies; summaries follow.
 Commands take dates the way you'd say them: `:due tom`, `:due mon`,
 `:due +3d`, `:due 8/14`. Filters compose: `:f tag:dev open crit`.
 
+`tab` completes on the `:` line, wildmenu and all: the command name
+first, then that command's own vocabulary — `:sort` its keys, `:tag` the
+tags already in use, `:due` the words above. `shift-tab` walks back, and
+either one past the end of the list returns what you had typed.
+
 ## Plan vs actual, and the progress line
 
 Every task carries both sides. The plan is `start` + `duration`; the

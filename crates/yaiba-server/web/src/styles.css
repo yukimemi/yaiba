@@ -906,6 +906,8 @@ body::after {
 /* ---- status line ------------------------------------------------- */
 
 .status {
+  /* The anchor for the wildmenu, which stands above the line. */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -963,6 +965,49 @@ body::after {
   color: var(--edge);
   min-width: 4ch;
   text-align: right;
+}
+
+/* ---- wildmenu ---------------------------------------------------- */
+
+.wildmenu {
+  position: absolute;
+  /* Sits on top of the status line's own border, so the menu and the
+     line it completes read as one block. */
+  bottom: 100%;
+  /* The containing block is the status line's padding box, so 0 already
+     lines the menu up with the `:` prompt below it. */
+  left: 0;
+  z-index: 40;
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  width: max-content;
+  max-width: 100%;
+  /* Eight rows, then it scrolls — the cycle stays reachable by <tab>
+     either way, so a longer list buys nothing but a covered plan. */
+  max-height: calc(var(--row-h) * 8);
+  overflow-y: auto;
+  /* The candidates never wrap, and `width: max-content` already sizes
+     to the longest one — without this the vertical bar's own width is
+     enough to raise a horizontal one over nothing. */
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--grid-strong) transparent;
+  background: var(--panel);
+  border: 1px solid var(--grid-strong);
+  box-shadow:
+    0 0 calc(14px * var(--glow)) rgba(34, 211, 238, 0.14),
+    0 -8px 24px rgba(0, 0, 0, calc(0.55 * var(--glow)));
+}
+
+.wildmenu__item {
+  padding: 0 10px;
+  color: var(--ash);
+}
+
+.wildmenu__item--on {
+  background: var(--edge);
+  color: var(--void);
 }
 
 /* ---- help -------------------------------------------------------- */

@@ -1,3 +1,6 @@
+import { useEffect, useRef } from "react";
+
+import type { Completion } from "../completion";
 import type { Mode } from "../mode";
 
 export interface Message {
@@ -13,6 +16,7 @@ interface Props {
   message: Message | null;
   pending: string;
   hint: string;
+  completion: Completion | null;
 }
 
 export function StatusLine({
@@ -23,6 +27,7 @@ export function StatusLine({
   message,
   pending,
   hint,
+  completion,
 }: Props) {
   const typing = mode === "command" || mode === "search";
 
@@ -30,6 +35,7 @@ export function StatusLine({
     <footer className="status">
       {typing ? (
         <span className="status__cmd">
+          {completion && <Wildmenu completion={completion} />}
           <span className="status__prompt">{mode === "command" ? ":" : "/"}</span>
           <input
             className="status__input"
@@ -59,5 +65,33 @@ export function StatusLine({
       )}
       <span className="status__pending">{pending}</span>
     </footer>
+  );
+}
+
+/** Vim's wildmenu: the matches, stacked above the line you are typing. */
+function Wildmenu({ completion }: { completion: Completion }) {
+  const selected = useRef<HTMLLIElement>(null);
+
+  // The list scrolls once it is taller than the panel, and cycling past
+  // the bottom has to bring the selection back into view with it.
+  useEffect(() => {
+    selected.current?.scrollIntoView({ block: "nearest" });
+  }, [completion.index]);
+
+  return (
+    <ul className="wildmenu">
+      {completion.items.map((item, i) => {
+        const on = i === completion.index;
+        return (
+          <li
+            key={item}
+            ref={on ? selected : undefined}
+            className={`wildmenu__item${on ? " wildmenu__item--on" : ""}`}
+          >
+            {item}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

@@ -132,7 +132,8 @@ export function Help({ onClose }: Props) {
         </div>
         <p className="help__foot">
           Edits save as they happen. Dates accept today / tom / mon / +3d /
-          8-14. Press ? or esc to close.
+          8-14. On the : line, tab completes and s-tab walks back. Press ? or
+          esc to close.
         </p>
       </div>
     </div>
