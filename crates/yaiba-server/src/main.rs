@@ -74,6 +74,14 @@ struct Cli {
     #[arg(long, global = true)]
     no_sync: bool,
 
+    /// Open only the project asked for, not every registered one.
+    ///
+    /// Opening them all is what makes `:proj` switching instant and keeps
+    /// every project replicating. This is the way out if that costs more
+    /// than it is worth — a long registry, a slow disk, a metered link.
+    #[arg(long, global = true)]
+    only_active: bool,
+
     /// Sync through relays only, binding no UDP socket to do it.
     ///
     /// For a machine without administrator rights: the normal endpoint
@@ -225,7 +233,7 @@ async fn main() -> Result<()> {
     // A registry failure is only fatal for the commands that need one —
     // `yaiba --db <path>` has to keep working on a machine where the
     // platform data directory can't be resolved at all.
-    let registry = load_registry();
+    let mut registry = load_registry();
     let target = resolve_target(&cli, &registry)?;
 
     let store = Store::open(&target.db)
@@ -237,44 +245,96 @@ async fn main() -> Result<()> {
     // cost the user the name they just chose — otherwise `yaiba join`
     // against an offline peer leaves an unnamed database behind and the
     // next attempt silently reuses it.
-    let project = remember(registry, &target);
+    let active_name = remember(&mut registry, &target).unwrap_or_else(|| "yaiba".to_string());
 
-    let mut state = api::AppState::new(store);
+    // The active project is first, so it is the one `AppState` starts on.
+    let mut projects = vec![api::OpenProject::new(
+        active_name.clone(),
+        target.db.clone(),
+        store,
+    )];
+    projects.extend(open_others(
+        registry.as_ref().ok(),
+        &target.db,
+        cli.only_active,
+    ));
 
-    // Peer-to-peer replication. Bound before the HTTP listener so the
-    // ticket is on screen by the time the UI opens.
-    let relay_only = cli.relay_only();
+    // Peer-to-peer replication, for *every* open project rather than only
+    // the one on screen — that is what makes switching instant instead of
+    // a reconnect. Bound before the HTTP listener so the ticket is up by
+    // the time the UI opens.
     let mut ticket = None;
     if !cli.no_sync {
-        let transport = if relay_only {
+        let transport = if cli.relay_only() {
             Transport::RelayOnly
         } else {
             Transport::Direct
         };
-        let sync = yaiba_sync::SyncNode::start_with(Arc::clone(&state.store), transport)
-            .await
-            .context("failed to start the peer-to-peer sync endpoint")?;
-        if let Some(peer) = &target.peer {
-            sync.join(peer.ticket())
-                .context("could not join the peer from that ticket")?;
-            // Pull immediately: joining should show their tasks now, not
-            // after the first idle tick. Bounded, because a peer that is
-            // simply switched off would otherwise hold the whole startup
-            // — including the UI — for as long as iroh keeps dialling. The
-            // background driver retries on its own timer, so a slow first
-            // handshake costs a delay, never the data.
-            if tokio::time::timeout(FIRST_SYNC, sync.sync_all())
-                .await
-                .is_err()
-            {
-                tracing::warn!(
-                    "the peer hasn't answered yet — continuing, and retrying in the background"
-                );
+        // Started concurrently: each endpoint spends most of its setup
+        // waiting on a relay handshake, so doing them in sequence would
+        // make startup scale with the number of projects.
+        let starting: Vec<_> = projects
+            .iter()
+            .map(|project| {
+                let store = Arc::clone(&project.store);
+                tokio::spawn(
+                    async move { yaiba_sync::SyncNode::start_with(store, transport).await },
+                )
+            })
+            .collect();
+
+        for (index, (project, handle)) in projects.iter_mut().zip(starting).enumerate() {
+            let started = match handle.await {
+                Ok(result) => result,
+                Err(e) => Err(anyhow!("the endpoint task did not finish: {e}")),
+            };
+            match started {
+                Ok(sync) => project.sync = Some(sync),
+                // Index 0 is the project being opened. Only its endpoint is
+                // worth failing the launch over — a background project that
+                // cannot replicate is still perfectly usable locally, and
+                // refusing to start over one would make a stale registry
+                // entry able to lock you out of yaiba entirely.
+                Err(e) if index == 0 => {
+                    return Err(e).context("failed to start the peer-to-peer sync endpoint");
+                }
+                Err(e) => tracing::warn!(
+                    project = %project.name,
+                    "could not start replication, continuing without it: {e:#}"
+                ),
             }
         }
-        ticket = Some(sync.ticket().to_string());
-        tokio::spawn(Arc::clone(&sync).run(Arc::clone(&state.notify)));
-        state.sync = Some(sync);
+
+        if let Some(sync) = &projects[0].sync {
+            if let Some(peer) = &target.peer {
+                sync.join(peer.ticket())
+                    .context("could not join the peer from that ticket")?;
+                // Pull immediately: joining should show their tasks now,
+                // not after the first idle tick. Bounded, because a peer
+                // that is simply switched off would otherwise hold the
+                // whole startup — including the UI — for as long as iroh
+                // keeps dialling. The background driver retries on its own
+                // timer, so a slow first handshake costs a delay, never the
+                // data.
+                if tokio::time::timeout(FIRST_SYNC, sync.sync_all())
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(
+                        "the peer hasn't answered yet — continuing, and retrying in the background"
+                    );
+                }
+            }
+            ticket = Some(sync.ticket().to_string());
+        }
+    }
+
+    let open_count = projects.len();
+    let state = api::AppState::with_projects(projects);
+    for project in state.projects() {
+        if let Some(sync) = &project.sync {
+            tokio::spawn(Arc::clone(sync).run(Arc::clone(&project.notify)));
+        }
     }
 
     let router = app(state);
@@ -285,7 +345,8 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| {
         format!(
             "failed to bind {addr} — is yaiba already running? \
-             A second project needs its own --port."
+             One yaiba serves every project, so a second one is only needed \
+             for a second port."
         )
     })?;
 
@@ -301,10 +362,11 @@ async fn main() -> Result<()> {
     banner(
         &url,
         &target.db,
-        project.as_deref(),
+        Some(active_name.as_str()),
+        open_count,
         node_id,
         ticket.as_deref(),
-        relay_only,
+        cli.relay_only(),
     );
     if !cli.no_open {
         open_browser(&url);
@@ -493,10 +555,59 @@ fn registry_ref(registry: &Result<Registry>) -> Result<&Registry> {
         .map_err(|e| anyhow!("could not read the project registry: {e:#}"))
 }
 
+/// Open every *other* registered project, so all of them replicate and
+/// switching between them is instant.
+///
+/// A registry entry whose database has gone is skipped with a warning
+/// rather than failing the launch: the registry is an index, and a stale
+/// line in it must not stop yaiba starting. Same for one that won't open —
+/// only the active project is worth refusing to start over.
+fn open_others(
+    registry: Option<&Registry>,
+    active_db: &std::path::Path,
+    only_active: bool,
+) -> Vec<api::OpenProject> {
+    let mut opened = Vec::new();
+    if only_active {
+        return opened;
+    }
+    let Some(registry) = registry else {
+        return opened;
+    };
+    for project in registry.recent() {
+        if projects::same_db(&project.db, active_db) {
+            continue;
+        }
+        if !project.db.exists() {
+            tracing::warn!(
+                project = %project.name,
+                path = %project.db.display(),
+                "registered database is missing; skipping (`yaiba forget` to drop it)"
+            );
+            continue;
+        }
+        match Store::open(&project.db) {
+            Ok(store) => opened.push(api::OpenProject::new(
+                project.name.clone(),
+                project.db.clone(),
+                store,
+            )),
+            Err(e) => tracing::warn!(
+                project = %project.name,
+                "could not open, skipping: {e:#}"
+            ),
+        }
+    }
+    opened
+}
+
 /// File the open database in the registry. Best-effort on purpose: a
 /// registry that can't be written costs a name, not a session.
-fn remember(registry: Result<Registry>, target: &Target) -> Option<String> {
-    let mut registry = match registry {
+///
+/// Takes `&mut` rather than consuming: the caller still needs the registry
+/// afterwards to know which *other* projects to open.
+fn remember(registry: &mut Result<Registry>, target: &Target) -> Option<String> {
+    let registry = match registry {
         Ok(registry) => registry,
         Err(e) => {
             tracing::warn!("project registry unavailable: {e:#}");
@@ -587,6 +698,7 @@ fn banner(
     url: &str,
     db_path: &std::path::Path,
     project: Option<&str>,
+    open_count: usize,
     node_id: yaiba_core::NodeId,
     ticket: Option<&str>,
     relay_only: bool,
@@ -614,7 +726,24 @@ fn banner(
 "#,
         db = db_path.display(),
         project = match project {
-            Some(name) => format!("  {CYAN}▸{RESET} pj   {MAGENTA}{name}{RESET}\n"),
+            Some(name) => format!(
+                "  {CYAN}▸{RESET} pj   {MAGENTA}{name}{RESET}{others}\n",
+                // Say how many others are live, so the background
+                // replication isn't invisible. Only claim they are syncing
+                // when they are: under --no-sync nothing is.
+                others = match open_count {
+                    0 | 1 => String::new(),
+                    n => format!(
+                        "{DIM}  +{} more open{} · :proj{RESET}",
+                        n - 1,
+                        if ticket.is_some() {
+                            ", all syncing"
+                        } else {
+                            ""
+                        }
+                    ),
+                }
+            ),
             None => String::new(),
         },
         peering = match ticket {

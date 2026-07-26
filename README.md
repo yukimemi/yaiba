@@ -287,8 +287,16 @@ self-contained yaiba on a synced folder or a stick.
 Losing the index costs names and ordering, never tasks: every database
 still opens with `yaiba --db <path>`, registered or not.
 
-**One port per project.** Two open at once are two processes, so the
-second needs its own `--port`.
+**One yaiba holds them all.** Starting it opens every registered project,
+not only the one you asked for, and each one replicates on its own —
+so a project is up to date when you turn to it, rather than starting to
+catch up at that moment. `/api/projects` lists what is open and switches
+between them; there is no second process and no second port.
+
+A registry entry whose database has gone is skipped with a warning rather
+than stopping the launch. If opening everything costs more than it is
+worth — a long registry, a slow disk, a metered link — `--only-active`
+opens just the one project.
 
 ### `--join` is not `join`
 

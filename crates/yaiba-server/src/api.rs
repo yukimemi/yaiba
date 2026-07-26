@@ -7,6 +7,8 @@
 //! in the background, a partial response would be stale the moment it
 //! was built anyway.
 
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::Json;
@@ -19,8 +21,15 @@ use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use yaiba_core::{Dep, Error, NewTask, NodeId, Schedule, Store, Task, TaskId, TaskPatch, schedule};
 
-#[derive(Clone)]
-pub struct AppState {
+/// One project the server has open: its database, its change signal, and
+/// its replication.
+///
+/// Every open project replicates, not just the one being looked at — that
+/// is the point of holding them all. Switching is then only a change of
+/// view, with nothing to catch up on.
+pub struct OpenProject {
+    pub name: String,
+    pub db: PathBuf,
     pub store: Arc<Mutex<Store>>,
     /// Bumped after every local write so the sync layer knows to push.
     ///
@@ -34,14 +43,83 @@ pub struct AppState {
     pub sync: Option<Arc<yaiba_sync::SyncNode>>,
 }
 
-impl AppState {
-    pub fn new(store: Store) -> Self {
+impl OpenProject {
+    pub fn new(name: impl Into<String>, db: PathBuf, store: Store) -> Self {
         Self {
+            name: name.into(),
+            db,
             store: Arc::new(Mutex::new(store)),
             notify: Arc::new(tokio::sync::Notify::new()),
             sync: None,
         }
     }
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    /// Fixed after construction, so an index into it stays valid.
+    projects: Arc<Vec<OpenProject>>,
+    /// Index of the project being looked at. An index rather than a name
+    /// so that reading it — which every handler does — is a load rather
+    /// than a lock or a map lookup.
+    active: Arc<AtomicUsize>,
+}
+
+impl AppState {
+    /// A server holding one unnamed project. Used by the smoke test and
+    /// anything else that just wants a store behind the HTTP surface.
+    pub fn new(store: Store) -> Self {
+        Self::with_projects(vec![OpenProject::new(
+            projects_default_name(),
+            PathBuf::new(),
+            store,
+        )])
+    }
+
+    /// # Panics
+    /// If `projects` is empty. A server with nothing open has no state to
+    /// serve and no meaningful answer for any endpoint, so this is a
+    /// construction bug rather than a runtime condition.
+    pub fn with_projects(projects: Vec<OpenProject>) -> Self {
+        assert!(
+            !projects.is_empty(),
+            "a server needs at least one open project"
+        );
+        Self {
+            projects: Arc::new(projects),
+            active: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Point the server at a different open project. `false` if no project
+    /// goes by that name.
+    pub fn switch(&self, name: &str) -> bool {
+        match self.projects.iter().position(|p| p.name == name) {
+            Some(index) => {
+                self.active.store(index, Ordering::SeqCst);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn active(&self) -> &OpenProject {
+        // The index only ever comes from `position` on this same vector,
+        // which is fixed at construction, so it cannot be out of range.
+        &self.projects[self.active.load(Ordering::SeqCst)]
+    }
+
+    pub fn projects(&self) -> &[OpenProject] {
+        &self.projects
+    }
+
+    pub fn store(&self) -> &Arc<Mutex<Store>> {
+        &self.active().store
+    }
+}
+
+fn projects_default_name() -> String {
+    "default".to_string()
 }
 
 /// Everything the client needs to render, in one payload.
@@ -86,7 +164,66 @@ pub fn router(state: AppState) -> Router {
         .route("/api/deps", post(add_dep))
         .route("/api/deps/{from}/{to}", axum::routing::delete(remove_dep))
         .route("/api/peers", get(get_peers).post(join_peer))
+        .route("/api/projects", get(get_projects).post(switch_project))
         .with_state(state)
+}
+
+#[derive(Serialize)]
+pub struct ProjectSummary {
+    name: String,
+    db: String,
+    /// Hand this to someone to bring them into *this* project. `None`
+    /// under `--no-sync`.
+    ticket: Option<String>,
+    peers: usize,
+}
+
+#[derive(Serialize)]
+pub struct ProjectsResponse {
+    projects: Vec<ProjectSummary>,
+    active: String,
+}
+
+fn projects_response(state: &AppState) -> ProjectsResponse {
+    ProjectsResponse {
+        active: state.active().name.clone(),
+        projects: state
+            .projects()
+            .iter()
+            .map(|p| ProjectSummary {
+                name: p.name.clone(),
+                db: p.db.display().to_string(),
+                ticket: p.sync.as_ref().map(|s| s.ticket().to_string()),
+                peers: p.sync.as_ref().map_or(0, |s| s.peer_ids().len()),
+            })
+            .collect(),
+    }
+}
+
+async fn get_projects(State(state): State<AppState>) -> Json<ProjectsResponse> {
+    Json(projects_response(&state))
+}
+
+#[derive(Deserialize)]
+struct SwitchRequest {
+    name: String,
+}
+
+/// Change which open project the UI is looking at.
+///
+/// Only a change of view: every project was already replicating, so there
+/// is nothing to start up and nothing to wait for.
+async fn switch_project(
+    State(state): State<AppState>,
+    Json(req): Json<SwitchRequest>,
+) -> ApiResult<Json<ProjectsResponse>> {
+    if !state.switch(&req.name) {
+        return Err(ApiError::message(
+            StatusCode::NOT_FOUND,
+            format!("no open project named {:?}", req.name),
+        ));
+    }
+    Ok(Json(projects_response(&state)))
 }
 
 #[derive(Serialize)]
@@ -98,7 +235,7 @@ pub struct PeersResponse {
 }
 
 async fn get_peers(State(state): State<AppState>) -> Json<PeersResponse> {
-    let Some(sync) = &state.sync else {
+    let Some(sync) = &state.active().sync else {
         return Json(PeersResponse {
             ticket: None,
             peers: Vec::new(),
@@ -121,7 +258,7 @@ async fn join_peer(
     State(state): State<AppState>,
     Json(req): Json<JoinRequest>,
 ) -> std::result::Result<Json<PeersResponse>, ApiError> {
-    let Some(sync) = state.sync.clone() else {
+    let Some(sync) = state.active().sync.clone() else {
         return Err(ApiError::message(
             StatusCode::CONFLICT,
             "this replica was started with --no-sync",
@@ -186,7 +323,7 @@ async fn create_task(
         store.create_task(new)?;
         respond(&store)
     };
-    state.notify.notify_one();
+    state.active().notify.notify_one();
     response
 }
 
@@ -200,7 +337,7 @@ async fn patch_task(
         store.patch_task(id, patch)?;
         respond(&store)
     };
-    state.notify.notify_one();
+    state.active().notify.notify_one();
     response
 }
 
@@ -222,7 +359,7 @@ async fn put_task(
         store.put_task(&task)?;
         respond(&store)
     };
-    state.notify.notify_one();
+    state.active().notify.notify_one();
     response
 }
 
@@ -235,7 +372,7 @@ async fn delete_task(
         store.delete_task(id)?;
         respond(&store)
     };
-    state.notify.notify_one();
+    state.active().notify.notify_one();
     response
 }
 
@@ -253,7 +390,7 @@ async fn reorder(
         store.reorder(&req.ids)?;
         respond(&store)
     };
-    state.notify.notify_one();
+    state.active().notify.notify_one();
     response
 }
 
@@ -266,7 +403,7 @@ async fn add_dep(
         store.add_dep(dep.from, dep.to)?;
         respond(&store)
     };
-    state.notify.notify_one();
+    state.active().notify.notify_one();
     response
 }
 
@@ -279,7 +416,7 @@ async fn remove_dep(
         store.remove_dep(from, to)?;
         respond(&store)
     };
-    state.notify.notify_one();
+    state.active().notify.notify_one();
     response
 }
 
@@ -287,7 +424,7 @@ async fn remove_dep(
 /// SQLite rolled that transaction back, so the data is still consistent
 /// and carrying on beats taking the whole process down.
 fn lock(state: &AppState) -> std::sync::MutexGuard<'_, Store> {
-    state.store.lock().unwrap_or_else(|e| e.into_inner())
+    state.store().lock().unwrap_or_else(|e| e.into_inner())
 }
 
 pub enum ApiError {
@@ -332,5 +469,69 @@ impl IntoResponse for ApiError {
             tracing::error!(error = %text, "request failed");
         }
         (status, Json(serde_json::json!({ "error": text }))).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project(name: &str) -> OpenProject {
+        OpenProject::new(
+            name,
+            PathBuf::from(format!("{name}.db")),
+            Store::open_in_memory().unwrap(),
+        )
+    }
+
+    #[test]
+    fn the_first_project_is_the_one_being_looked_at() {
+        // main puts the project that was asked for at index 0, so this is
+        // what makes `yaiba open work` land on `work` rather than on
+        // whichever project happened to sort first.
+        let state = AppState::with_projects(vec![project("work"), project("default")]);
+        assert_eq!(state.active().name, "work");
+    }
+
+    #[test]
+    fn switching_changes_which_store_is_served() {
+        let state = AppState::with_projects(vec![project("work"), project("default")]);
+        let before = Arc::as_ptr(state.store());
+
+        assert!(state.switch("default"));
+        assert_eq!(state.active().name, "default");
+        assert_ne!(
+            Arc::as_ptr(state.store()),
+            before,
+            "the handlers must reach a different database after a switch"
+        );
+
+        assert!(state.switch("work"));
+        assert_eq!(Arc::as_ptr(state.store()), before);
+    }
+
+    #[test]
+    fn switching_to_a_project_that_is_not_open_leaves_the_active_one_alone() {
+        let state = AppState::with_projects(vec![project("work"), project("default")]);
+        assert!(!state.switch("nope"));
+        assert_eq!(state.active().name, "work");
+    }
+
+    /// `AppState` is cloned per request by axum, and every clone has to
+    /// see the same selection — otherwise a switch would apply to the one
+    /// request that made it and nothing else.
+    #[test]
+    fn a_switch_is_visible_to_every_clone() {
+        let state = AppState::with_projects(vec![project("work"), project("default")]);
+        let clone = state.clone();
+        assert!(clone.switch("default"));
+        assert_eq!(state.active().name, "default");
+    }
+
+    #[test]
+    fn a_single_project_server_still_works() {
+        let state = AppState::new(Store::open_in_memory().unwrap());
+        assert_eq!(state.projects().len(), 1);
+        assert!(state.active().sync.is_none());
     }
 }

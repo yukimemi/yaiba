@@ -370,6 +370,24 @@ replica. Two projects stay apart only by living in different databases —
 adding a `project` column would not change that, because the sync
 protocol would still ship every row of it.
 
+- **One process holds every project, each with its own `SyncNode`.**
+  Identity lives in the database (`sync_secret_key`), so N projects means
+  N endpoints — which is exactly what N processes did before, so no
+  ticket changed and no migration was needed. The tempting alternative
+  (one endpoint per machine, rooms telling projects apart) saves a socket
+  and costs every non-default ticket, because the endpoint id is derived
+  from the secret being discarded. Don't reach for it without a reason
+  worth that.
+- **`AppState` serves the active project through `store()`, never a
+  field.** The projects vector is fixed at construction so an index into
+  it stays valid, and the index is atomic so a switch is visible to every
+  cloned `AppState` — axum hands each request its own clone, and a switch
+  that only applied to the request that made it would be no switch at all.
+  Index 0 is the project that was asked for.
+- **Only the active project's failures are fatal.** A background project
+  that won't open, or whose endpoint won't bind, is warned about and
+  skipped. Otherwise one stale registry entry could lock you out of yaiba
+  entirely.
 - **The default database is adopted on sight, not on open.** Registration
   used to happen only when the server started, so everyone already using
   yaiba saw `yaiba list` report nothing and `yaiba open` raise an empty

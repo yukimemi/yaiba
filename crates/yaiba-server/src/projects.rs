@@ -451,6 +451,15 @@ fn normalize(path: &Path) -> PathBuf {
 
 /// Whether two paths name the same database file.
 ///
+/// Exposed because opening every project has to recognise that the active
+/// database and a registry entry are the same file — otherwise it opens
+/// SQLite twice over one path and replicates a project against itself.
+pub fn same_db(a: &Path, b: &Path) -> bool {
+    same_path(a, b)
+}
+
+/// Whether two paths name the same database file.
+///
 /// Windows paths are case-insensitive, so the same database reached as
 /// `C:\Users\…` and `c:\users\…` must not register twice.
 fn same_path(a: &Path, b: &Path) -> bool {
