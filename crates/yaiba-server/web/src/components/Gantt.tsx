@@ -518,6 +518,10 @@ export function Gantt({
  * (actual − planned) × its own duration: a task finished on time lands
  * exactly on the line, and so does one that has not started and is not
  * yet due to.
+ *
+ * The reading is taken at the *start* of the reference date. The day it
+ * is drawn on is still being worked, so nothing that happens during it
+ * can be owed yet.
  */
 function progressLinePoints(
   tasks: Task[],
@@ -534,13 +538,20 @@ function progressLinePoints(
     const top = index * ROW_H;
     const bottom = top + ROW_H;
     if (!sched) {
-      points.push(`${refX},${bottom}`);
+      // Both corners, not just the bottom one: a single point would draw
+      // a diagonal from the previous row's offset instead of stepping
+      // back to the reference date the way every other row does.
+      points.push(`${refX},${top}`, `${refX},${bottom}`);
       return;
     }
 
     const spanDays = Math.max(diffDays(sched.start, sched.end) + 1, 1);
-    // Where the plan says it should be by the reference date.
-    const elapsed = diffDays(sched.start, reference) + 1;
+    // Where the plan says it should be at the *start* of the reference
+    // date — days finished before it, not counting the day itself. Count
+    // the reference day as already spent and a task that starts today is
+    // owed its whole duration before anyone could have touched it, so
+    // every untouched task hangs a day behind the line from birth.
+    const elapsed = diffDays(sched.start, reference);
     const planned = Math.min(Math.max(elapsed / spanDays, 0), 1);
     const actual = (task.status === "done" ? 100 : sched.progress) / 100;
     // Scaled by the task's own duration, so a week of slippage on a
