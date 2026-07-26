@@ -86,7 +86,7 @@ const GROUPS: Group[] = [
     title: "PEERS",
     keys: [
       [":ticket", "copy this replica's invite"],
-      [":join ⟨t⟩", "sync with the peer that ticket names"],
+      [":join ⟨t⟩", "merge this project with that peer"],
     ],
   },
   {

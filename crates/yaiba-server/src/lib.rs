@@ -6,6 +6,7 @@
 //! guessing at its readiness.
 
 pub mod api;
+pub mod projects;
 pub mod updater;
 pub mod web;
 

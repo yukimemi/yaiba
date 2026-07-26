@@ -350,6 +350,42 @@ tab title — it has to survive a shared screen in a meeting.
   handle. `onMove` uses the same call, so the drop highlight and the
   commit can never disagree.
 
+### A project is a database file
+
+`projects.rs` is an *index*, not a scope. Nothing in `yaiba-core` or
+`yaiba-sync` knows what a project is: `entries_since` hands a peer the
+whole CRDT log, and `SyncNode::join` overwrites `sync_room_key` for the
+replica. Two projects stay apart only by living in different databases —
+adding a `project` column would not change that, because the sync
+protocol would still ship every row of it.
+
+- **Register before touching the network.** `main` files the project in
+  the registry *before* `SyncNode::start`. The first sync against an
+  offline peer blocked past that point and left an unnamed database on
+  disk with nothing in `projects.toml` pointing at it.
+- **The initial pull is bounded** (`FIRST_SYNC`). `SyncNode::run` retries
+  every 30s anyway, so a slow handshake costs a delay; awaiting it
+  unbounded cost the UI, because the listener is bound after it.
+- **Top-level flags are `global = true`.** Subcommands start the server
+  now, so `yaiba open work --port 9000` has to parse. Without `global`
+  clap rejects any flag written *after* a subcommand, and every flag
+  silently becomes prefix-only.
+- **A free name is not a free file.** `joined_db_path` runs the name
+  through `slug()`, so `work` and `work!` are one database — and joining
+  into an existing one overwrites its room key, which is the hazard the
+  subcommand exists to remove. `Command::Join` therefore checks
+  `find_by_db` and file existence, never just `find`.
+- **`same_path` folds `/` to `\` on Windows.** Both separate there, so a
+  byte comparison called `C:/x/a.db` and `C:\x\a.db` two databases. That
+  is reachable from one `YAIBA_DATA_DIR` typed two ways, and it silently
+  defeated the collision check above until a manual run caught it — the
+  unit tests all built their paths the same way, so they agreed with each
+  other and with the bug.
+- **`--join` and `join` are different things** and both are correct.
+  The flag merges the current replica into the peer's room (mutual, no
+  undo); the subcommand opens theirs as a separate project. `:join` in
+  the UI is the flag's behaviour — one server, one database.
+
 ### Invariants worth knowing before changing the graph
 
 - **Cycles are refused server-side.** `Store::add_dep` calls
