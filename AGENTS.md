@@ -370,6 +370,14 @@ replica. Two projects stay apart only by living in different databases —
 adding a `project` column would not change that, because the sync
 protocol would still ship every row of it.
 
+- **The default database is adopted on sight, not on open.** Registration
+  used to happen only when the server started, so everyone already using
+  yaiba saw `yaiba list` report nothing and `yaiba open` raise an empty
+  picker — with their tasks in `yaiba.db` the whole time. `load_registry`
+  seeds it on every entry point. `seed_default`'s inner `seed` takes the
+  path so tests never touch `YAIBA_DATA_DIR`: `std::env::set_var` is
+  `unsafe` in edition 2024, and the environment is shared across parallel
+  tests.
 - **Register before touching the network.** `main` files the project in
   the registry *before* `SyncNode::start`. The first sync against an
   offline peer blocked past that point and left an unnamed database on
