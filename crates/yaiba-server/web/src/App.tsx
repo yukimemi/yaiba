@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type PeersInfo } from "./api";
 import { runCommand, type UiPatch, type View, type Zoom } from "./commands";
+import {
+  completionLine,
+  startCompletion,
+  stepCompletion,
+  type Completion,
+} from "./completion";
 import { Gantt } from "./components/Gantt";
 import { Help } from "./components/Help";
 import { Hud } from "./components/Hud";
@@ -20,6 +26,9 @@ const REFRESH_MS = 3000;
 const PEERS_MS = 15000;
 const HALF_PAGE = 10;
 const STATUS_CYCLE: Status[] = ["todo", "doing", "done"];
+
+/** Held down rather than typed, so they never end a completion cycle. */
+const MODIFIERS = new Set(["Shift", "Control", "Alt", "Meta"]);
 
 /** Keys that only make sense as the first half of a two-key command. */
 const PREFIXES = new Set(["d", "y", "g", "z", "c", ">", "<"]);
@@ -48,6 +57,8 @@ export function App() {
   const [linkAnchor, setLinkAnchor] = useState<string | null>(null);
   const [pending, setPending] = useState("");
   const [cmdline, setCmdline] = useState("");
+  /** The open `<tab>` cycle, or null when nothing is being completed. */
+  const [completion, setCompletion] = useState<Completion | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(
     null,
@@ -875,6 +886,7 @@ export function App() {
         break;
       case ":":
         setCmdline("");
+        setCompletion(null);
         historyAt.current = history.current.length;
         enterMode("command");
         break;
@@ -1163,18 +1175,51 @@ export function App() {
 
   // ---- command line -----------------------------------------------
 
+  /**
+   * Open the `<tab>` cycle, or walk the open one. `step` is +1 for
+   * `<tab>` and -1 for `<s-tab>`; from a closed menu -1 opens it on the
+   * last match, which is what wrapping through "as typed" gives you.
+   */
+  const cycleCompletion = (step: number) => {
+    if (!data) return;
+    const from = completion ?? startCompletion(cmdline, { data });
+    if (!from) return;
+    const next = stepCompletion(from, step);
+    setCompletion(next);
+    setCmdline(completionLine(next));
+  };
+
   const onCmdKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     e.stopPropagation();
     if (e.key === "Escape") {
       e.preventDefault();
+      // The first esc only closes the menu — the line you were typing
+      // survives, and a second esc leaves the command line.
+      if (completion) {
+        setCompletion(null);
+        return;
+      }
       enterMode("normal");
       setCmdline("");
       setSearchTerm("");
       return;
     }
+    if (e.key === "Tab") {
+      // Search has nothing to complete, but tab still must not move
+      // focus out of the input and strand a half-typed search.
+      e.preventDefault();
+      if (mode === "command") cycleCompletion(e.shiftKey ? -1 : 1);
+      return;
+    }
     if (mode === "command" && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       e.preventDefault();
       const step = e.key === "ArrowUp" ? -1 : 1;
+      // With the menu up the arrows belong to it, the way they do in a
+      // popup; history is what they mean the rest of the time.
+      if (completion) {
+        cycleCompletion(step);
+        return;
+      }
       const next = Math.min(
         Math.max(historyAt.current + step, 0),
         history.current.length,
@@ -1183,10 +1228,17 @@ export function App() {
       setCmdline(history.current[next] ?? "");
       return;
     }
-    if (e.key !== "Enter") return;
+    if (e.key !== "Enter") {
+      // Anything else ends the cycle, the way it does in vim — except a
+      // bare modifier, since <s-tab> arrives as Shift and then Tab and
+      // closing on the Shift would restart the cycle forwards.
+      if (completion && !MODIFIERS.has(e.key)) setCompletion(null);
+      return;
+    }
     e.preventDefault();
     const line = cmdline;
     setCmdline("");
+    setCompletion(null);
     enterMode("normal");
 
     if (mode === "search") {
@@ -1355,9 +1407,13 @@ export function App() {
         cmdline={cmdline}
         onCmdChange={(value) => {
           setCmdline(value);
+          // Covers the edits no keydown announces — a mouse paste, an
+          // IME commit — which would otherwise leave a stale menu up.
+          setCompletion(null);
           if (mode === "search") setSearchTerm(value);
         }}
         onCmdKey={onCmdKey}
+        completion={completion}
         message={message}
         pending={pending}
         hint={MODE_HINT[mode]}

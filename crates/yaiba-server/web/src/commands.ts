@@ -7,6 +7,9 @@ import type { AppData, Task, TaskPatch } from "./types";
 export type View = "list" | "gantt" | "split";
 export type Zoom = "day" | "week" | "month";
 
+export const VIEWS: View[] = ["list", "gantt", "split"];
+export const ZOOMS: Zoom[] = ["day", "week", "month"];
+
 export interface UiPatch {
   view?: View;
   /** Show only this subtree; null clears the focus. */
@@ -45,6 +48,119 @@ export interface CommandResult {
   /** Peer-to-peer actions the app performs against /api/peers. */
   peer?: { join?: string; showTicket?: boolean };
 }
+
+// ---- the command table, for <tab> completion ---------------------
+//
+// This lists the same names the `switch` in `runCommand` dispatches on,
+// and nothing enforces that it stays in step: a `case` added below
+// without an entry here still runs, it just can't be completed, and an
+// entry here without a `case` completes into "not a command". Add both.
+
+export interface ArgContext {
+  data: AppData;
+}
+
+export interface CommandSpec {
+  /** What completion inserts — the long form wherever there is one. */
+  name: string;
+  /**
+   * Short forms `runCommand` also accepts. Typing one still finds the
+   * spec, but the menu only ever lists `name` — vim offers `:write`,
+   * not `:w`, and the abbreviation keeps working regardless.
+   */
+  aliases?: string[];
+  /** Candidates for the `n`-th argument (1-based); none by default. */
+  args?: (ctx: ArgContext, n: number) => string[];
+}
+
+/** Wrap a candidate list that only applies to the first argument. */
+function first(build: (ctx: ArgContext) => string[]) {
+  return (ctx: ArgContext, n: number) => (n === 1 ? build(ctx) : []);
+}
+
+/** Every tag in use, which is the only tag vocabulary there is. */
+function tagNames(ctx: ArgContext): string[] {
+  return [...new Set(ctx.data.tasks.flatMap((t) => t.tags))].sort();
+}
+
+/**
+ * The words `parseDateExpr` understands, minus the open-ended ones —
+ * `+3d` stands in for the whole relative family, and no completion can
+ * guess a calendar date for you.
+ */
+const DATE_WORDS = [
+  "today",
+  "tomorrow",
+  "yesterday",
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+  "+1d",
+  "+1w",
+  "+1m",
+  "none",
+];
+
+/** The fixed half of the filter grammar in `filter.ts`. */
+const FILTER_WORDS = [
+  "open",
+  "done",
+  "doing",
+  "crit",
+  "blocked",
+  "overdue",
+  "status:todo",
+  "status:doing",
+  "status:done",
+];
+
+export const COMMANDS: CommandSpec[] = [
+  { name: "write", aliases: ["w"] },
+  { name: "quit", aliases: ["q"] },
+  { name: "help", aliases: ["h"] },
+  { name: "list" },
+  { name: "gantt" },
+  { name: "split" },
+  { name: "view", args: first(() => VIEWS) },
+  { name: "zoom", args: first(() => ZOOMS) },
+  {
+    name: "filter",
+    aliases: ["f"],
+    // Every term ANDs with the last, so this one completes at any depth.
+    args: (ctx) => [...FILTER_WORDS, ...tagNames(ctx).map((t) => `tag:${t}`)],
+  },
+  { name: "sort", args: first(() => SORT_KEYS) },
+  { name: "new", aliases: ["n"] },
+  { name: "delete", aliases: ["d"] },
+  { name: "due", args: first(() => DATE_WORDS) },
+  { name: "start", args: first(() => DATE_WORDS) },
+  { name: "duration", aliases: ["dur"] },
+  { name: "priority", aliases: ["prio"], args: first(() => ["0", "1", "2", "3"]) },
+  { name: "progress", aliases: ["pr"] },
+  {
+    name: "tag",
+    // `+dev` and `-dev` both, so the sign you have already typed narrows
+    // the list to the half that can follow it.
+    args: (ctx) => tagNames(ctx).flatMap((t) => [`+${t}`, `-${t}`]),
+    aliases: ["t"],
+  },
+  { name: "notes", aliases: ["note"] },
+  { name: "dep", aliases: ["link"] },
+  { name: "undep", aliases: ["unlink"] },
+  { name: "theme", args: first(() => ["dark", "light"]) },
+  { name: "office" },
+  { name: "asof", aliases: ["as"], args: first(() => DATE_WORDS) },
+  { name: "only" },
+  { name: "all" },
+  { name: "level", aliases: ["lv"] },
+  { name: "parent" },
+  { name: "ticket", aliases: ["share"] },
+  { name: "join" },
+];
 
 /** Apply the same patch to every selected row, with its inverse. */
 function patchSelection(
@@ -106,14 +222,14 @@ export function runCommand(
     case "split":
       return { ui: { view: head as View } };
     case "view": {
-      if (!["list", "gantt", "split"].includes(arg)) {
-        return { error: "usage: :view list|gantt|split" };
+      if (!VIEWS.includes(arg as View)) {
+        return { error: `usage: :view ${VIEWS.join("|")}` };
       }
       return { ui: { view: arg as View } };
     }
     case "zoom": {
-      if (!["day", "week", "month"].includes(arg)) {
-        return { error: "usage: :zoom day|week|month" };
+      if (!ZOOMS.includes(arg as Zoom)) {
+        return { error: `usage: :zoom ${ZOOMS.join("|")}` };
       }
       return { ui: { zoom: arg as Zoom } };
     }
