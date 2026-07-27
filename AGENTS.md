@@ -539,9 +539,15 @@ it returns forever — is `SyncNode::start`, via iroh.
   `<enter>` does nothing — a state that looks interactive and isn't.
 - **Row actions render on the cursor row only.** On every row they are a
   wall of buttons, and `forget` becomes something a mis-click reaches.
-- **A verb needs a subject.** `:proj new` with nothing after it is a
-  *switch* to a project called `new`, not a create — otherwise a project
-  genuinely named `new` would be unreachable from the command line.
+- **A bare verb is decided by what exists, not by which verb it is.**
+  `:proj new` / `rename` / `forget` with nothing after them switch when a
+  project by that name is open — otherwise a project genuinely called
+  `new` is unreachable from the command line — and are a usage error when
+  none is, which is the likelier reading. `runCommand` takes the open
+  names for exactly this. The first version special-cased `rename` into
+  an unconditional usage error and left the other two falling through,
+  which broke this rule for one of the three; deciding it by existence is
+  what let reachability and a good message stop competing.
 
 ### Invariants worth knowing before changing the graph
 

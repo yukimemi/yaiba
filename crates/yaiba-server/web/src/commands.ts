@@ -35,6 +35,13 @@ export interface CommandContext {
   current: Task | null;
   /** Cursor row, or the visual selection when one is active. */
   selection: Task[];
+  /**
+   * Names of the projects the server holds open.
+   *
+   * `:proj` needs them to tell a *verb* from a project called `new`,
+   * `rename` or `forget` — see the bare-verb handling below.
+   */
+  projects: string[];
 }
 
 export interface CommandResult {
@@ -481,16 +488,24 @@ export function runCommand(
       if (!arg) return { project: { pick: true } };
       const [verb, ...rest] = arg.split(/\s+/);
       const subject = rest.join(" ").trim();
-      // A verb only counts as one when something follows it, so a project
-      // genuinely called `new` is still reachable with `:proj new`.
-      if (subject) {
+      const isVerb = ["new", "forget", "rename"].includes(verb);
+      if (isVerb && subject) {
         if (verb === "new") return { project: { create: subject } };
         if (verb === "forget") return { project: { forget: subject } };
-        if (verb === "rename") return { project: { rename: subject } };
+        return { project: { rename: subject } };
       }
-      if (verb === "rename") {
+      // A bare verb is a *switch* when a project by that name is open, so
+      // one genuinely called `new` stays reachable — and a usage error
+      // when none is, which is the far likelier reading of `:proj rename`
+      // with nothing after it. Deciding it by what exists beats picking
+      // one meaning for all three: reachability and a good message were
+      // only in tension while this guessed.
+      if (isVerb && !ctx.projects.includes(verb)) {
         return {
-          error: "usage: :proj rename ⟨new name⟩  — renames the current project",
+          error:
+            verb === "rename"
+              ? "usage: :proj rename ⟨new name⟩ — renames the project you are on"
+              : `usage: :proj ${verb} ⟨name⟩`,
         };
       }
       return { project: { switch: arg } };

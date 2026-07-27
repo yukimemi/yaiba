@@ -1358,6 +1358,7 @@ export function App() {
       visible,
       current,
       selection,
+      projects: projects.projects.map((p) => p.name),
     });
     if (!result) return;
     if (result.error) {
