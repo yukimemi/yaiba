@@ -76,8 +76,11 @@ export interface ProjectsInfo {
   active: string;
 }
 
-async function projectsRequest(init?: RequestInit): Promise<ProjectsInfo> {
-  const res = await fetch("/api/projects", {
+async function projectsRequest(
+  init?: RequestInit,
+  path = "/api/projects",
+): Promise<ProjectsInfo> {
+  const res = await fetch(path, {
     ...init,
     headers: init?.body ? { "content-type": "application/json" } : undefined,
   });
@@ -123,4 +126,28 @@ export const api = {
    */
   switchProject: (name: string) =>
     projectsRequest({ method: "POST", body: JSON.stringify({ name }) }),
+  /**
+   * Start a project and open it, without restarting.
+   *
+   * The server applies the same rules `yaiba new` does, so a name that
+   * collides — outright or through the slug its database is named from —
+   * comes back as a 409 rather than quietly landing on someone's tasks.
+   */
+  createProject: (name: string) =>
+    projectsRequest(
+      { method: "POST", body: JSON.stringify({ name }) },
+      "/api/projects/new",
+    ),
+  /** Rename a project. Only the name moves; its database keeps its path. */
+  renameProject: (from: string, to: string) =>
+    projectsRequest(
+      { method: "PATCH", body: JSON.stringify({ to }) },
+      `/api/projects/${encodeURIComponent(from)}`,
+    ),
+  /** Close a project and drop it from the list. Its database stays. */
+  forgetProject: (name: string) =>
+    projectsRequest(
+      { method: "DELETE" },
+      `/api/projects/${encodeURIComponent(name)}`,
+    ),
 };

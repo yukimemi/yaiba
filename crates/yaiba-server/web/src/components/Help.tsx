@@ -92,8 +92,12 @@ const GROUPS: Group[] = [
   {
     title: "PROJECTS",
     keys: [
-      [":proj", "pick one — every open project is syncing"],
+      [":proj", "pick one — click the name in the bar too"],
       [":proj ⟨n⟩", "switch straight to it"],
+      [":proj new ⟨n⟩", "start one of your own"],
+      [":proj rename ⟨n⟩", "rename the current one"],
+      [":proj forget ⟨n⟩", "drop it from the list; database stays"],
+      ["^r / ^d", "in the picker: rename / forget"],
     ],
   },
   {

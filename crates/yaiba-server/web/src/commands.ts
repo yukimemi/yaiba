@@ -48,7 +48,13 @@ export interface CommandResult {
   /** Peer-to-peer actions the app performs against /api/peers. */
   peer?: { join?: string; showTicket?: boolean };
   /** Project actions the app performs against /api/projects. */
-  project?: { switch?: string; pick?: boolean };
+  project?: {
+    switch?: string;
+    pick?: boolean;
+    create?: string;
+    rename?: string;
+    forget?: string;
+  };
 }
 
 // ---- the command table, for <tab> completion ---------------------
@@ -469,10 +475,26 @@ export function runCommand(
 
     // ---- projects ------------------------------------------------
     case "proj":
-    case "project":
+    case "project": {
       // No argument opens the picker, which is the usual way in: the
       // list is short and filtering it beats recalling a name exactly.
-      return arg ? { project: { switch: arg } } : { project: { pick: true } };
+      if (!arg) return { project: { pick: true } };
+      const [verb, ...rest] = arg.split(/\s+/);
+      const subject = rest.join(" ").trim();
+      // A verb only counts as one when something follows it, so a project
+      // genuinely called `new` is still reachable with `:proj new`.
+      if (subject) {
+        if (verb === "new") return { project: { create: subject } };
+        if (verb === "forget") return { project: { forget: subject } };
+        if (verb === "rename") return { project: { rename: subject } };
+      }
+      if (verb === "rename") {
+        return {
+          error: "usage: :proj rename ⟨new name⟩  — renames the current project",
+        };
+      }
+      return { project: { switch: arg } };
+    }
 
     default:
       return { error: `not a command: ${head}  (try :help)` };

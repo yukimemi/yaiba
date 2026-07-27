@@ -20,6 +20,10 @@ interface Props {
   theme: Theme;
   /** Flip between the neon HUD and office mode. */
   onToggleTheme: () => void;
+  /** The project on screen, and the way in for a mouse. */
+  project: string;
+  projectCount: number;
+  onOpenProjects: () => void;
 }
 
 const METER_CELLS = 10;
@@ -40,6 +44,9 @@ export function Hud({
   focusTitle,
   theme,
   onToggleTheme,
+  project,
+  projectCount,
+  onOpenProjects,
 }: Props) {
   const done = tasks.filter((t) => t.status === "done").length;
   const filled = tasks.length
@@ -54,6 +61,24 @@ export function Hud({
       <span className="hud__mode" data-mode={mode}>
         {mode.toUpperCase()}
       </span>
+
+      {/* The only pointer-driven way into the palette. The keyboard has
+          `:proj`; without this a mouse has no route to projects at all. */}
+      <button
+        type="button"
+        className="hud__project"
+        onClick={onOpenProjects}
+        title={
+          projectCount > 1
+            ? `${projectCount} projects open — switch, rename, forget (or :proj)`
+            : "projects — new, rename, forget (or :proj)"
+        }
+      >
+        {project || "—"}
+        {projectCount > 1 && (
+          <span className="hud__project-count">{projectCount}</span>
+        )}
+      </button>
 
       <span className="hud__spacer" />
 

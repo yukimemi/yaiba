@@ -1272,3 +1272,102 @@ body::after {
   border-top: 1px solid var(--grid-strong);
   color: var(--ash-dim);
 }
+
+/* ---- palette: manage ---------------------------------------------- */
+
+/* Actions sit on the cursor row only. On every row they are a wall of
+   buttons, and `forget` becomes something you can reach by accident. */
+.palette__actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.palette__action {
+  font: inherit;
+  color: var(--ash);
+  background: transparent;
+  border: 1px solid var(--grid-strong);
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.palette__action:hover,
+.palette__action:focus-visible {
+  color: var(--edge);
+  border-color: var(--edge-dim);
+  outline: none;
+}
+
+/* The create row is an action, not a project, so it does not pretend to
+   be one — no columns, and the name it would take is spelled out. */
+.palette__create {
+  color: var(--ash);
+  gap: 6px;
+}
+
+.palette__create strong {
+  color: var(--edge);
+  font-weight: 700;
+}
+
+.palette__ask {
+  flex: 1;
+  min-width: 0;
+  color: var(--ash);
+}
+
+.palette__ask strong {
+  color: var(--edge);
+  font-weight: 700;
+}
+
+/* `--rust` is the palette's amber, already meaning "this wants your
+   attention" on overdue rows. Not magenta: that belongs to the critical
+   path alone, and a confirmation is not a critical path. */
+.palette__row.is-doomed {
+  background: var(--grid-strong);
+  box-shadow: inset 2px 0 0 var(--rust);
+}
+
+/* Focusable so the confirm step still receives keys, but never seen. */
+.palette__offscreen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---- hud: project ------------------------------------------------- */
+
+.hud__project {
+  font: inherit;
+  color: var(--edge);
+  background: transparent;
+  border: 1px solid var(--grid-strong);
+  padding: 0 8px;
+  margin-left: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud__project:hover,
+.hud__project:focus-visible {
+  border-color: var(--edge-dim);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, calc(0.25 * var(--glow)));
+  outline: none;
+}
+
+.hud__project-count {
+  color: var(--ash-dim);
+}
