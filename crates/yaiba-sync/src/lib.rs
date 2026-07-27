@@ -16,11 +16,11 @@
 //! ticket. A peer that can't present it is dropped before any data
 //! moves.
 
+mod gate;
 pub mod proto;
 
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -30,6 +30,7 @@ use iroh::{Endpoint, EndpointId, SecretKey};
 use tokio::sync::Notify;
 use yaiba_core::Store;
 
+use crate::gate::Gate;
 use crate::proto::{Hello, Offer, Push};
 
 const ALPN: &[u8] = b"yaiba/sync/1";
@@ -102,18 +103,10 @@ pub enum Transport {
 
 pub struct SyncNode {
     endpoint: Endpoint,
-    store: Arc<Mutex<Store>>,
+    gate: Gate,
     /// Hex room key. Replaced when joining someone else's group.
     room: Mutex<String>,
     peers: Mutex<HashSet<EndpointId>>,
-    /// Set by `shutdown`, and the thing that actually makes it stick.
-    ///
-    /// Aborting the accept loop stops *new* connections being taken, but
-    /// each one it already took is served on a detached task nothing
-    /// holds a handle to — a dial mid-handshake when shutdown lands goes
-    /// on to merge seconds later. `serve` consults this instead, so
-    /// refusing does not depend on winning a race with a task.
-    closed: AtomicBool,
     /// The inbound half, so replication can actually be stopped.
     ///
     /// Aborting the outbound driver silences only what this replica
@@ -179,10 +172,9 @@ impl SyncNode {
 
         let node = Arc::new(Self {
             endpoint,
-            store,
+            gate: Gate::new(store),
             room: Mutex::new(room),
             peers: Mutex::new(HashSet::new()),
-            closed: AtomicBool::new(false),
             inbound: Mutex::new(None),
         });
 
@@ -211,13 +203,9 @@ impl SyncNode {
     /// takes effect immediately; the endpoint's graceful close only tells
     /// peers why, so it is spawned rather than waited on.
     pub fn shutdown(&self) {
-        // Under the store lock, so this cannot land between a merge's
-        // check and the merge itself. A merge already running finishes
-        // and this waits for it; none can start afterwards.
-        {
-            let _db = self.store.lock().unwrap_or_else(|e| e.into_inner());
-            self.closed.store(true, Ordering::SeqCst);
-        }
+        // First, and under the store lock: a merge already running
+        // finishes and this waits for it; none can start afterwards.
+        self.gate.close();
         if let Some(task) = self
             .inbound
             .lock()
@@ -256,11 +244,10 @@ impl SyncNode {
         if ticket.endpoint == self.endpoint.id() {
             bail!("that ticket is this replica's own");
         }
-        {
-            let db = self.store.lock().unwrap_or_else(|e| e.into_inner());
+        self.gate.with_store(|db| {
             db.set_meta(META_ROOM, &ticket.room)?;
-            db.upsert_peer(&ticket.endpoint.to_string(), &ticket.to_string(), "")?;
-        }
+            db.upsert_peer(&ticket.endpoint.to_string(), &ticket.to_string(), "")
+        })?;
         *self.room.lock().unwrap_or_else(|e| e.into_inner()) = ticket.room.clone();
         self.peers
             .lock()
@@ -270,10 +257,7 @@ impl SyncNode {
     }
 
     fn load_peers(&self) -> Result<()> {
-        let stored = {
-            let db = self.store.lock().unwrap_or_else(|e| e.into_inner());
-            db.list_peers()?
-        };
+        let stored = self.gate.with_store(|db| db.list_peers())?;
         let mut peers = self.peers.lock().unwrap_or_else(|e| e.into_inner());
         for (node, _ticket, _label) in stored {
             if let Ok(id) = node.parse::<EndpointId>() {
@@ -321,19 +305,20 @@ impl SyncNode {
 
         let hello = Hello {
             room: self.room.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-            vv: self.with_store(|db| db.version_vector())?,
+            vv: self.gate.with_store(|db| db.version_vector())?,
         };
         proto::write_frame(&mut send, &hello).await?;
 
         let offer: Offer = proto::read_frame(&mut recv).await?;
-        let applied = self.merge_unless_closed(&offer.entries, &offer.vv)?;
+        let applied = self.gate.merge(&offer.entries, &offer.vv)?;
 
         // Now that their vector is known, send back only what they lack.
-        let entries = self.with_store(|db| db.entries_since(&offer.vv))?;
+        let entries = self.gate.with_store(|db| db.entries_since(&offer.vv))?;
         proto::write_frame(&mut send, &Push { entries }).await?;
         send.finish()?;
 
-        self.with_store(|db| db.touch_peer(&peer.to_string()))?;
+        self.gate
+            .with_store(|db| db.touch_peer(&peer.to_string()))?;
         conn.close(0u32.into(), b"done");
         Ok(applied)
     }
@@ -361,7 +346,7 @@ impl SyncNode {
         // Checked after the handshake, not before it: shutdown can land
         // while this connection is still being established, and the point
         // is that nothing merges afterwards.
-        if self.closed.load(Ordering::SeqCst) {
+        if self.gate.is_closed() {
             conn.close(2u32.into(), b"shut down");
             bail!("refused an inbound peer: this node has been shut down");
         }
@@ -373,13 +358,13 @@ impl SyncNode {
         }
 
         let offer = Offer {
-            vv: self.with_store(|db| db.version_vector())?,
-            entries: self.with_store(|db| db.entries_since(&hello.vv))?,
+            vv: self.gate.with_store(|db| db.version_vector())?,
+            entries: self.gate.with_store(|db| db.entries_since(&hello.vv))?,
         };
         proto::write_frame(&mut send, &offer).await?;
 
         let push: Push = proto::read_frame(&mut recv).await?;
-        let applied = self.merge_unless_closed(&push.entries, &hello.vv)?;
+        let applied = self.gate.merge(&push.entries, &hello.vv)?;
         if applied > 0 {
             tracing::info!(applied, "merged updates from an inbound peer");
         }
@@ -394,42 +379,12 @@ impl SyncNode {
             .insert(id);
         if is_new {
             let ticket = Ticket { endpoint: id, room };
-            self.with_store(|db| db.upsert_peer(&id.to_string(), &ticket.to_string(), ""))?;
+            self.gate
+                .with_store(|db| db.upsert_peer(&id.to_string(), &ticket.to_string(), ""))?;
         }
 
         send.finish()?;
         Ok(())
-    }
-
-    /// Run a store operation without holding the lock across an await.
-    fn with_store<T>(&self, f: impl FnOnce(&mut Store) -> yaiba_core::Result<T>) -> Result<T> {
-        let mut db = self.store.lock().unwrap_or_else(|e| e.into_inner());
-        Ok(f(&mut db)?)
-    }
-
-    /// Merge, unless this node has been shut down.
-    ///
-    /// The check and the merge share the store's lock, and [`shutdown`]
-    /// takes that same lock to set the flag — so the two cannot interleave.
-    /// Checking `closed` on its own is not enough: several awaits sit
-    /// between the handshake and the merge, and a shutdown landing in that
-    /// gap would still let one write through.
-    ///
-    /// A merge already under way when shutdown is called therefore
-    /// completes, and shutdown waits for it. That is the boundary meaning
-    /// "nothing lands after the close", not "nothing lands during it".
-    ///
-    /// [`shutdown`]: SyncNode::shutdown
-    fn merge_unless_closed(
-        &self,
-        entries: &[yaiba_core::Entry],
-        vv: &yaiba_core::VersionVector,
-    ) -> Result<usize> {
-        let mut db = self.store.lock().unwrap_or_else(|e| e.into_inner());
-        if self.closed.load(Ordering::SeqCst) {
-            bail!("refused a merge: this node has been shut down");
-        }
-        Ok(db.merge(entries, vv)?)
     }
 }
 
