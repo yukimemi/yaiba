@@ -1310,11 +1310,16 @@ body::after {
   margin-left: 8px;
 }
 
+/* The cursor row's own background *is* `--grid-strong`, so a border in
+   that colour vanishes on exactly the row these appear on — leaving two
+   dim words that read as more of the path they sit next to. Sit them on
+   the panel colour instead, which the row is lighter than in both
+   themes, and outline them in something the row is not. */
 .palette__action {
   font: inherit;
   color: var(--ash);
-  background: transparent;
-  border: 1px solid var(--grid-strong);
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
   padding: 0 6px;
   cursor: pointer;
 }
@@ -1322,7 +1327,7 @@ body::after {
 .palette__action:hover,
 .palette__action:focus-visible {
   color: var(--edge);
-  border-color: var(--edge-dim);
+  border-color: var(--edge);
   outline: none;
 }
 

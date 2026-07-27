@@ -102,7 +102,15 @@ export function ProjectPalette({
       ? query.trim()
       : null;
 
-  useEffect(() => inputRef.current?.focus(), [mode.kind]);
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    // Rename arrives prefilled with the name you are replacing, so select
+    // it: typing overwrites, and → / End still drops you into editing it.
+    // Without this you'd have to clear the box before it did anything.
+    if (mode.kind === "rename") input.select();
+  }, [mode.kind]);
 
   useEffect(() => {
     listRef.current
@@ -275,11 +283,16 @@ export function ProjectPalette({
                     a wall of buttons, and a `forget` easy to mis-click. */}
                 {onCursor && (
                   <span className="palette__actions">
+                    {/* preventDefault, or the browser's own mousedown
+                        handling focuses the button *after* we have focused
+                        the input — the box would look ready and swallow
+                        everything you typed. */}
                     <button
                       type="button"
                       className="palette__action"
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        e.preventDefault();
                         startRename(project.name);
                       }}
                     >
@@ -290,6 +303,7 @@ export function ProjectPalette({
                       className="palette__action"
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        e.preventDefault();
                         setMode({ kind: "confirm", target: project.name });
                       }}
                     >
