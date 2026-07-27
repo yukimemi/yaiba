@@ -371,6 +371,23 @@ failing.
   That is `release-build` and `install`. A bare `cargo install --path .`
   skips it and installs a working binary serving an empty UI — no error,
   because the missing bundle is exactly the silent case above.
+- **`.github/workflows/web.yml` is the only thing that type-checks the
+  SPA.** `ci.yml` is Rust-only and `cargo make check` is
+  fmt-check + clippy + test + lock-check — neither depends on
+  `web-build`, so before this workflow existed a TypeScript error
+  passed every green check and only surfaced when `release.yml` built
+  the bundle on a tag. It is a sibling workflow because `ci.yml` is
+  kata-managed and a local edit there does not survive `kata apply`.
+  Two properties of it are load-bearing:
+  - **It runs on every PR, unfiltered.** A path-filtered check reports
+    forever-pending on PRs that don't touch the path, which makes it
+    un-requireable, which leaves it advisory — and `gh pr merge --auto`
+    merges straight through an advisory red. yukimemi/kanade shipped
+    two binary-less releases (v0.44.27, v0.44.28) that way before
+    dropping its own path filter.
+  - **The job name is the status-check context.** `web build` is in
+    `main`'s required checks; renaming the job un-requires it silently,
+    because protection keeps waiting on a context nothing reports.
 
 ### The binary crate is `yaiba`, not `yaiba-server`
 

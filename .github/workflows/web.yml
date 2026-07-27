@@ -1,0 +1,69 @@
+# Type-check and build the SPA that rust-embed bakes into the binary.
+#
+# Until this existed, the TypeScript in `crates/yaiba-server/web` was
+# checked by nothing. `ci.yml` is Rust-only (`cargo check`, `test`,
+# `fmt`, `clippy`, `llvm-cov`); `cargo make check` is
+# fmt-check + clippy + test + lock-check and does **not** depend on
+# `web-build`. The only job that ever compiled the SPA was
+# `release.yml`, and only on a tag — so a type error merged green and
+# surfaced as a broken release.
+#
+# Lives in its own workflow rather than in `ci.yml` because `ci.yml` is
+# kata-managed (rendered from yukimemi/pj-rust) and a local edit there
+# is reverted by the next `kata apply`. A sibling workflow is the
+# pattern the templates themselves prescribe for project-specific
+# steps.
+#
+# Runs on EVERY pull request. NOT path-filtered to `web/**`, even
+# though that would skip ~40s on a Rust-only PR, because a required
+# status check that never runs on a given PR reports as forever-pending
+# and blocks the merge — so a path-filtered job cannot be required, and
+# a job that cannot be required is only advisory. yukimemi/kanade
+# learned this the expensive way: with the equivalent job advisory,
+# #1096 and #1101 both auto-merged RED and produced two tagged releases
+# (v0.44.27, v0.44.28) with no binaries, the builds having died at
+# `web-build`. This repo merges with `gh pr merge --auto --squash`,
+# which is exactly that mechanism. "Cannot be skipped" is the safety
+# property a gate is for.
+#
+# The job name is the status-check context. Renaming it silently
+# un-requires the check on `main` — the old context stops reporting and
+# branch protection keeps waiting for a name nothing produces.
+
+name: web
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install deps
+        working-directory: crates/yaiba-server/web
+        # --frozen-lockfile: the committed bun.lock pins the tree, so a
+        # transitive bump can't change what is being type-checked here
+        # without showing up as a lockfile diff first.
+        run: bun install --frozen-lockfile
+
+      - name: Type-check and build
+        working-directory: crates/yaiba-server/web
+        # `bun run build` is `tsc -b && vite build`, the package's own
+        # definition — so this checks what `cargo make web-build`
+        # produces rather than a second, drifting copy of the command.
+        run: bun run build
