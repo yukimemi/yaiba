@@ -252,15 +252,6 @@ export function App() {
   };
 
   /**
-   * Adopt a new project list *and* forget everything derived from the old
-   * project, for the paths that also change which database is served.
-   *
-   * Creating a project and forgetting the one you were looking at both
-   * land you somewhere else, so they owe the same reset a switch does: a
-   * filter or a fold depth carried across would silently hide the new
-   * project's tasks and read as the operation having lost them.
-   */
-  /**
    * Report a project action that failed, to both places it can be read.
    *
    * The status line alone is not enough while the palette is up — it sits
@@ -272,6 +263,15 @@ export function App() {
     say(e.message, "error");
   };
 
+  /**
+   * Adopt a new project list *and* forget everything derived from the old
+   * project, for the paths that also change which database is served.
+   *
+   * Creating a project and forgetting the one you were looking at both
+   * land you somewhere else, so they owe the same reset a switch does: a
+   * filter or a fold depth carried across would silently hide the new
+   * project's tasks and read as the operation having lost them.
+   */
   const adoptProjects = (info: ProjectsInfo, note: string) => {
     setProjects(info);
     setShowProjects(false);
