@@ -48,3 +48,4 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 yaiba-sync = { path = "../yaiba-sync" }
+tower      = { workspace = true }

@@ -521,9 +521,6 @@ async fn rename_project(
     let to = crate::projects::validate_name(&req.to)
         .map_err(|e| ApiError::message(StatusCode::BAD_REQUEST, e.to_string()))?
         .to_string();
-    if from == to {
-        return Ok(Json(projects_response(&state)));
-    }
     // Held across everything below — both the registry's load-mutate-save
     // and the in-memory rename. `forget_project` takes it before it closes
     // anything, so within this hold the open set cannot move underneath
@@ -539,6 +536,12 @@ async fn rename_project(
             StatusCode::NOT_FOUND,
             format!("no open project named {from:?}"),
         ));
+    }
+    // After the existence check, not before it: renaming something to the
+    // name it already has is a no-op *for a project that exists*, and a
+    // shortcut that skips validation turns a 404 into a 200.
+    if from == to {
+        return Ok(Json(projects_response(&state)));
     }
 
     // The registry goes first, and its refusal is the answer.
@@ -1021,5 +1024,140 @@ mod tests {
         let state = AppState::new(Store::open_in_memory().unwrap());
         assert_eq!(state.projects().len(), 1);
         assert!(state.active().sync.is_none());
+    }
+}
+
+/// Handler-level tests for the project endpoints.
+///
+/// Separate from the `AppState` unit tests above because the bugs these
+/// catch live in the *handlers* — the order of a validation check against
+/// an early return, a status code — and `AppState` never sees them. The
+/// absence of this layer is how a `from == to` shortcut came to sit in
+/// front of an existence check and turn a 404 into a 200.
+#[cfg(test)]
+mod handler_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    fn server(names: &[&str]) -> Router {
+        let projects = names
+            .iter()
+            .map(|name| {
+                OpenProject::new(
+                    *name,
+                    PathBuf::from(format!("{name}.db")),
+                    Store::open_in_memory().unwrap(),
+                )
+            })
+            .collect();
+        router(AppState::with_projects(projects, None))
+    }
+
+    async fn send(
+        app: Router,
+        method: &str,
+        uri: &str,
+        body: Option<&str>,
+    ) -> (StatusCode, String) {
+        let request = Request::builder().method(method).uri(uri);
+        let request = match body {
+            Some(json) => request
+                .header("content-type", "application/json")
+                .body(Body::from(json.to_string())),
+            None => request.body(Body::empty()),
+        }
+        .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8(bytes.to_vec()).unwrap())
+    }
+
+    /// The regression: reordering `is_open` under the registry lock left
+    /// the no-op shortcut in front of it, so renaming a project that was
+    /// never open *to its own name* answered 200 instead of 404.
+    #[tokio::test]
+    async fn renaming_a_project_that_is_not_open_to_itself_is_still_a_404() {
+        let (status, body) = send(
+            server(&["work"]),
+            "PATCH",
+            "/api/projects/ghost",
+            Some(r#"{"to":"ghost"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    #[tokio::test]
+    async fn renaming_an_open_project_to_itself_is_a_no_op() {
+        let (status, body) = send(
+            server(&["work"]),
+            "PATCH",
+            "/api/projects/work",
+            Some(r#"{"to":"work"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(r#""active":"work""#), "{body}");
+    }
+
+    #[tokio::test]
+    async fn renaming_onto_another_open_project_is_a_409() {
+        let (status, body) = send(
+            server(&["work", "personal"]),
+            "PATCH",
+            "/api/projects/work",
+            Some(r#"{"to":"personal"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    }
+
+    #[tokio::test]
+    async fn a_name_that_is_not_usable_as_a_file_is_a_400() {
+        let (status, body) = send(
+            server(&["work"]),
+            "PATCH",
+            "/api/projects/work",
+            Some(r#"{"to":"a/b"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+
+    #[tokio::test]
+    async fn switching_to_a_project_that_is_not_open_is_a_404() {
+        let (status, body) = send(
+            server(&["work"]),
+            "POST",
+            "/api/projects",
+            Some(r#"{"name":"ghost"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    /// A server with nothing open has no answer for any endpoint, so the
+    /// last project cannot be closed.
+    #[tokio::test]
+    async fn forgetting_the_only_open_project_is_a_409() {
+        let (status, body) = send(server(&["work"]), "DELETE", "/api/projects/work", None).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    }
+
+    #[tokio::test]
+    async fn forgetting_a_project_that_is_not_open_is_a_404() {
+        let (status, body) = send(
+            server(&["work", "personal"]),
+            "DELETE",
+            "/api/projects/ghost",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     }
 }
