@@ -316,7 +316,9 @@ async fn main() -> Result<()> {
                 Err(e) => Err(anyhow!("the endpoint task did not finish: {e}")),
             };
             match started {
-                Ok(sync) => project.sync = Some(sync),
+                // Spawns the loop and keeps its handle, so closing the
+                // project later can actually stop it.
+                Ok(sync) => project.replicate(sync),
                 // Index 0 is the project being opened. Only its endpoint is
                 // worth failing the launch over — a background project that
                 // cannot replicate is still perfectly usable locally, and
@@ -362,11 +364,6 @@ async fn main() -> Result<()> {
     // replicating, and the banner must not fold it into "all syncing".
     let syncing_count = projects.iter().filter(|p| p.sync.is_some()).count();
     let state = api::AppState::with_projects(projects, transport);
-    for project in state.projects() {
-        if let Some(sync) = &project.sync {
-            tokio::spawn(Arc::clone(sync).run(Arc::clone(&project.notify)));
-        }
-    }
 
     let router = app(state);
 

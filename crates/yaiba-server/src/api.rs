@@ -40,6 +40,14 @@ pub struct OpenProject {
     pub notify: Arc<tokio::sync::Notify>,
     /// `None` when started with `--no-sync`.
     pub sync: Option<Arc<yaiba_sync::SyncNode>>,
+    /// Handle on the background replication loop, so closing a project can
+    /// actually stop it.
+    ///
+    /// That loop owns `Arc`s to the store and the notify, so dropping the
+    /// project from the open set does not end it. Without this it would go
+    /// on replicating a project the server no longer considers open, for
+    /// the life of the process.
+    pub replication: Option<tokio::task::AbortHandle>,
 }
 
 impl OpenProject {
@@ -50,6 +58,22 @@ impl OpenProject {
             store: Arc::new(Mutex::new(store)),
             notify: Arc::new(tokio::sync::Notify::new()),
             sync: None,
+            replication: None,
+        }
+    }
+
+    /// Start replicating, keeping hold of the task so it can be stopped.
+    pub fn replicate(&mut self, sync: Arc<yaiba_sync::SyncNode>) {
+        let task = tokio::spawn(Arc::clone(&sync).run(Arc::clone(&self.notify)));
+        self.replication = Some(task.abort_handle());
+        self.sync = Some(sync);
+    }
+
+    /// Stop replicating. Idempotent, and a no-op on a project that never
+    /// started one — `--no-sync`, or an endpoint that failed to bind.
+    pub fn stop_replicating(&self) {
+        if let Some(task) = &self.replication {
+            task.abort();
         }
     }
 }
@@ -184,20 +208,27 @@ impl AppState {
 
     /// Take a newly created project into the open set and look at it.
     ///
-    /// `false` if the name is already open — two projects under one name
-    /// would make `switch`, `rename` and `remove` ambiguous.
-    pub fn insert(&self, project: OpenProject) -> bool {
+    /// Hands the project back on failure rather than returning a bool: it
+    /// owns a running replication task, and a caller that cannot reach it
+    /// again has no way to stop it. The name being taken means two
+    /// projects under one name, which would make `switch`, `rename` and
+    /// `remove` ambiguous.
+    pub fn insert(&self, project: OpenProject) -> Result<(), OpenProject> {
         let mut open = self.open();
         if open.has(&project.name) {
-            return false;
+            return Err(project);
         }
         open.active = project.name.clone();
         open.projects.push(Arc::new(project));
-        true
+        Ok(())
     }
 
     /// Close a project, moving off it first if it is the one being looked
     /// at. Returns the name now active, or `None` if nothing was removed.
+    ///
+    /// Stops its replication as part of removing it, rather than leaving
+    /// that to the caller: "closed" has to mean the loop is not still
+    /// syncing a project the server no longer holds.
     ///
     /// Refuses to remove the last one: the server would then have no state
     /// to serve and every endpoint would have nothing to answer with.
@@ -207,7 +238,8 @@ impl AppState {
             return None;
         }
         let at = open.projects.iter().position(|p| p.name == name)?;
-        open.projects.remove(at);
+        let closed = open.projects.remove(at);
+        closed.stop_replicating();
         if open.active == name {
             // The one that took its place, or the last if it was last.
             let next = at.min(open.projects.len() - 1);
@@ -240,6 +272,10 @@ impl AppState {
             store: Arc::clone(&old.store),
             notify: Arc::clone(&old.notify),
             sync: old.sync.clone(),
+            // Carried over, not dropped: the loop is still the same one,
+            // and losing the handle here would make the project
+            // unstoppable if it were closed later.
+            replication: old.replication.clone(),
         });
         open.projects[at] = renamed;
         if open.active == from {
@@ -398,23 +434,50 @@ async fn create_project(
 
     if let Some(transport) = state.transport() {
         match yaiba_sync::SyncNode::start_with(Arc::clone(&project.store), transport).await {
-            Ok(sync) => {
-                tokio::spawn(Arc::clone(&sync).run(Arc::clone(&project.notify)));
-                project.sync = Some(sync);
-            }
+            Ok(sync) => project.replicate(sync),
             // Local-only is a worse project than a replicating one, but a
             // far better answer than refusing to create it at all.
             Err(e) => tracing::warn!("{name:?} starts without replication: {e:#}"),
         }
     }
 
-    if !state.insert(project) {
+    if let Err(rejected) = state.insert(project) {
+        // The `creating` lock keeps two creates apart, but a `rename` can
+        // still claim the name across the await above. Undo it rather than
+        // return 409 on top of a live sync task replicating a project the
+        // server does not hold, and a registry entry for the same.
+        rejected.stop_replicating();
+        drop(rejected);
+        forget_by_db(&db);
         return Err(ApiError::message(
             StatusCode::CONFLICT,
             format!("a project named {name:?} is already open"),
         ));
     }
     Ok(Json(projects_response(&state)))
+}
+
+/// Drop whatever registry entry points at `db`.
+///
+/// By path rather than by name: the entry may have been filed under a
+/// uniquified name, and the path is what identifies it either way. The
+/// database file itself is left alone — deleting one on an error path is
+/// how an error becomes a loss, and an empty stray file is inert.
+fn forget_by_db(db: &std::path::Path) {
+    let Ok(mut registry) = crate::projects::Registry::load() else {
+        return;
+    };
+    let Some(name) = registry.find_by_db(db).map(|p| p.name.clone()) else {
+        return;
+    };
+    registry.forget(&name);
+    if let Err(e) = registry.save() {
+        tracing::warn!("could not drop the half-created {name:?}: {e:#}");
+    }
+    tracing::warn!(
+        "{name:?} was not opened after all; its empty database is still at {}",
+        db.display()
+    );
 }
 
 #[derive(Deserialize)]
@@ -446,24 +509,36 @@ async fn rename_project(
     if from == to {
         return Ok(Json(projects_response(&state)));
     }
+    // The registry goes first, and its refusal is the answer.
+    //
+    // It knows about projects this server does not hold open — a
+    // registered but closed one can own `to`. Renaming memory first and
+    // warning on the registry failure would answer 200 to a rename that
+    // the next start silently undoes, with `to` by then meaning two
+    // different projects.
+    let mut registry = crate::projects::Registry::load()
+        .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
+    if registry.find(&from).is_some() {
+        registry
+            .rename(&from, &to)
+            .map_err(|e| ApiError::message(StatusCode::CONFLICT, format!("{e:#}")))?;
+        registry
+            .save()
+            .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
+    } else if registry.find(&to).is_some() {
+        // Not registered under `from` — opened by path, say — but `to` is
+        // taken by something else on disk.
+        return Err(ApiError::message(
+            StatusCode::CONFLICT,
+            format!("a project named {to:?} is already registered"),
+        ));
+    }
+
     if !state.rename(&from, &to) {
         return Err(ApiError::message(
             StatusCode::CONFLICT,
             format!("a project named {to:?} is already open"),
         ));
-    }
-
-    // The registry is the durable half; without this the old name is back
-    // on the next start.
-    match crate::projects::Registry::load() {
-        Ok(mut registry) => {
-            if let Err(e) = registry.rename(&from, &to) {
-                tracing::warn!("renamed in memory only: {e:#}");
-            } else if let Err(e) = registry.save() {
-                tracing::warn!("could not save the project registry: {e:#}");
-            }
-        }
-        Err(e) => tracing::warn!("could not read the project registry: {e:#}"),
     }
     Ok(Json(projects_response(&state)))
 }
@@ -862,7 +937,7 @@ mod tests {
     #[test]
     fn a_new_project_is_opened_and_looked_at() {
         let state = AppState::with_projects(vec![project("a")], None);
-        assert!(state.insert(project("b")));
+        assert!(state.insert(project("b")).is_ok());
         assert_eq!(state.active().name, "b");
         assert_eq!(state.projects().len(), 2);
     }
@@ -872,7 +947,7 @@ mod tests {
     #[test]
     fn a_duplicate_name_is_refused() {
         let state = AppState::with_projects(vec![project("a")], None);
-        assert!(!state.insert(project("a")));
+        assert!(state.insert(project("a")).is_err());
         assert_eq!(state.projects().len(), 1);
     }
 
