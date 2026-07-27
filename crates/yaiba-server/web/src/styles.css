@@ -218,13 +218,102 @@ body::after {
   font-weight: 500;
 }
 
-/* Viewing the past is a mode, and an easy one to forget you are in —
-   so it is stated loudly rather than tucked away. */
+/* The reference date is always present, because everything on screen is
+   measured from it. At now it is grey chrome you can ignore; viewing the
+   past is a mode, and an easy one to forget you are in, so *that* state
+   is stated loudly rather than tucked away. */
 .hud__asof {
-  padding: 0 8px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--ash);
+  border: 1px solid transparent;
+}
+
+.hud__asof--off-now {
   color: var(--rust);
-  border: 1px solid currentcolor;
+  border-color: currentcolor;
   font-weight: 700;
+}
+
+.hud__asof-step,
+.hud__asof-date {
+  font: inherit;
+  line-height: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.hud__asof-step {
+  padding: 0 4px;
+  opacity: 0.55;
+}
+
+.hud__asof-step:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--edge);
+}
+
+.hud__asof-date {
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.hud__asof-date:hover {
+  color: var(--edge);
+}
+
+.hud__asof-day {
+  opacity: 0.6;
+  font-weight: 400;
+}
+
+.hud__asof-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--grid-strong);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.hud__asof-item {
+  font: inherit;
+  text-align: left;
+  padding: 1px 8px;
+  color: var(--ash);
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hud__asof-item:hover:not(:disabled) {
+  color: var(--edge);
+  background: var(--grid);
+}
+
+.hud__asof-item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.hud__asof-input {
+  font: inherit;
+  margin-top: 4px;
+  padding: 1px 4px;
+  color: var(--steel);
+  background: var(--void);
+  border: 1px solid var(--grid-strong);
 }
 
 /* Reads as one more HUD readout that happens to be clickable, rather

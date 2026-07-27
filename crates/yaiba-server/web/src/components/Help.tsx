@@ -54,6 +54,8 @@ const GROUPS: Group[] = [
       ["drag ⟩ edge", "change the duration"],
       ["drag ● onto", "make that task wait for this one"],
       ["click arrow", "cut that dependency"],
+      ["◀ ▶ in the bar", "reference date, a day at a time"],
+      ["click the date", "jump to one — or back to now"],
     ],
   },
   {

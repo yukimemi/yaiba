@@ -23,7 +23,7 @@ import { ProjectPalette } from "./components/ProjectPalette";
 import { Hud } from "./components/Hud";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
-import { addDays } from "./dates";
+import { addDays, toISO } from "./dates";
 import { visibleTasks, type SortKey } from "./filter";
 import { MODE_HINT, type Mode } from "./mode";
 import { applyTheme, initialTheme, type Theme } from "./theme";
@@ -129,6 +129,16 @@ export function App() {
    * stale closure would silently snap the view back to today.
    */
   const [, setAsof] = useState<string | null>(null);
+  /**
+   * The reference-date picker hanging off the HUD.
+   *
+   * State lives here rather than inside `Hud` because the global key
+   * handler has no "focus is in a field" guard — it bails on explicit
+   * flags instead (`showProjects`, the insert / command / search modes).
+   * A date field owned entirely by the HUD would keep firing `j`, `x`
+   * and `dd` at the task list while you typed into it.
+   */
+  const [showAsof, setShowAsof] = useState(false);
 
   const modeRef = useRef<Mode>("normal");
   /**
@@ -390,6 +400,42 @@ export function App() {
       void load();
     },
     [load],
+  );
+
+  /**
+   * Walk the reference date a day at a time, from the HUD's ◀ ▶.
+   *
+   * Landing on the real today has to send `null`, not the date itself:
+   * the server marks any explicit date as `as_of`, and `as_of` is what
+   * `liveOnly` refuses edits on. Stepping back to today and finding the
+   * board still read-only — while the HUD says today — would be a trap
+   * you could only escape by typing `:asof today`.
+   *
+   * Only that exact landing is special. The future is as reachable as
+   * the past, because `:asof +3d` has always been: a reference date
+   * ahead of now reads "if nothing moves, how far behind is this by
+   * Friday", which is a fair question to ask of a plan. Both directions
+   * are read-only and both are one click from coming back.
+   *
+   * Steps from `asofRef`, not from `data.today`. The ref moves the
+   * moment you click; `data` only catches up when the reload resolves,
+   * so a second click arriving before the fetch would read the date it
+   * had *before* the first one and recompute the same day — two clicks
+   * collapsing into one day of travel, exactly when you are holding the
+   * arrow down to scrub.
+   *
+   * The ref is null at now, and `data.today` would be the reference date
+   * rather than the real one anyway, so the base and the comparison both
+   * fall back to the browser's date. The server this talks to runs on
+   * this machine, so they share a clock.
+   */
+  const stepReference = useCallback(
+    (days: number) => {
+      const liveToday = toISO(new Date());
+      const next = addDays(asofRef.current ?? liveToday, days);
+      setReferenceDate(next === liveToday ? null : next);
+    },
+    [setReferenceDate],
   );
 
   /**
@@ -1021,6 +1067,16 @@ export function App() {
     // The palette and the date picker each run their own input and own
     // every key while up, exactly as insert / command / search do.
     if (showProjects || picking) return;
+    // Same bargain for the reference-date picker, which carries a date
+    // field of its own. Escape is the one key it hands back, so the
+    // popover closes the way every other overlay here does.
+    if (showAsof) {
+      if (e.key === "Escape") {
+        setShowAsof(false);
+        e.preventDefault();
+      }
+      return;
+    }
     if (showHelp) {
       if (e.key === "Escape" || e.key === "?" || e.key === "Enter") {
         setShowHelp(false);
@@ -1592,7 +1648,13 @@ export function App() {
         projectEnd={data.schedule.end}
         peerCount={peers.peers.length}
         syncOn={peers.ticket !== null}
-        asof={data.as_of ? data.today : null}
+        reference={data.today}
+        isAsOf={data.as_of}
+        asofOpen={showAsof}
+        onToggleAsof={() => setShowAsof((open) => !open)}
+        onCloseAsof={() => setShowAsof(false)}
+        onStepAsof={stepReference}
+        onSetAsof={setReferenceDate}
         foldLevel={foldLevel}
         theme={theme}
         project={projects.active}
