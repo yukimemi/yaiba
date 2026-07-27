@@ -1,9 +1,9 @@
 preset = "github.com/yukimemi/pj-presets:rust-workspace"
-applied_at = "2026-07-26T04:25:27.906918704Z"
+applied_at = "2026-07-27T04:28:15.274135285Z"
 
 [[templates]]
 source = "github.com/yukimemi/pj-base"
-rev = "8226510d21d7211eec3ce4fd03e18915a4e0326e"
+rev = "937c2e75f75e20fe40554a50b4977926590e2ef8"
 version = "0.13.0"
 
 [[templates]]
@@ -29,22 +29,22 @@ content_hash = "486c974de88903113ed99b4e643432b7050e88f1031276f5263e8da7b43fe11e
 content_hash = "6d380d1ecc2f882c2011429d548a6f3c774b74f0c757d884453e4667172acc2a"
 
 [files.".github/workflows/apm-bump.yml"]
-content_hash = "85b195e27232805149919455cf3e9906cec9e5c5d82c1b0e9c668db355844ed1"
+content_hash = "f1cf3615e0f5ff443860722da8d7f74530eaa37e755e65f4392a0c25cd83917e"
 
 [files.".github/workflows/auto-tag.yml"]
-content_hash = "406943795e69542d92d37a0d70051f22a899956dc0cbd1d70ebc16aea13d655a"
+content_hash = "4e2735f40c2ae61014810159a2458da2edc1646589f5f65d9f2f3d099366c9a8"
 
 [files.".github/workflows/ci.yml"]
-content_hash = "ca678bb4447eee0b1de347b1f339d400740e960a408331f73d8dd80a1dca2017"
+content_hash = "3e2b071337a00167805781cc078cb08e1bf05e67be2e0bb226eeb11586396cc0"
 
 [files.".github/workflows/claude-review.yml"]
-content_hash = "8804c503c1960abdda86578c0bb0bdd727daf41c0d482975d45947d27768b2ec"
+content_hash = "c87f402d97862f1c94af0f3b7a6f9dc9627fbe75a08cdf1b95a7718049958193"
 
 [files.".github/workflows/claude.yml"]
-content_hash = "81eb918f932e08a95f3deb8e64c13e57976691bc5723c4d7cb56501d6566994c"
+content_hash = "f1ab660d42884efc4224b468c164403575d9b546ca09961fab67eed0a2c3716d"
 
 [files.".github/workflows/kata-apply.yml"]
-content_hash = "3e0e0491a0a1bf4dc0fd4e62cb57748278ff578ceca95e9c140f3e82f4cc6e39"
+content_hash = "62bd9b21a8b7257762d06feefbd3d4595cadfdf01dbde2e67a03521fc4b09efc"
 
 [files.".github/workflows/release.yml"]
 content_hash = "bfcca626928ccfadca91e822bd33407bf5d7d35680285e4ec41b47e908457cd7"
