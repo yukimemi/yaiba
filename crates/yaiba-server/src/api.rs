@@ -69,11 +69,21 @@ impl OpenProject {
         self.sync = Some(sync);
     }
 
-    /// Stop replicating. Idempotent, and a no-op on a project that never
-    /// started one — `--no-sync`, or an endpoint that failed to bind.
+    /// Stop replicating, in **both** directions.
+    ///
+    /// Aborting the driver silences only what this replica sends. The sync
+    /// node runs its own accept loop, which would go on answering dials
+    /// and merging peer writes into a store the server no longer considers
+    /// open — so the node is shut down as well.
+    ///
+    /// Idempotent, and a no-op on a project that never started either:
+    /// `--no-sync`, or an endpoint that failed to bind.
     pub fn stop_replicating(&self) {
         if let Some(task) = &self.replication {
             task.abort();
+        }
+        if let Some(sync) = &self.sync {
+            sync.shutdown();
         }
     }
 }
@@ -472,6 +482,13 @@ async fn create_project(
 /// database file itself is left alone — deleting one on an error path is
 /// how an error becomes a loss, and an empty stray file is inert.
 fn forget_by_db(db: &std::path::Path) {
+    // First, because it is the line that explains a later refusal to reuse
+    // this name — and the two early returns below are exactly the cases
+    // where the registry could not be tidied, so it is needed most there.
+    tracing::warn!(
+        "that project was not opened after all; its empty database is still at {}",
+        db.display()
+    );
     let Ok(mut registry) = crate::projects::Registry::load() else {
         return;
     };
@@ -482,10 +499,6 @@ fn forget_by_db(db: &std::path::Path) {
     if let Err(e) = registry.save() {
         tracing::warn!("could not drop the half-created {name:?}: {e:#}");
     }
-    tracing::warn!(
-        "{name:?} was not opened after all; its empty database is still at {}",
-        db.display()
-    );
 }
 
 #[derive(Deserialize)]
@@ -508,18 +521,25 @@ async fn rename_project(
     let to = crate::projects::validate_name(&req.to)
         .map_err(|e| ApiError::message(StatusCode::BAD_REQUEST, e.to_string()))?
         .to_string();
+    if from == to {
+        return Ok(Json(projects_response(&state)));
+    }
+    // Held across everything below — both the registry's load-mutate-save
+    // and the in-memory rename. `forget_project` takes it before it closes
+    // anything, so within this hold the open set cannot move underneath
+    // us: without that, a forget landing between the registry save and
+    // `state.rename` leaves the registry renamed while this answers 409.
+    let _registry = state.registry().await;
+
+    // Checked under the lock, not before it. Before, a forget could land
+    // while this was still waiting for the lock, and the check would have
+    // been answered about a project that is no longer open.
     if !state.is_open(&from) {
         return Err(ApiError::message(
             StatusCode::NOT_FOUND,
             format!("no open project named {from:?}"),
         ));
     }
-    if from == to {
-        return Ok(Json(projects_response(&state)));
-    }
-    // Held across the load-mutate-save below, so a concurrent forget or
-    // create cannot save a snapshot taken before this rename.
-    let _registry = state.registry().await;
 
     // The registry goes first, and its refusal is the answer.
     //
@@ -563,6 +583,13 @@ async fn forget_project(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ProjectsResponse>> {
+    // Taken before anything is closed, so the whole forget — the open set
+    // *and* the registry — is one span against `rename_project`. Closing
+    // first and locking after let a rename that already held the lock see
+    // the project vanish between its registry save and its own
+    // `state.rename`, leaving the registry moved and the response a 409.
+    let _registry = state.registry().await;
+
     if !state.is_open(&name) {
         return Err(ApiError::message(
             StatusCode::NOT_FOUND,
@@ -576,7 +603,6 @@ async fn forget_project(
         ));
     }
 
-    let _registry = state.registry().await;
     match crate::projects::Registry::load() {
         Ok(mut registry) => {
             registry.forget(&name);
