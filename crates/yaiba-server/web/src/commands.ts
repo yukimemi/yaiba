@@ -35,6 +35,13 @@ export interface CommandContext {
   current: Task | null;
   /** Cursor row, or the visual selection when one is active. */
   selection: Task[];
+  /**
+   * Names of the projects the server holds open.
+   *
+   * `:proj` needs them to tell a *verb* from a project called `new`,
+   * `rename` or `forget` — see the bare-verb handling below.
+   */
+  projects: string[];
 }
 
 export interface CommandResult {
@@ -48,7 +55,13 @@ export interface CommandResult {
   /** Peer-to-peer actions the app performs against /api/peers. */
   peer?: { join?: string; showTicket?: boolean };
   /** Project actions the app performs against /api/projects. */
-  project?: { switch?: string; pick?: boolean };
+  project?: {
+    switch?: string;
+    pick?: boolean;
+    create?: string;
+    rename?: string;
+    forget?: string;
+  };
 }
 
 // ---- the command table, for <tab> completion ---------------------
@@ -469,10 +482,34 @@ export function runCommand(
 
     // ---- projects ------------------------------------------------
     case "proj":
-    case "project":
+    case "project": {
       // No argument opens the picker, which is the usual way in: the
       // list is short and filtering it beats recalling a name exactly.
-      return arg ? { project: { switch: arg } } : { project: { pick: true } };
+      if (!arg) return { project: { pick: true } };
+      const [verb, ...rest] = arg.split(/\s+/);
+      const subject = rest.join(" ").trim();
+      const isVerb = ["new", "forget", "rename"].includes(verb);
+      if (isVerb && subject) {
+        if (verb === "new") return { project: { create: subject } };
+        if (verb === "forget") return { project: { forget: subject } };
+        return { project: { rename: subject } };
+      }
+      // A bare verb is a *switch* when a project by that name is open, so
+      // one genuinely called `new` stays reachable — and a usage error
+      // when none is, which is the far likelier reading of `:proj rename`
+      // with nothing after it. Deciding it by what exists beats picking
+      // one meaning for all three: reachability and a good message were
+      // only in tension while this guessed.
+      if (isVerb && !ctx.projects.includes(verb)) {
+        return {
+          error:
+            verb === "rename"
+              ? "usage: :proj rename ⟨new name⟩ — renames the project you are on"
+              : `usage: :proj ${verb} ⟨name⟩`,
+        };
+      }
+      return { project: { switch: arg } };
+    }
 
     default:
       return { error: `not a command: ${head}  (try :help)` };

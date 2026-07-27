@@ -526,6 +526,28 @@ it returns forever — is `SyncNode::start`, via iroh.
 - **The cursor is clamped against the filtered list, not stored into it.**
   Filtering to fewer rows than the cursor index would otherwise leave
   `<enter>` picking nothing, which reads as the palette ignoring you.
+- **A rename is not a switch.** Same database, same tasks, so the view
+  keeps its cursor, filter and folds — clearing them for an operation
+  that changed nothing but a label is the same surprise from the other
+  direction. Create and forget *do* clear, because both land you on a
+  different project.
+- **Only filtering filters.** Rename and confirm keep the whole list on
+  screen so the row being acted on stays visible, which is why `matches`
+  short-circuits on `mode.kind`.
+- **Confirm shows no input, so something invisible has to hold focus.**
+  Without `.palette__offscreen` the panel receives no keys at all and
+  `<enter>` does nothing — a state that looks interactive and isn't.
+- **Row actions render on the cursor row only.** On every row they are a
+  wall of buttons, and `forget` becomes something a mis-click reaches.
+- **A bare verb is decided by what exists, not by which verb it is.**
+  `:proj new` / `rename` / `forget` with nothing after them switch when a
+  project by that name is open — otherwise a project genuinely called
+  `new` is unreachable from the command line — and are a usage error when
+  none is, which is the likelier reading. `runCommand` takes the open
+  names for exactly this. The first version special-cased `rename` into
+  an unconditional usage error and left the other two falling through,
+  which broke this rule for one of the three; deciding it by existence is
+  what let reachability and a good message stop competing.
 
 ### Invariants worth knowing before changing the graph
 

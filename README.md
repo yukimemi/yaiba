@@ -305,9 +305,25 @@ not only the one you asked for, and each one replicates on its own —
 so a project is up to date when you turn to it, rather than starting to
 catch up at that moment. There is no second process and no second port.
 
-Switch from inside the app: **`:proj`** opens a fuzzy picker over what is
-open — `^n` / `^p` to move, enter to switch, esc to cancel. `:proj <name>`
-goes straight there, and `<tab>` completes the name.
+Manage them from inside the app, without restarting. **`:proj`** opens a
+fuzzy picker over what is open — and so does clicking the project name in
+the top bar, which is the way in for a mouse.
+
+| in the picker | |
+| --- | --- |
+| `^n` / `^p` | move |
+| enter | switch |
+| `^r` | rename the row under the cursor |
+| `^d` | forget it — asks first |
+| type a name nothing matches | offers to create it |
+
+`rename` and `forget` are buttons on that row too. From the command line:
+`:proj <name>` switches, and `:proj new <name>`, `:proj rename <name>`
+(renames the one you are on) and `:proj forget <name>` do the rest, with
+`<tab>` completing names.
+
+**Forget only drops it from the list** — the database stays where it is,
+which is what the picker says before it does anything.
 
 A registry entry whose database has gone is skipped with a warning rather
 than stopping the launch. If opening everything costs more than it is
