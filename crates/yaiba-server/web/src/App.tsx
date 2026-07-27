@@ -15,7 +15,7 @@ import {
   stepCompletion,
   type Completion,
 } from "./completion";
-import { DATE_COLUMNS, dateValue } from "./dateColumns";
+import { DATE_COLUMNS, dateLocked, dateValue } from "./dateColumns";
 import { Gantt } from "./components/Gantt";
 import { DatePicker, type Anchor } from "./components/DatePicker";
 import { Help } from "./components/Help";
@@ -977,6 +977,59 @@ export function App() {
   );
 
   /**
+   * Open the calendar on one of the cursor row's dates, from the
+   * keyboard.
+   *
+   * Anchored on whatever is actually on screen: the cell when the date
+   * columns are showing, the cursor row when they are not, and the
+   * cursor's bar in the gantt-only view, where the list is unmounted
+   * entirely. The alternative — refusing until `:dates` is on, or
+   * turning it on for you — makes a display mode a precondition for an
+   * edit, and the columns are a way to *read* the dates, not the only
+   * place they exist. The same reasoning covers `tab`: a view is a
+   * choice about what to look at, not about what can be edited.
+   *
+   * Reaching into the DOM for the box is the trade the gantt already
+   * makes for hit-testing: the geometry is the browser's, and mirroring
+   * it into state would only give us a second copy to keep in step.
+   */
+  const openDate = useCallback(
+    (field: DateField) => {
+      if (!current) {
+        say("no task under the cursor", "error");
+        return;
+      }
+      // The same refusal the cell renders as plain text, said out loud —
+      // from the keyboard there is no shape to notice instead.
+      const locked = dateLocked(field, bySchedule.get(current.id));
+      if (locked) {
+        say(locked, "error");
+        return;
+      }
+      const box = (
+        document.querySelector(`[data-date-cell="${current.id}:${field}"]`) ??
+        document.querySelector(".row--cursor") ??
+        // Gantt-only: the bar *is* where that task lives on screen. It
+        // can be scrolled out of view horizontally, which the panel's
+        // own clamp then pulls back on screen.
+        document.querySelector(
+          `.gantt__row[data-task-id="${current.id}"] .gantt__bar`,
+        )
+      )?.getBoundingClientRect();
+      setPicking({
+        id: current.id,
+        field,
+        // Nothing on screen to hang it off — no rows at all. The panel
+        // still has to appear somewhere it can be read and dismissed.
+        anchor: box
+          ? { left: box.left, top: box.top, bottom: box.bottom }
+          : { left: 40, top: 60, bottom: 60 },
+      });
+    },
+    [current, bySchedule],
+  );
+
+  /**
    * Commit a date picked out of the calendar.
    *
    * By running the command the keyboard would have run, not by patching
@@ -1135,6 +1188,21 @@ export function App() {
           setEditing({ id: current.id, value: current.title });
           enterMode("insert");
         }
+        break;
+      // `c` is change, and `cc` already changes the title — these change
+      // the other four things a row holds. The letters follow the column
+      // headings: start, end, and the two actuals under `a`.
+      case "cs":
+        openDate("start");
+        break;
+      case "ce":
+        openDate("end");
+        break;
+      case "ca":
+        openDate("astart");
+        break;
+      case "cA":
+        openDate("aend");
         break;
       case "<space>":
       case "x":

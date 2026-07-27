@@ -96,6 +96,8 @@ const GROUPS: Group[] = [
   {
     title: "DATE PICKER",
     keys: [
+      ["cs / ce", "calendar on the planned start / end"],
+      ["ca / cA", "calendar on the actual start / end"],
       ["click a cell", "open the calendar over it"],
       ["hjkl / arrows", "walk the grid"],
       ["[ / ]", "previous / next month"],

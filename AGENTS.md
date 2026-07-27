@@ -426,6 +426,17 @@ tab title — it has to survive a shared screen in a meeting.
   still refused. A second implementation behind the mouse is the one
   that goes stale the next time either changes. It passes
   `selection: [task]` — a click names one row even in visual mode.
+- **The keyboard opens the picker in every view.** `cs` / `ce` / `ca` /
+  `cA` anchor on whatever is actually mounted: the cell (`data-date-cell`)
+  when `:dates` is on, `.row--cursor` when it is not, and the cursor's
+  `.gantt__bar` in the gantt-only view, where the list is gone entirely
+  — `tab` reaches that view and the key handler has no `view` gate, so
+  a chain that stops at the list anchors the panel in the top-left
+  corner. Neither a display mode nor a view is a precondition for an
+  edit; both are choices about what to *look* at. Reading the box out
+  of the DOM is the trade the gantt already makes for hit-testing: the
+  geometry is the browser's, and mirroring it into state would only
+  give us a second copy to keep in step.
 - **A popover opened on `mousedown` must `preventDefault`.** The panel
   focuses itself as it mounts; the browser's own focus move lands
   *after* that and puts it back on the cell, so the calendar opens
