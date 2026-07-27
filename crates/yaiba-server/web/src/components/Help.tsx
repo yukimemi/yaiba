@@ -71,6 +71,7 @@ const GROUPS: Group[] = [
       [":new ⟨t⟩", "add a task"],
       [":due ⟨d⟩", "today, tom, mon, +3d, 8/14"],
       [":start ⟨d⟩", "pin a start date"],
+      [":end ⟨d⟩", "land it on a date — sets the duration"],
       [":dur ⟨n⟩", "duration in days"],
       [":prio ⟨n⟩", "0 none … 3 high"],
       [":pr ⟨n⟩", "progress percent"],
@@ -80,6 +81,13 @@ const GROUPS: Group[] = [
       [":f ⟨q⟩", "tag:dev, open, crit, blocked, overdue"],
       [":sort ⟨k⟩", "manual, due, prio, start, title"],
       [":zoom ⟨z⟩", "day, week, month"],
+    ],
+  },
+  {
+    title: ": ACTUALS",
+    keys: [
+      [":astart ⟨d⟩", "when work really began"],
+      [":aend ⟨d⟩", "when it really finished — none clears"],
     ],
   },
   {

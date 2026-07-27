@@ -329,6 +329,10 @@ export function Gantt({
                     sched.summary ? ` · ${sched.children} inside` : ""
                   }${
                     sched.slack_days > 0 ? `\nslack ${sched.slack_days}d` : ""
+                  }${
+                    task.actual_start
+                      ? `\nactual ${task.actual_start} → ${task.actual_end ?? "…"}`
+                      : ""
                   }`}
                 >
                   <div
@@ -388,6 +392,40 @@ export function Gantt({
                       }}
                     />
                   </>
+                )}
+                {/* 実績 — what actually happened, as a rail under the
+                    plan. Deliberately achromatic: the palette spends
+                    colour on meaning (magenta critical, amber overdue)
+                    and a record of fact is not a status. Reading the
+                    gap between bar and rail is the whole point, so it
+                    is drawn for summaries too rather than hiding a
+                    value the task actually carries. */}
+                {task.actual_start && (
+                  <div
+                    className={`gantt__actual${
+                      task.actual_end ? "" : " gantt__actual--open"
+                    }`}
+                    style={{
+                      left: x(task.actual_start),
+                      width: Math.max(
+                        (diffDays(
+                          task.actual_start,
+                          // Unfinished work runs to the *reference*
+                          // date, not to now: under `:asof` the rail
+                          // has to stop where the rest of the report
+                          // does.
+                          task.actual_end ?? today,
+                        ) +
+                          1) *
+                          dayW -
+                          2,
+                        3,
+                      ),
+                    }}
+                    title={`${task.title}\nactual ${task.actual_start} → ${
+                      task.actual_end ?? "…"
+                    }`}
+                  />
                 )}
                 {/* Only in the gantt-only view: alongside the list the
                     titles are already there, and repeating them here

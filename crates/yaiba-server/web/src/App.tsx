@@ -1447,12 +1447,27 @@ export function App() {
       : 0
     : -1;
 
+  // The window has to cover what *happened* as well as what is planned.
+  // A backfilled `:astart` can predate every scheduled start — the plan
+  // moves when a dependency slips, the record of the work does not — and
+  // a rail left of `rangeStart` is drawn at a negative offset inside a
+  // pane whose `scrollLeft` stops at 0: on screen for nobody, which is
+  // the "stored but never displayed" bug these rails exist to end.
+  // ISO dates compare lexicographically, so plain min/max is enough.
+  const spanned = [
+    data.schedule.start,
+    data.schedule.end,
+    data.today,
+    ...data.tasks.flatMap((t) =>
+      [t.actual_start, t.actual_end].filter((d): d is string => d !== null),
+    ),
+  ];
   const rangeStart = addDays(
-    data.schedule.start < data.today ? data.schedule.start : data.today,
+    spanned.reduce((a, b) => (a < b ? a : b)),
     -3,
   );
   const rangeEnd = addDays(
-    data.schedule.end > data.today ? data.schedule.end : data.today,
+    spanned.reduce((a, b) => (a > b ? a : b)),
     zoom === "day" ? 7 : 30,
   );
 
