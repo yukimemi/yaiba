@@ -146,6 +146,8 @@ require handing over the keybindings too:
 | drag its right edge | change the duration |
 | drag the dot past its end onto another bar | make that task wait for this one |
 | click a date cell | pick that date off a calendar (`gd` shows the columns) |
+| `◀` `▶` beside the date | move the reference date a day |
+| click the date | jump to one, or back to now |
 
 Dragging a bar pins its start: a task placed by its dependencies gets an
 explicit date, which is what makes the gesture survive the next
@@ -245,6 +247,21 @@ from a column of numbers.
 :asof -3d           # three days ago
 :asof today         # back to now
 ```
+
+The reference date sits in the top bar at all times — it is the number
+every bar, percentage and overdue flag is measured from, so leaving it
+unstated made the view depend on something it never showed. `◀` and `▶`
+walk it a day at a time, which is how you watch the progress line bend;
+clicking the date opens a jump list and a date field. It reads as grey
+chrome while you are at now and turns amber the moment you are not,
+because moving off now is a mode, and one that refuses edits.
+
+Forward is as available as back: a date ahead of now answers "if nothing
+moves, how far behind is this by Friday". What a past date will *not*
+show you is a task that did not exist yet — the snapshot drops anything
+created after the date, so a task entered today is absent from
+yesterday's view even when its planned dates run back a fortnight. The
+filter is on when the task was written down, not on where its bar sits.
 
 Progress and status are recorded per day, so a past reference date shows
 what was known then rather than today's numbers back-projected. The
