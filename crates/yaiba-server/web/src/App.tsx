@@ -78,6 +78,14 @@ export function App() {
 
   const [projects, setProjects] = useState<ProjectsInfo>({ projects: [], active: "" });
   const [showProjects, setShowProjects] = useState(false);
+  /**
+   * The last project action to fail, shown *inside* the palette.
+   *
+   * The status line is not enough on its own: the palette is `position:
+   * fixed; inset: 0` above it, so a `say()` while it is open lands
+   * behind the overlay and the failure reads as nothing having happened.
+   */
+  const [projectError, setProjectError] = useState<string | null>(null);
 
   const [view, setView] = useState<View>("split");
   const [zoom, setZoom] = useState<Zoom>("day");
@@ -240,7 +248,7 @@ export function App() {
         return load();
       })
       .then(() => say(`project · ${name}`, "ok"))
-      .catch((e: Error) => say(e.message, "error"));
+      .catch((e: Error) => failProject(e));
   };
 
   /**
@@ -252,6 +260,18 @@ export function App() {
    * filter or a fold depth carried across would silently hide the new
    * project's tasks and read as the operation having lost them.
    */
+  /**
+   * Report a project action that failed, to both places it can be read.
+   *
+   * The status line alone is not enough while the palette is up — it sits
+   * under a `position: fixed; inset: 0` overlay, so the message is there
+   * and invisible, and the failure reads as nothing having happened.
+   */
+  const failProject = (e: Error) => {
+    setProjectError(e.message);
+    say(e.message, "error");
+  };
+
   const adoptProjects = (info: ProjectsInfo, note: string) => {
     setProjects(info);
     setShowProjects(false);
@@ -268,7 +288,7 @@ export function App() {
     void api
       .createProject(name)
       .then((info) => adoptProjects(info, `project · ${info.active} (new)`))
-      .catch((e: Error) => say(e.message, "error"));
+      .catch((e: Error) => failProject(e));
   };
 
   const renameProject = (from: string, to: string) => {
@@ -283,7 +303,7 @@ export function App() {
         // nothing but a label.
         say(`renamed ${from} → ${to}`, "ok");
       })
-      .catch((e: Error) => say(e.message, "error"));
+      .catch((e: Error) => failProject(e));
   };
 
   const forgetProject = (name: string) => {
@@ -295,7 +315,7 @@ export function App() {
           `forgot ${name} · database still on disk · now on ${info.active}`,
         ),
       )
-      .catch((e: Error) => say(e.message, "error"));
+      .catch((e: Error) => failProject(e));
   };
 
   const say = (text: string, kind: Message["kind"] = "info") =>
@@ -1393,6 +1413,7 @@ export function App() {
       if (projects.projects.length < 2) {
         say("only one project is open — `yaiba join <ticket>` adds another", "info");
       } else {
+        setProjectError(null);
         setShowProjects(true);
       }
     }
@@ -1452,7 +1473,10 @@ export function App() {
         theme={theme}
         project={projects.active}
         projectCount={projects.projects.length}
-        onOpenProjects={() => setShowProjects(true)}
+        onOpenProjects={() => {
+          setProjectError(null);
+          setShowProjects(true);
+        }}
         onToggleTheme={() => applyUi({ theme: "toggle" })}
         focusTitle={
           focus ? (data.tasks.find((t) => t.id === focus)?.title ?? null) : null
@@ -1544,7 +1568,12 @@ export function App() {
           onCreate={createProject}
           onRename={renameProject}
           onForget={forgetProject}
-          onClose={() => setShowProjects(false)}
+          error={projectError}
+          onDismissError={() => setProjectError(null)}
+          onClose={() => {
+            setShowProjects(false);
+            setProjectError(null);
+          }}
         />
       )}
     </div>

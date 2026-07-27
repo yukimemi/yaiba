@@ -9,6 +9,10 @@ interface Props {
   onRename: (from: string, to: string) => void;
   onForget: (name: string) => void;
   onClose: () => void;
+  /** The last action that failed, or null. Shown next to the prompt. */
+  error: string | null;
+  /** Called when the user moves on, so a stale failure stops shouting. */
+  onDismissError: () => void;
 }
 
 /**
@@ -60,6 +64,8 @@ export function ProjectPalette({
   onRename,
   onForget,
   onClose,
+  error,
+  onDismissError,
 }: Props) {
   const [mode, setMode] = useState<Mode>({ kind: "filter" });
   const [query, setQuery] = useState("");
@@ -116,6 +122,7 @@ export function ProjectPalette({
   const backToFilter = () => {
     setMode({ kind: "filter" });
     setQuery("");
+    onDismissError();
   };
 
   const commit = () => {
@@ -203,6 +210,9 @@ export function ProjectPalette({
               onChange={(e) => {
                 setQuery(e.target.value);
                 setCursor(0);
+                // Typing is trying something else; the old failure is
+                // no longer about what is on screen.
+                onDismissError();
               }}
               onKeyDown={onKeyDown}
             />
@@ -213,6 +223,11 @@ export function ProjectPalette({
             </span>
           )}
         </div>
+
+        {/* Here rather than only in the status line, which this overlay
+            covers — a failure reported behind the panel reads as nothing
+            having happened, and <enter> would just resend it. */}
+        {error && <div className="palette__error">{error}</div>}
 
         {/* Confirm shows no input, so something still has to hold focus
             and take the keys. */}

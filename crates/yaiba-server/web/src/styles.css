@@ -1371,3 +1371,11 @@ body::after {
 .hud__project-count {
   color: var(--ash-dim);
 }
+
+/* The palette covers the status line, so a failure has to be reported
+   here as well — reported behind the panel is not reported. */
+.palette__error {
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--grid-strong);
+  color: var(--rust);
+}
