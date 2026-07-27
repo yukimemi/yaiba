@@ -334,6 +334,10 @@ export function TaskList({
                         <button
                           type="button"
                           key={col.field}
+                          // How the keyboard finds this cell to anchor
+                          // the calendar on — `cs` / `ce` / `ca` / `cA`
+                          // open the same panel a click does.
+                          data-date-cell={`${task.id}:${col.field}`}
                           className={classes}
                           title={col.title}
                           onMouseDown={(e) => {

@@ -111,6 +111,7 @@ yaiba self-update --check    # just tell me whether one exists
 | `/` `n` `N` | search |
 | `tab` | split → list → gantt · `[` `]` zoom the timeline |
 | `gd` | plan-vs-actual date columns ⇄ compact |
+| `cs` `ce` `ca` `cA` | calendar on the planned start / end, actual start / end |
 | `>>` `<<` | nest under the row above / move back out |
 | `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |
 | `za` | fold this row · `zf` focus its subtree, `zF` to come back |
@@ -231,10 +232,19 @@ gd              date columns <-> compact
 
 Click a cell and a calendar opens over it — `hjkl` or the arrows walk
 the grid, `[` `]` page months, `t` jumps to the reference date, `x`
-clears, `⏎` commits. Every pick runs the command you could have typed,
-so it obeys the same rules: picking an `end` writes a duration, an
-actual span is refused if it would run backwards, and a summary's plan
-is not editable at all — those cells are plain text rather than buttons.
+clears, `⏎` commits. The keyboard opens the same panel on the cursor
+row, without reaching for the mouse or turning the columns on:
+
+```text
+cs              calendar on the planned start · ce on the end
+ca              calendar on the actual start · cA on the actual end
+```
+
+`c` is change, the way `cc` changes the title. Every pick runs the
+command you could have typed, so it obeys the same rules: picking an
+`end` writes a duration, an actual span is refused if it would run
+backwards, and a summary's plan is not editable at all — those cells are
+plain text rather than buttons, and `cs` on one says so.
 
 The gantt draws a **progress line** (イナズマ線) from the reference date:
 each row steps left or right by how far it deviates from where the plan
