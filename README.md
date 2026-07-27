@@ -184,9 +184,32 @@ either one past the end of the list returns what you had typed.
 
 Every task carries both sides. The plan is `start` + `duration`; the
 actuals are stamped as work happens — `actual_start` the first time a
-task leaves `todo`, `actual_end` when it is done, both editable if you
-are recording things after the fact. Reopening a task clears its finish,
-because leaving it would quietly corrupt every comparison downstream.
+task leaves `todo`, `actual_end` when it is done. Reopening a task
+clears its finish, because leaving it would quietly corrupt every
+comparison downstream.
+
+```sh
+:start mon      # the plan: where it begins…
+:dur 5          # …and how long it takes
+:end 8/20       # or say where it lands, and the duration follows
+:astart 8/18    # the actuals, when you are recording after the fact
+:aend 8/22      # `none` on either one clears it
+```
+
+The two sides are shaped differently on purpose. A plan is `start` +
+`duration` because the scheduler *moves* it: when a dependency slips,
+what stays true is how long the work takes, not the day it happens to
+finish. So there is no stored end date — `:end` is sugar that measures
+back from the date you name and writes the duration. An actual span is
+the opposite: both ends are recorded, because nothing recomputes what
+already happened, and the days between them are not "how long it took"
+anyway.
+
+The gantt draws each recorded span as a thin rail under the bar, so the
+offset between plan and actual reads without a legend — flush left
+started on time, a rail past the bar's right edge ran long. Work still
+in progress fades out at the reference date rather than claiming a
+finish it doesn't have.
 
 The gantt draws a **progress line** (イナズマ線) from the reference date:
 each row steps left or right by how far it deviates from where the plan

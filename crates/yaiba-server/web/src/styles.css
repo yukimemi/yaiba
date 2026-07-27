@@ -666,6 +666,32 @@ body::after {
   );
 }
 
+/* 実績 — the recorded span, as a rail along the bottom of the row.
+   Under the plan rather than beside it, so the eye reads the offset
+   between the two without a legend: flush left means work started on
+   time, a rail running past the bar's right edge means it ran long.
+
+   Achromatic on purpose. Magenta is the critical path and amber is
+   overdue; spending a third hue on "this happened" would dilute the
+   rule that a colour here always carries a meaning. The plan keeps the
+   colour because the plan is what has a status. */
+.gantt__actual {
+  position: absolute;
+  top: calc(var(--row-h) - 5px);
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ash);
+}
+
+/* Still running: no right cap. Squaring it off would assert a finish
+   date that hasn't happened, so it fades out at the reference date
+   instead. */
+.gantt__actual--open {
+  border-radius: 2px 0 0 2px;
+  -webkit-mask-image: linear-gradient(90deg, #000 60%, transparent);
+  mask-image: linear-gradient(90deg, #000 60%, transparent);
+}
+
 /* Handles appear on hover only. With the keyboard as the primary
    interface, permanently visible grips would clutter every bar for a
    gesture most sessions never use. */

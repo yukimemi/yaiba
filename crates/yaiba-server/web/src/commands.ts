@@ -1,8 +1,8 @@
-import { parseDateExpr } from "./dates";
+import { diffDays, parseDateExpr } from "./dates";
 import type { Theme } from "./theme";
 import { SORT_KEYS, type SortKey } from "./filter";
 import { inversePatch, type Op } from "./ops";
-import type { AppData, Task, TaskPatch } from "./types";
+import type { AppData, Scheduled, Task, TaskPatch } from "./types";
 
 export type View = "list" | "gantt" | "split";
 export type Zoom = "day" | "week" | "month";
@@ -155,7 +155,10 @@ export const COMMANDS: CommandSpec[] = [
   { name: "delete", aliases: ["d"] },
   { name: "due", args: first(() => DATE_WORDS) },
   { name: "start", args: first(() => DATE_WORDS) },
+  { name: "end", args: first(() => DATE_WORDS) },
   { name: "duration", aliases: ["dur"] },
+  { name: "astart", args: first(() => DATE_WORDS) },
+  { name: "aend", args: first(() => DATE_WORDS) },
   { name: "priority", aliases: ["prio"], args: first(() => ["0", "1", "2", "3"]) },
   { name: "progress", aliases: ["pr"] },
   {
@@ -200,6 +203,26 @@ function patchSelection(
     label,
     message: selection.length > 1 ? `${label} · ${selection.length}` : label,
   };
+}
+
+/** The server's placement for a task, which is what the gantt draws. */
+function scheduled(data: AppData, task: Task): Scheduled | undefined {
+  return data.schedule.tasks.find((s) => s.id === task.id);
+}
+
+/**
+ * Refuse an edit to a field the scheduler derives for summaries.
+ *
+ * A summary's dates span its children and its progress is their
+ * weighted roll-up, so a value typed here is not wrong so much as
+ * *ignored* — the next recompute overwrites it. Silently accepting the
+ * patch is the worse failure: the row reports a start date the gantt
+ * never draws. Returns the refusal for `patchSelection`, or null when
+ * the task is an ordinary leaf.
+ */
+function refuseSummary(data: AppData, task: Task, field: string): string | null {
+  if (!scheduled(data, task)?.summary) return null;
+  return `“${task.title}” is a summary — its ${field} comes from its children`;
 }
 
 /** Resolve a 1-based row number as typed on the command line. */
@@ -301,7 +324,89 @@ export function runCommand(
       if (!clearing && date === null) return { error: `bad date: ${arg}` };
       return patchSelection(
         selection,
-        () => (head === "due" ? { due: date } : { start: date }),
+        (task) => {
+          // `:due` stays legal on a summary: a deadline for a whole
+          // project is a real thing to record, and `overdue` compares
+          // it against the rolled-up finish. Only the planned *start*
+          // is derived from the children.
+          if (head === "start") {
+            const refusal = refuseSummary(data, task, "start date");
+            if (refusal) return refusal;
+          }
+          return head === "due" ? { due: date } : { start: date };
+        },
+        `${head} ${date ?? "cleared"}`,
+      );
+    }
+
+    // The plan's finish is not a stored field — it is `start` +
+    // `duration_days`. Keeping an end date as well would leave three
+    // values free to disagree the next time a dependency pushes the
+    // task sideways, so `:end` is sugar over `:dur`: say where it
+    // lands and the duration follows.
+    case "end": {
+      if (!selection.length) return needTask();
+      // Every other date command clears on `none`, so the word arrives
+      // here already trained — and `parseDateExpr` maps it to null,
+      // which would come back as `bad date: none` and read as a parse
+      // failure. There is no end field to clear; say what to reach for
+      // instead.
+      if (!arg || ["none", "clear", "-"].includes(arg)) {
+        return {
+          error: "no end date is stored — set the span with :dur, or move it with :start none",
+        };
+      }
+      const date = parseDateExpr(arg, data.today);
+      if (date === null) return { error: `bad date: ${arg}` };
+      return patchSelection(
+        selection,
+        (task) => {
+          const refusal = refuseSummary(data, task, "dates");
+          if (refusal) return refusal;
+          // A task with no `start` of its own is placed by the
+          // scheduler. Pin it where it currently sits — the same thing
+          // dragging its bar does — so the duration is measured from a
+          // date that survives the next recompute.
+          const start = task.start ?? scheduled(data, task)?.start;
+          if (!start) return `“${task.title}” has no start to measure from`;
+          const days = diffDays(start, date) + 1;
+          if (days < 1) return `${date} is before the start (${start})`;
+          return { start, duration_days: days };
+        },
+        `end ${date}`,
+      );
+    }
+
+    // The actuals the server stamps as work happens, typed by hand when
+    // you are recording after the fact. Both ends are stored here,
+    // unlike the plan: an actual span is a record of what happened, not
+    // something the scheduler is free to move.
+    case "astart":
+    case "aend": {
+      if (!selection.length) return needTask();
+      const clearing = !arg || ["none", "clear", "-"].includes(arg);
+      const date = clearing ? null : parseDateExpr(arg, data.today);
+      if (!clearing && date === null) return { error: `bad date: ${arg}` };
+      return patchSelection(
+        selection,
+        (task) => {
+          // Refuse a span that runs backwards. Left in, it would read
+          // as a task that finished before it started and quietly skew
+          // every plan-vs-actual comparison drawn from it.
+          if (date && head === "astart" && task.actual_end) {
+            if (diffDays(date, task.actual_end) < 0) {
+              return `${date} is after work finished (${task.actual_end})`;
+            }
+          }
+          if (date && head === "aend" && task.actual_start) {
+            if (diffDays(task.actual_start, date) < 0) {
+              return `${date} is before work started (${task.actual_start})`;
+            }
+          }
+          return head === "astart"
+            ? { actual_start: date }
+            : { actual_end: date };
+        },
         `${head} ${date ?? "cleared"}`,
       );
     }
@@ -314,7 +419,10 @@ export function runCommand(
       }
       return patchSelection(
         selection,
-        () => ({ duration_days: Math.round(days) }),
+        (task) =>
+          refuseSummary(data, task, "span") ?? {
+            duration_days: Math.round(days),
+          },
         `${Math.round(days)}d`,
       );
     }
@@ -337,11 +445,12 @@ export function runCommand(
       const value = Math.round(n);
       return patchSelection(
         selection,
-        () => ({
-          progress: value,
-          // 100% and "still todo" is a state nobody means to be in.
-          ...(value === 100 ? { status: "done" as const } : {}),
-        }),
+        (task) =>
+          refuseSummary(data, task, "progress") ?? {
+            progress: value,
+            // 100% and "still todo" is a state nobody means to be in.
+            ...(value === 100 ? { status: "done" as const } : {}),
+          },
         `${value}%`,
       );
     }
