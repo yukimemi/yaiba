@@ -1410,12 +1410,12 @@ export function App() {
         .catch((e: Error) => say(e.message, "error"));
     }
     if (result.project?.pick) {
-      if (projects.projects.length < 2) {
-        say("only one project is open — `yaiba join <ticket>` adds another", "info");
-      } else {
-        setProjectError(null);
-        setShowProjects(true);
-      }
+      // Opens however few projects there are. Switching is only one of the
+      // things in here — create, rename and forget all live on the list
+      // too, and refusing to open with a single project hid all three
+      // behind commands you would have to already know about.
+      setProjectError(null);
+      setShowProjects(true);
     }
     if (result.project?.switch) switchTo(result.project.switch);
     if (result.project?.create) createProject(result.project.create);
