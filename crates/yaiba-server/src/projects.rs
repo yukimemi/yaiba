@@ -259,6 +259,29 @@ impl Registry {
         Self::default_db().is_ok_and(|db| same_path(&db, &project.db))
     }
 
+    /// Give a project a different name.
+    ///
+    /// Only the entry changes. The database keeps the path it was created
+    /// with, because identity here *is* the path — which is also what
+    /// makes a hand-edited rename stick rather than being re-adopted under
+    /// the old name. A project renamed from `private` to `personal` still
+    /// lives in `projects/private.db`, and a later `new private` is
+    /// refused on that file, which is correct but worth knowing.
+    pub fn rename(&mut self, from: &str, to: &str) -> Result<()> {
+        let to = validate_name(to)?.to_string();
+        if from == to {
+            return Ok(());
+        }
+        if self.find(&to).is_some() {
+            bail!("a project named {to:?} is already registered");
+        }
+        let Some(project) = self.file.projects.iter_mut().find(|p| p.name == from) else {
+            bail!("no project named {from:?}");
+        };
+        project.name = to;
+        Ok(())
+    }
+
     /// Drop an entry. The database file itself is never touched — a name
     /// is metadata, and deleting someone's tasks is not what "forget" means.
     pub fn forget(&mut self, name: &str) -> Option<Project> {
@@ -289,6 +312,65 @@ impl Registry {
             .find(|candidate| self.find(candidate).is_none())
             .expect("an unbounded counter always yields a free name")
     }
+}
+
+/// Where a brand-new project's database goes, refusing every path that
+/// would land it on an existing one.
+///
+/// Lives here rather than in the binary because *every* way of starting a
+/// project has to go through it — the CLI's `new` and `join`, and the API
+/// the UI calls. A free *name* is not a free *file*: the path is
+/// `slug(name)`, so "work" and "work!" both become projects/work.db, and
+/// opening an existing database as if it were new either fuses two
+/// projects or — for `join` — overwrites the room key and cuts its peer
+/// off.
+///
+/// `db_override` is the caller naming the file itself, a deliberate choice
+/// rather than a collision, so it skips the *path* checks — never the name
+/// check.
+///
+/// `escape` is a full noun phrase, not a flag name: it lands inside
+/// "or choose {escape}", where a bare `--as` reads as a dangling flag
+/// rather than an instruction.
+pub fn db_for_new_project(
+    registry: &Registry,
+    name: &str,
+    db_override: Option<&Path>,
+    escape: &str,
+) -> Result<PathBuf> {
+    if let Some(existing) = registry.find(name) {
+        bail!(
+            "a project named {name:?} is already registered ({}) — open it with \
+             `yaiba open {name}`, or choose {escape}",
+            existing.db.display()
+        );
+    }
+    if let Some(path) = db_override {
+        return Ok(path.to_path_buf());
+    }
+
+    let path = registry.joined_db_path(name)?;
+    if let Some(existing) = registry.find_by_db(&path) {
+        bail!(
+            "{name:?} would share a database with the project {:?} ({}) — open that \
+             one with `yaiba open {}`, or choose a name that differs by more than \
+             punctuation",
+            existing.name,
+            // The registered path, not the one just built: it is
+            // normalized, so it reads as a real path.
+            existing.db.display(),
+            existing.name
+        );
+    }
+    if path.exists() {
+        bail!(
+            "{} already exists but no project is registered for it (forgotten \
+             earlier?). Choose {escape}, or name that database directly to use it \
+             deliberately",
+            path.display()
+        );
+    }
+    Ok(path)
 }
 
 /// Reject names that would be surprising as a filename or ambiguous in the
@@ -586,6 +668,111 @@ mod tests {
         let order: Vec<&str> = reg.recent().iter().map(|p| p.name.as_str()).collect();
         assert_eq!(order.last(), Some(&"aaa-never"));
         assert!(order.contains(&"one") && order.contains(&"two"));
+    }
+
+    /// Every way of starting a project goes through this, so it is worth
+    /// testing here rather than only through whichever caller happens to
+    /// exercise it.
+    #[test]
+    fn a_free_name_gets_a_path_under_the_projects_directory() {
+        let registry = temp_registry();
+        let path = db_for_new_project(&registry, "work", None, "x").unwrap();
+        assert_eq!(path, registry.joined_db_path("work").unwrap());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_registered_name_is_refused_with_the_callers_escape() {
+        let mut registry = temp_registry();
+        let db = registry.joined_db_path("work").unwrap();
+        registry.remember(&db, Some("work"), None).unwrap();
+
+        let err = db_for_new_project(&registry, "work", None, "another name with --as")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("already registered"), "{err}");
+        // The escape is interpolated as a phrase, so it reads as a sentence.
+        assert!(err.contains("choose another name with --as"), "{err}");
+    }
+
+    /// Distinct names, one file — the collision `find` alone cannot see.
+    #[test]
+    fn a_name_whose_slug_collides_is_refused() {
+        let mut registry = temp_registry();
+        let db = registry.joined_db_path("work").unwrap();
+        registry.remember(&db, Some("work"), None).unwrap();
+
+        let err = db_for_new_project(&registry, "work!", None, "x")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("share a database"), "{err}");
+    }
+
+    #[test]
+    fn a_database_left_behind_by_a_forget_is_refused() {
+        let registry = temp_registry();
+        let db = registry.joined_db_path("ghost").unwrap();
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        std::fs::write(&db, b"pretend this holds tasks").unwrap();
+
+        let err = db_for_new_project(&registry, "ghost", None, "x")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("already exists"), "{err}");
+    }
+
+    /// Naming the file yourself skips the *path* checks but never the name
+    /// check — otherwise `--db` would be a way to register a duplicate.
+    #[test]
+    fn an_override_skips_the_path_checks_but_not_the_name_check() {
+        let mut registry = temp_registry();
+        let db = registry.joined_db_path("work").unwrap();
+        registry.remember(&db, Some("work"), None).unwrap();
+        let chosen = PathBuf::from("elsewhere.db");
+
+        assert_eq!(
+            db_for_new_project(&registry, "fresh", Some(&chosen), "x").unwrap(),
+            chosen
+        );
+        assert!(db_for_new_project(&registry, "work", Some(&chosen), "x").is_err());
+    }
+
+    #[test]
+    fn rename_keeps_the_database_and_the_entry_identity() {
+        let mut reg = empty();
+        reg.remember(Path::new("/tmp/private.db"), Some("private"), None)
+            .unwrap();
+        let db = reg.find("private").unwrap().db.clone();
+
+        reg.rename("private", "personal").unwrap();
+        assert_eq!(reg.names(), vec!["personal"]);
+        // The file does not move: identity here is the path, which is also
+        // what stops the old name being re-adopted alongside the new one.
+        assert_eq!(reg.find("personal").unwrap().db, db);
+        assert!(reg.find_by_db(&db).is_some());
+    }
+
+    #[test]
+    fn rename_refuses_a_name_in_use_and_leaves_both_alone() {
+        let mut reg = empty();
+        reg.remember(Path::new("/tmp/a.db"), Some("shared"), None)
+            .unwrap();
+        reg.remember(Path::new("/tmp/b.db"), Some("private"), None)
+            .unwrap();
+        assert!(reg.rename("private", "shared").is_err());
+        assert_eq!(reg.names(), vec!["private", "shared"]);
+    }
+
+    #[test]
+    fn rename_validates_the_new_name() {
+        let mut reg = empty();
+        reg.remember(Path::new("/tmp/a.db"), Some("work"), None)
+            .unwrap();
+        assert!(reg.rename("work", "a/b").is_err());
+        assert!(reg.rename("nope", "fine").is_err());
+        // Renaming to itself is a no-op rather than a self-collision.
+        assert!(reg.rename("work", "work").is_ok());
+        assert_eq!(reg.names(), vec!["work"]);
     }
 
     #[test]

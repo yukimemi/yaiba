@@ -167,6 +167,18 @@ enum Command {
     /// List registered projects.
     List,
 
+    /// Give a project a different name.
+    ///
+    /// Only the name changes: the database keeps the file it was created
+    /// with, so a project renamed away from `work` still lives in
+    /// `projects/work.db`, and that filename stays claimed.
+    Rename {
+        /// The name it has now, as shown by `yaiba list`.
+        from: String,
+        /// What to call it instead.
+        to: String,
+    },
+
     /// Drop a project from the registry. Its database is left on disk.
     Forget {
         /// Project name, as shown by `yaiba list`.
@@ -232,6 +244,7 @@ async fn main() -> Result<()> {
             non_interactive,
         }) => return updater::run_self_update(*yes, *check, *non_interactive).await,
         Some(Command::List) => return list_projects(),
+        Some(Command::Rename { from, to }) => return rename_project(from, to),
         Some(Command::Forget { name }) => return forget_project(name),
         _ => {}
     }
@@ -274,12 +287,16 @@ async fn main() -> Result<()> {
     // a reconnect. Bound before the HTTP listener so the ticket is up by
     // the time the UI opens.
     let mut ticket = None;
-    if !cli.no_sync {
-        let transport = if cli.relay_only() {
+    // Carried into `AppState` as well, so a project created from the UI
+    // later comes up replicating the same way these do.
+    let transport = (!cli.no_sync).then(|| {
+        if cli.relay_only() {
             Transport::RelayOnly
         } else {
             Transport::Direct
-        };
+        }
+    });
+    if let Some(transport) = transport {
         // Started concurrently: each endpoint spends most of its setup
         // waiting on a relay handshake, so doing them in sequence would
         // make startup scale with the number of projects.
@@ -299,7 +316,9 @@ async fn main() -> Result<()> {
                 Err(e) => Err(anyhow!("the endpoint task did not finish: {e}")),
             };
             match started {
-                Ok(sync) => project.sync = Some(sync),
+                // Spawns the loop and keeps its handle, so closing the
+                // project later can actually stop it.
+                Ok(sync) => project.replicate(sync),
                 // Index 0 is the project being opened. Only its endpoint is
                 // worth failing the launch over — a background project that
                 // cannot replicate is still perfectly usable locally, and
@@ -344,12 +363,7 @@ async fn main() -> Result<()> {
     // background project whose endpoint failed to bind is open but not
     // replicating, and the banner must not fold it into "all syncing".
     let syncing_count = projects.iter().filter(|p| p.sync.is_some()).count();
-    let state = api::AppState::with_projects(projects);
-    for project in state.projects() {
-        if let Some(sync) = &project.sync {
-            tokio::spawn(Arc::clone(sync).run(Arc::clone(&project.notify)));
-        }
-    }
+    let state = api::AppState::with_projects(projects, transport);
 
     let router = app(state);
 
@@ -450,7 +464,12 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 Some(given) => projects::validate_name(given)?.to_string(),
                 None => projects::name_from_ticket(ticket),
             };
-            let db = db_for_new_project(cli, registry, &name, "another name with --as")?;
+            let db = projects::db_for_new_project(
+                registry,
+                &name,
+                cli.db.as_deref(),
+                "another name with --as",
+            )?;
             Ok(Target {
                 db,
                 peer: Some(Peer::Adopt(peer)),
@@ -461,7 +480,12 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
         Some(Command::New { name }) => {
             let name = projects::validate_name(name)?.to_string();
             let registry = registry_ref(registry)?;
-            let db = db_for_new_project(cli, registry, &name, "a different name")?;
+            let db = projects::db_for_new_project(
+                registry,
+                &name,
+                cli.db.as_deref(),
+                "a different name",
+            )?;
             Ok(Target {
                 db,
                 peer: None,
@@ -499,58 +523,6 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
             })
         }
     }
-}
-
-/// Where a brand-new project's database goes, refusing every path that
-/// would land it on an existing one.
-///
-/// Shared by `join` and `new` because the hazard is the same either way:
-/// a free *name* is not a free *file*. The path is `slug(name)`, so
-/// "work" and "work!" both become projects/work.db, and opening an
-/// existing database as if it were new would either fuse two projects or
-/// — for `join` — overwrite the room key and cut its peer off.
-///
-/// `escape` is a full noun phrase, not a flag name: it lands inside
-/// "or choose {escape}", where a bare `--as` reads as a dangling flag
-/// rather than an instruction. `join` says "another name with --as",
-/// `new` says "a different name".
-fn db_for_new_project(cli: &Cli, registry: &Registry, name: &str, escape: &str) -> Result<PathBuf> {
-    if let Some(existing) = registry.find(name) {
-        bail!(
-            "a project named {name:?} is already registered ({}) — open it with \
-             `yaiba open {name}`, or choose {escape}",
-            existing.db.display()
-        );
-    }
-    // An explicit --db is the user naming the file themselves, which is a
-    // deliberate choice rather than a collision.
-    if let Some(path) = &cli.db {
-        return Ok(path.clone());
-    }
-
-    let path = registry.joined_db_path(name)?;
-    if let Some(existing) = registry.find_by_db(&path) {
-        bail!(
-            "{name:?} would share a database with the project {:?} ({}) — open that \
-             one with `yaiba open {}`, or choose a name that differs by more than \
-             punctuation",
-            existing.name,
-            // The registered path, not the one just built: it is
-            // normalized, so it reads as a real path.
-            existing.db.display(),
-            existing.name
-        );
-    }
-    if path.exists() {
-        bail!(
-            "{} already exists but no project is registered for it (forgotten \
-             earlier?). Choose {escape}, or pass --db {} to use that database \
-             deliberately",
-            path.display(),
-            path.display()
-        );
-    }
-    Ok(path)
 }
 
 fn parse_ticket(raw: &str) -> Result<Ticket> {
@@ -717,6 +689,25 @@ fn list_projects() -> Result<()> {
         );
     }
     println!("\nregistry: {}", registry.path().display());
+    Ok(())
+}
+
+fn rename_project(from: &str, to: &str) -> Result<()> {
+    let mut registry = load_registry()?;
+    if registry.find(from).is_none() {
+        return Err(unknown_project(&registry, from));
+    }
+    // `Registry::rename` trims, so bind the trimmed form once rather than
+    // recompute it at each use and risk the two drifting apart.
+    let to = projects::validate_name(to)?;
+    registry.rename(from, to)?;
+    registry.save()?;
+    println!("renamed {from:?} to {to:?}");
+    // Say it plainly rather than let someone find out when a later
+    // `new work` is refused: the file keeps the old name.
+    if let Some(project) = registry.find(to) {
+        println!("  its database is still {}", project.db.display());
+    }
     Ok(())
 }
 

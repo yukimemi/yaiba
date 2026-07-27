@@ -20,6 +20,7 @@ pub mod proto;
 
 use std::collections::HashSet;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -105,6 +106,22 @@ pub struct SyncNode {
     /// Hex room key. Replaced when joining someone else's group.
     room: Mutex<String>,
     peers: Mutex<HashSet<EndpointId>>,
+    /// Set by `shutdown`, and the thing that actually makes it stick.
+    ///
+    /// Aborting the accept loop stops *new* connections being taken, but
+    /// each one it already took is served on a detached task nothing
+    /// holds a handle to — a dial mid-handshake when shutdown lands goes
+    /// on to merge seconds later. `serve` consults this instead, so
+    /// refusing does not depend on winning a race with a task.
+    closed: AtomicBool,
+    /// The inbound half, so replication can actually be stopped.
+    ///
+    /// Aborting the outbound driver silences only what this replica
+    /// *sends*: the accept loop keeps answering dials and merging what
+    /// peers push. A caller that has closed a project needs both halves
+    /// to stop, or it is still taking writes into a store it no longer
+    /// considers open.
+    inbound: Mutex<Option<tokio::task::AbortHandle>>,
 }
 
 impl SyncNode {
@@ -165,14 +182,52 @@ impl SyncNode {
             store,
             room: Mutex::new(room),
             peers: Mutex::new(HashSet::new()),
+            closed: AtomicBool::new(false),
+            inbound: Mutex::new(None),
         });
 
         node.load_peers()?;
 
         let listener = Arc::clone(&node);
-        tokio::spawn(async move { listener.accept_loop().await });
+        let accepting = tokio::spawn(async move { listener.accept_loop().await });
+        *node.inbound.lock().unwrap_or_else(|e| e.into_inner()) = Some(accepting.abort_handle());
 
         Ok(node)
+    }
+
+    /// Stop replicating, in both directions, and give up the endpoint.
+    ///
+    /// For a caller that has closed the project this node belongs to.
+    /// Aborting their own outbound driver is not enough on its own — the
+    /// accept loop here would go on answering dials and merging peer
+    /// writes into a store nobody is looking at any more.
+    ///
+    /// Idempotent: the abort handle is taken, so a second call has nothing
+    /// left to abort, and closing an endpoint twice is a no-op.
+    ///
+    /// Synchronous on purpose — callers reach this while holding a lock
+    /// over their own project set, which rules out awaiting here. Aborting
+    /// the accept loop is what actually stops peer writes landing, and it
+    /// takes effect immediately; the endpoint's graceful close only tells
+    /// peers why, so it is spawned rather than waited on.
+    pub fn shutdown(&self) {
+        // Under the store lock, so this cannot land between a merge's
+        // check and the merge itself. A merge already running finishes
+        // and this waits for it; none can start afterwards.
+        {
+            let _db = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            self.closed.store(true, Ordering::SeqCst);
+        }
+        if let Some(task) = self
+            .inbound
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            task.abort();
+        }
+        let endpoint = self.endpoint.clone();
+        tokio::spawn(async move { endpoint.close().await });
     }
 
     pub fn ticket(&self) -> Ticket {
@@ -271,7 +326,7 @@ impl SyncNode {
         proto::write_frame(&mut send, &hello).await?;
 
         let offer: Offer = proto::read_frame(&mut recv).await?;
-        let applied = self.with_store(|db| db.merge(&offer.entries, &offer.vv))?;
+        let applied = self.merge_unless_closed(&offer.entries, &offer.vv)?;
 
         // Now that their vector is known, send back only what they lack.
         let entries = self.with_store(|db| db.entries_since(&offer.vv))?;
@@ -303,6 +358,14 @@ impl SyncNode {
         let (mut send, mut recv) = conn.accept_bi().await?;
         let hello: Hello = proto::read_frame(&mut recv).await?;
 
+        // Checked after the handshake, not before it: shutdown can land
+        // while this connection is still being established, and the point
+        // is that nothing merges afterwards.
+        if self.closed.load(Ordering::SeqCst) {
+            conn.close(2u32.into(), b"shut down");
+            bail!("refused an inbound peer: this node has been shut down");
+        }
+
         let room = self.room.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if !proto::room_matches(&hello.room, &room) {
             conn.close(1u32.into(), b"room mismatch");
@@ -316,7 +379,7 @@ impl SyncNode {
         proto::write_frame(&mut send, &offer).await?;
 
         let push: Push = proto::read_frame(&mut recv).await?;
-        let applied = self.with_store(|db| db.merge(&push.entries, &hello.vv))?;
+        let applied = self.merge_unless_closed(&push.entries, &hello.vv)?;
         if applied > 0 {
             tracing::info!(applied, "merged updates from an inbound peer");
         }
@@ -342,6 +405,31 @@ impl SyncNode {
     fn with_store<T>(&self, f: impl FnOnce(&mut Store) -> yaiba_core::Result<T>) -> Result<T> {
         let mut db = self.store.lock().unwrap_or_else(|e| e.into_inner());
         Ok(f(&mut db)?)
+    }
+
+    /// Merge, unless this node has been shut down.
+    ///
+    /// The check and the merge share the store's lock, and [`shutdown`]
+    /// takes that same lock to set the flag — so the two cannot interleave.
+    /// Checking `closed` on its own is not enough: several awaits sit
+    /// between the handshake and the merge, and a shutdown landing in that
+    /// gap would still let one write through.
+    ///
+    /// A merge already under way when shutdown is called therefore
+    /// completes, and shutdown waits for it. That is the boundary meaning
+    /// "nothing lands after the close", not "nothing lands during it".
+    ///
+    /// [`shutdown`]: SyncNode::shutdown
+    fn merge_unless_closed(
+        &self,
+        entries: &[yaiba_core::Entry],
+        vv: &yaiba_core::VersionVector,
+    ) -> Result<usize> {
+        let mut db = self.store.lock().unwrap_or_else(|e| e.into_inner());
+        if self.closed.load(Ordering::SeqCst) {
+            bail!("refused a merge: this node has been shut down");
+        }
+        Ok(db.merge(entries, vv)?)
     }
 }
 
