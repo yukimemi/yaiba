@@ -1,14 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type PeersInfo, type ProjectsInfo } from "./api";
-import { runCommand, type UiPatch, type View, type Zoom } from "./commands";
+import {
+  runCommand,
+  type Columns,
+  type DateField,
+  type UiPatch,
+  type View,
+  type Zoom,
+} from "./commands";
 import {
   completionLine,
   startCompletion,
   stepCompletion,
   type Completion,
 } from "./completion";
+import { DATE_COLUMNS, dateValue } from "./dateColumns";
 import { Gantt } from "./components/Gantt";
+import { DatePicker, type Anchor } from "./components/DatePicker";
 import { Help } from "./components/Help";
 import { ProjectPalette } from "./components/ProjectPalette";
 import { Hud } from "./components/Hud";
@@ -89,6 +98,21 @@ export function App() {
 
   const [view, setView] = useState<View>("split");
   const [zoom, setZoom] = useState<Zoom>("day");
+  /** Which columns the list carries — `:dates` / `gd` swaps them. */
+  const [columns, setColumns] = useState<Columns>("compact");
+  /**
+   * The date cell the calendar is open over.
+   *
+   * Held here rather than in the list because it owns the keyboard while
+   * it is up, the same way the project palette does — and because the
+   * panel is `position: fixed`, so it has to be rendered outside a pane
+   * that scrolls and clips.
+   */
+  const [picking, setPicking] = useState<{
+    id: string;
+    field: DateField;
+    anchor: Anchor;
+  } | null>(null);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("manual");
   const [theme, setTheme] = useState<Theme>(initialTheme);
@@ -195,13 +219,29 @@ export function App() {
   // editing out from under the caret.
   useEffect(() => {
     if (mode !== "normal" && mode !== "visual") return;
+    // The picker is an input like any other, even though the mode stays
+    // normal behind it: a refresh mid-pick re-renders the cell the panel
+    // is anchored to.
+    if (picking) return;
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(timer);
-  }, [mode, load]);
+  }, [mode, picking, load]);
 
   useEffect(() => {
     if (!cursorId && visible.length) setCursorId(visible[0].id);
   }, [cursorId, visible]);
+
+  /**
+   * Drop an open picker whose row is gone — a peer's delete, a filter, a
+   * project switch.
+   *
+   * Not cosmetic: the key handler stands down while a picker is up, so a
+   * `picking` that outlived its row would leave the panel invisible and
+   * every keystroke swallowed, with nothing on screen to escape from.
+   */
+  useEffect(() => {
+    if (picking && !visible.some((t) => t.id === picking.id)) setPicking(null);
+  }, [picking, visible]);
 
   // Peer roster, for the HUD. Slower than the data poll — peers come and
   // go on a human timescale.
@@ -237,6 +277,7 @@ export function App() {
         setProjects(info);
         setCursorId(null);
         setAnchorId(null);
+        setPicking(null);
         setFocus(null);
         // Both halves of the folding state. `foldLevel` is a raw depth
         // compared against each project's own tree, so carrying it over
@@ -277,6 +318,7 @@ export function App() {
     setShowProjects(false);
     setCursorId(null);
     setAnchorId(null);
+    setPicking(null);
     setFocus(null);
     setFoldLevel(null);
     setCollapsed(new Set());
@@ -747,6 +789,22 @@ export function App() {
         return next;
       });
     }
+    if (ui.columns) {
+      setColumns((prev) => {
+        const next =
+          ui.columns === "toggle"
+            ? prev === "dates"
+              ? "compact"
+              : "dates"
+            : ui.columns!;
+        say(
+          next === "dates"
+            ? "dates — click a cell to pick one"
+            : "compact columns",
+        );
+        return next;
+      });
+    }
     if (ui.foldLevel !== undefined) setFoldLevel(ui.foldLevel);
     if (ui.zoom) setZoom(ui.zoom);
     if (ui.filter !== undefined) setFilter(ui.filter);
@@ -918,14 +976,51 @@ export function App() {
     [run],
   );
 
+  /**
+   * Commit a date picked out of the calendar.
+   *
+   * By running the command the keyboard would have run, not by patching
+   * the field: `:end` still turns a date into a duration, `:astart`
+   * still refuses a span that finishes before it starts, and a summary
+   * is still refused. A second implementation here would be the one
+   * that is wrong after the next change to either.
+   */
+  const commitDate = useCallback(
+    (id: string, field: DateField, iso: string | null) => {
+      setPicking(null);
+      if (!data) return;
+      const task = visible.find((t) => t.id === id);
+      if (!task) return;
+      const result = runCommand(`${field} ${iso ?? "none"}`, {
+        data,
+        visible,
+        current: task,
+        // A click names one row, so it edits that row — even in visual
+        // mode, where the same command from the keyboard takes the block.
+        selection: [task],
+        projects: projects.projects.map((p) => p.name),
+      });
+      if (!result) return;
+      if (result.error) {
+        say(result.error, "error");
+        return;
+      }
+      if (result.ops) {
+        void run(result.ops, result.undoOps ?? [], result.label ?? field);
+      }
+      if (result.message) say(result.message, "ok");
+    },
+    [data, visible, projects, run],
+  );
+
   // ---- key handling -----------------------------------------------
 
   const onKey = (e: KeyboardEvent) => {
     // Read the ref, not the state: see enterMode.
     const activeMode = modeRef.current;
-    // The palette runs its own input and owns every key while it is up,
-    // exactly as insert / command / search do.
-    if (showProjects) return;
+    // The palette and the date picker each run their own input and own
+    // every key while up, exactly as insert / command / search do.
+    if (showProjects || picking) return;
     if (showHelp) {
       if (e.key === "Escape" || e.key === "?" || e.key === "Enter") {
         setShowHelp(false);
@@ -1225,6 +1320,10 @@ export function App() {
         outdent(selection);
         break;
 
+      case "gd":
+        applyUi({ columns: "toggle" });
+        break;
+
       case "gt":
         applyUi({ theme: "toggle" });
         break;
@@ -1471,6 +1570,16 @@ export function App() {
     zoom === "day" ? 7 : 30,
   );
 
+  // Both can go missing under an open picker — a peer's delete, or a
+  // filter that no longer matches — and then there is no cell to float
+  // over any more.
+  const pickingTask = picking
+    ? (visible.find((t) => t.id === picking.id) ?? null)
+    : null;
+  const pickingColumn = picking
+    ? (DATE_COLUMNS.find((c) => c.field === picking.field) ?? null)
+    : null;
+
   return (
     <div className="app">
       <Hud
@@ -1524,6 +1633,9 @@ export function App() {
               filter ? "nothing matches this filter." : "no tasks yet."
             }
             sort={sort}
+            columns={columns}
+            picking={picking}
+            onOpenDate={(id, field, anchor) => setPicking({ id, field, anchor })}
             collapsed={collapsed}
             paneRef={listPane}
             onScroll={syncScroll(listPane)}
@@ -1573,6 +1685,32 @@ export function App() {
         pending={pending}
         hint={MODE_HINT[mode]}
       />
+
+      {/* Keyed on the cell, because clicking straight from one open
+          picker onto another cell never renders a null `picking`: a
+          real mouse dispatches pointerdown and mousedown in one task,
+          so the outside-click close and the new open batch into a
+          single render. Unkeyed, React reuses the instance and its
+          `cursor` — seeded once at mount — keeps showing the month you
+          paged to for the *previous* cell. Synthetic clicks split the
+          two events across tasks and hide this entirely. */}
+      {picking && pickingTask && pickingColumn && (
+        <DatePicker
+          key={`${picking.id}:${picking.field}`}
+          value={dateValue(
+            pickingColumn.field,
+            pickingTask,
+            bySchedule.get(pickingTask.id),
+          )}
+          today={data.today}
+          anchor={picking.anchor}
+          label={pickingColumn.head}
+          hint={pickingColumn.title}
+          clearable={pickingColumn.clearable}
+          onPick={(iso) => commitDate(pickingTask.id, pickingColumn.field, iso)}
+          onClose={() => setPicking(null)}
+        />
+      )}
 
       {showHelp && <Help onClose={() => setShowHelp(false)} />}
       {showProjects && (

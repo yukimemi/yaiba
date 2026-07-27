@@ -417,6 +417,38 @@ tab title — it has to survive a shared screen in a meeting.
   handle. `onMove` uses the same call, so the drop highlight and the
   commit can never disagree.
 
+### The date columns, and the picker over them
+
+- **A cell commits by running the command, not by patching the field.**
+  `commitDate` hands `runCommand` the line the keyboard would have
+  typed, so `:end` still measures a duration back from the date, an
+  actual span is still refused if it runs backwards, and a summary is
+  still refused. A second implementation behind the mouse is the one
+  that goes stale the next time either changes. It passes
+  `selection: [task]` — a click names one row even in visual mode.
+- **A popover opened on `mousedown` must `preventDefault`.** The panel
+  focuses itself as it mounts; the browser's own focus move lands
+  *after* that and puts it back on the cell, so the calendar opens
+  unable to hear a key. The symptom is a panel that renders perfectly
+  and ignores every keystroke — `document.activeElement` is what tells
+  you, not the screenshot.
+- **`picking` must not outlive its row.** The key handler stands down
+  while a picker is up, exactly as it does for the project palette, so a
+  `picking` left pointing at a deleted or filtered-out task swallows
+  every keystroke with nothing on screen to escape from. An effect drops
+  it whenever the row leaves `visible`.
+- **The picker is keyed on its cell.** Clicking straight from an open
+  picker onto another cell never renders a null `picking`: a real mouse
+  dispatches `pointerdown` and `mousedown` in one task, so the
+  outside-click close and the new open batch into a single render.
+  Unkeyed, React reuses the instance and its `cursor` — seeded once at
+  mount — keeps showing the month you paged to for the *previous* cell.
+- **Style the columns by class, not by sibling.** Painting the actuals
+  with `.row__date--opens-actuals ~ .row__date` out-specifies the single
+  classes that carry state — empty, locked, picking — so the state
+  silently loses on exactly those two columns. Every rule from the base
+  down is one class, and later wins.
+
 ### A project is a database file
 
 `projects.rs` is an *index*, not a scope. Nothing in `yaiba-core` or
@@ -584,3 +616,11 @@ bug listed here passed CI.
   listeners after React commits; firing `pointerdown` and `pointerup`
   back to back in one tick misses them. Real input never does this, so
   a failure here is the test's, not the app's.
+- **A driven click splits `pointerdown` from `mousedown`; a real one
+  does not.** Automation dispatches them as separate tasks, so React
+  renders in between and any bug that needs the two batched together
+  disappears — a picker that keeps the previous cell's month passed a
+  full click-through by hand and only reproduced from
+  `el.dispatchEvent(pointerdown); el.dispatchEvent(mousedown)` in one
+  statement. "Could not reproduce with the mouse" is not evidence
+  against a batching claim; dispatch the pair yourself before deciding.

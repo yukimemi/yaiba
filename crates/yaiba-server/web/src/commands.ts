@@ -7,11 +7,35 @@ import type { AppData, Scheduled, Task, TaskPatch } from "./types";
 export type View = "list" | "gantt" | "split";
 export type Zoom = "day" | "week" | "month";
 
+/**
+ * Which columns the list carries on its right-hand side.
+ *
+ * `compact` is the working view — a title and the few markers that say
+ * whether a row needs attention. `dates` trades that quiet for the four
+ * columns a progress meeting asks for: what was planned, and what
+ * happened.
+ */
+export type Columns = "compact" | "dates";
+
+/**
+ * The date columns, named for the command that edits each one.
+ *
+ * The name is the contract: a click on a cell commits by handing
+ * `runCommand` the line the keyboard would have typed, so every rule
+ * lives in one place — a summary's dates come from its children, an
+ * actual span cannot run backwards, and the plan's finish is a duration
+ * in disguise.
+ */
+export type DateField = "start" | "end" | "astart" | "aend";
+
 export const VIEWS: View[] = ["list", "gantt", "split"];
 export const ZOOMS: Zoom[] = ["day", "week", "month"];
+export const COLUMNS: Columns[] = ["compact", "dates"];
 
 export interface UiPatch {
   view?: View;
+  /** `"toggle"` flips between the two — what bare `:dates` and `gd` do. */
+  columns?: Columns | "toggle";
   /** Show only this subtree; null clears the focus. */
   focus?: string | null;
   /** Hide anything deeper than this; null shows every level. */
@@ -144,6 +168,8 @@ export const COMMANDS: CommandSpec[] = [
   { name: "split" },
   { name: "view", args: first(() => VIEWS) },
   { name: "zoom", args: first(() => ZOOMS) },
+  { name: "dates" },
+  { name: "columns", aliases: ["cols"], args: first(() => COLUMNS) },
   {
     name: "filter",
     aliases: ["f"],
@@ -273,6 +299,18 @@ export function runCommand(
         return { error: `usage: :zoom ${ZOOMS.join("|")}` };
       }
       return { ui: { zoom: arg as Zoom } };
+    }
+    // No message on either of these: `applyUi` announces the columns it
+    // ended up on, and its `say()` lands after this one would.
+    case "dates":
+      return { ui: { columns: "toggle" } };
+    case "cols":
+    case "columns": {
+      if (!arg) return { ui: { columns: "toggle" } };
+      if (!COLUMNS.includes(arg as Columns)) {
+        return { error: `usage: :cols ${COLUMNS.join("|")}  (bare :cols toggles)` };
+      }
+      return { ui: { columns: arg as Columns } };
     }
 
     // ---- listing -------------------------------------------------

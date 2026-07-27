@@ -35,7 +35,8 @@ export function isWeekend(iso: string): boolean {
 }
 
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-const JP_WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+/** Sunday first, indexed by `Date.getDay()` — and by the calendar grid. */
+export const JP_WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
 export function weekdayLabel(iso: string): string {
   return JP_WEEKDAYS[parseISO(iso).getDay()];

@@ -38,6 +38,7 @@ const GROUPS: Group[] = [
       ["X", "remove a dependency"],
       ["[ / ]", "gantt zoom out / in"],
       ["v", "visual line select"],
+      ["gd", "date columns ⇄ compact"],
       ["gt", "office mode ⇄ neon mode"],
     ],
   },
@@ -88,6 +89,19 @@ const GROUPS: Group[] = [
     keys: [
       [":astart ⟨d⟩", "when work really began"],
       [":aend ⟨d⟩", "when it really finished — none clears"],
+      [":dates", "plan vs actual columns — gd toggles"],
+      [":cols ⟨c⟩", "compact, dates"],
+    ],
+  },
+  {
+    title: "DATE PICKER",
+    keys: [
+      ["click a cell", "open the calendar over it"],
+      ["hjkl / arrows", "walk the grid"],
+      ["[ / ]", "previous / next month"],
+      ["t", "jump to the reference date"],
+      ["x", "clear it — not the planned end"],
+      ["⏎ / esc", "commit / close"],
     ],
   },
   {
