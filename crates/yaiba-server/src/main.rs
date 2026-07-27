@@ -697,14 +697,16 @@ fn rename_project(from: &str, to: &str) -> Result<()> {
     if registry.find(from).is_none() {
         return Err(unknown_project(&registry, from));
     }
+    // `Registry::rename` trims, so bind the trimmed form once rather than
+    // recompute it at each use and risk the two drifting apart.
+    let to = projects::validate_name(to)?;
     registry.rename(from, to)?;
     registry.save()?;
-    let renamed = registry.find(to.trim()).map(|p| p.db.display().to_string());
-    println!("renamed {from:?} to {:?}", to.trim());
-    // Say it plainly rather than let someone discover it when `new work`
-    // is refused later: the file keeps the old name.
-    if let Some(db) = renamed {
-        println!("  its database is still {db}");
+    println!("renamed {from:?} to {to:?}");
+    // Say it plainly rather than let someone find out when a later
+    // `new work` is refused: the file keeps the old name.
+    if let Some(project) = registry.find(to) {
+        println!("  its database is still {}", project.db.display());
     }
     Ok(())
 }

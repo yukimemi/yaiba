@@ -88,12 +88,18 @@ pub struct AppState {
     /// and `active` is left naming a project that is gone. One lock makes
     /// that unrepresentable instead of merely documented.
     open: Arc<Mutex<Open>>,
-    /// Serializes project *creation*, which spans an `.await` — binding an
-    /// endpoint — and so cannot hold `open` throughout. Without it two
-    /// requests for the same new name both clear the collision checks, and
-    /// the loser leaves a database, a registry entry and a running sync
-    /// task behind after its 409.
-    creating: Arc<tokio::sync::Mutex<()>>,
+    /// Serializes every read-modify-write of the registry file.
+    ///
+    /// `Registry::save` writes the whole project list rather than a diff,
+    /// so two handlers that each load a snapshot, change their own copy
+    /// and save will have the later save silently drop the earlier one's
+    /// change — even for unrelated projects, and with no `.await` gap
+    /// needed, since axum's runtime is multi-threaded.
+    ///
+    /// Async because creation holds it across an endpoint bind, which a
+    /// `std` guard cannot span. Holding it there also reserves the name:
+    /// creation checks and registers under one hold.
+    registry: Arc<tokio::sync::Mutex<()>>,
     /// How a project created at runtime gets its replication, so it comes
     /// up the same way one opened at startup did. `None` under
     /// `--no-sync`, which is the whole reason this is an `Option`.
@@ -143,7 +149,7 @@ impl AppState {
                 active: projects[0].name.clone(),
                 projects: projects.into_iter().map(Arc::new).collect(),
             })),
-            creating: Arc::new(tokio::sync::Mutex::new(())),
+            registry: Arc::new(tokio::sync::Mutex::new(())),
             transport,
         }
     }
@@ -156,11 +162,10 @@ impl AppState {
         self.open.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Held for the whole of a create, which is why it is async: the
-    /// creation path awaits an endpoint bind and a `std` guard cannot be
-    /// held across that.
-    pub async fn creating(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.creating.lock().await
+    /// Take the registry lock. Hold it across the whole load-mutate-save
+    /// span, not just the save — the read is half of the race.
+    pub async fn registry(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.registry.lock().await
     }
 
     /// Point the server at a different open project. `false` if no project
@@ -394,7 +399,7 @@ async fn create_project(
     // Two requests for the same name would otherwise both pass the checks
     // and the loser would 409 having already left a database, a registry
     // entry and a sync task behind.
-    let _creating = state.creating().await;
+    let _registry = state.registry().await;
 
     let name = crate::projects::validate_name(&req.name)
         .map_err(|e| ApiError::message(StatusCode::BAD_REQUEST, e.to_string()))?
@@ -442,7 +447,7 @@ async fn create_project(
     }
 
     if let Err(rejected) = state.insert(project) {
-        // The `creating` lock keeps two creates apart, but a `rename` can
+        // The registry lock keeps two creates apart, but a `rename` can
         // still claim the name across the await above. Undo it rather than
         // return 409 on top of a live sync task replicating a project the
         // server does not hold, and a registry entry for the same.
@@ -458,6 +463,9 @@ async fn create_project(
 }
 
 /// Drop whatever registry entry points at `db`.
+///
+/// Assumes the caller holds the registry lock — its only caller is the
+/// creation path, which does.
 ///
 /// By path rather than by name: the entry may have been filed under a
 /// uniquified name, and the path is what identifies it either way. The
@@ -509,6 +517,10 @@ async fn rename_project(
     if from == to {
         return Ok(Json(projects_response(&state)));
     }
+    // Held across the load-mutate-save below, so a concurrent forget or
+    // create cannot save a snapshot taken before this rename.
+    let _registry = state.registry().await;
+
     // The registry goes first, and its refusal is the answer.
     //
     // It knows about projects this server does not hold open — a
@@ -564,6 +576,7 @@ async fn forget_project(
         ));
     }
 
+    let _registry = state.registry().await;
     match crate::projects::Registry::load() {
         Ok(mut registry) => {
             registry.forget(&name);

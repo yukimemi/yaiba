@@ -670,6 +670,73 @@ mod tests {
         assert!(order.contains(&"one") && order.contains(&"two"));
     }
 
+    /// Every way of starting a project goes through this, so it is worth
+    /// testing here rather than only through whichever caller happens to
+    /// exercise it.
+    #[test]
+    fn a_free_name_gets_a_path_under_the_projects_directory() {
+        let registry = temp_registry();
+        let path = db_for_new_project(&registry, "work", None, "x").unwrap();
+        assert_eq!(path, registry.joined_db_path("work").unwrap());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_registered_name_is_refused_with_the_callers_escape() {
+        let mut registry = temp_registry();
+        let db = registry.joined_db_path("work").unwrap();
+        registry.remember(&db, Some("work"), None).unwrap();
+
+        let err = db_for_new_project(&registry, "work", None, "another name with --as")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("already registered"), "{err}");
+        // The escape is interpolated as a phrase, so it reads as a sentence.
+        assert!(err.contains("choose another name with --as"), "{err}");
+    }
+
+    /// Distinct names, one file — the collision `find` alone cannot see.
+    #[test]
+    fn a_name_whose_slug_collides_is_refused() {
+        let mut registry = temp_registry();
+        let db = registry.joined_db_path("work").unwrap();
+        registry.remember(&db, Some("work"), None).unwrap();
+
+        let err = db_for_new_project(&registry, "work!", None, "x")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("share a database"), "{err}");
+    }
+
+    #[test]
+    fn a_database_left_behind_by_a_forget_is_refused() {
+        let registry = temp_registry();
+        let db = registry.joined_db_path("ghost").unwrap();
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        std::fs::write(&db, b"pretend this holds tasks").unwrap();
+
+        let err = db_for_new_project(&registry, "ghost", None, "x")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("already exists"), "{err}");
+    }
+
+    /// Naming the file yourself skips the *path* checks but never the name
+    /// check — otherwise `--db` would be a way to register a duplicate.
+    #[test]
+    fn an_override_skips_the_path_checks_but_not_the_name_check() {
+        let mut registry = temp_registry();
+        let db = registry.joined_db_path("work").unwrap();
+        registry.remember(&db, Some("work"), None).unwrap();
+        let chosen = PathBuf::from("elsewhere.db");
+
+        assert_eq!(
+            db_for_new_project(&registry, "fresh", Some(&chosen), "x").unwrap(),
+            chosen
+        );
+        assert!(db_for_new_project(&registry, "work", Some(&chosen), "x").is_err());
+    }
+
     #[test]
     fn rename_keeps_the_database_and_the_entry_identity() {
         let mut reg = empty();
