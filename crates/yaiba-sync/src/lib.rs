@@ -211,9 +211,13 @@ impl SyncNode {
     /// takes effect immediately; the endpoint's graceful close only tells
     /// peers why, so it is spawned rather than waited on.
     pub fn shutdown(&self) {
-        // First: from here on `serve` refuses, whatever is already in
-        // flight.
-        self.closed.store(true, Ordering::SeqCst);
+        // Under the store lock, so this cannot land between a merge's
+        // check and the merge itself. A merge already running finishes
+        // and this waits for it; none can start afterwards.
+        {
+            let _db = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            self.closed.store(true, Ordering::SeqCst);
+        }
         if let Some(task) = self
             .inbound
             .lock()
@@ -322,7 +326,7 @@ impl SyncNode {
         proto::write_frame(&mut send, &hello).await?;
 
         let offer: Offer = proto::read_frame(&mut recv).await?;
-        let applied = self.with_store(|db| db.merge(&offer.entries, &offer.vv))?;
+        let applied = self.merge_unless_closed(&offer.entries, &offer.vv)?;
 
         // Now that their vector is known, send back only what they lack.
         let entries = self.with_store(|db| db.entries_since(&offer.vv))?;
@@ -375,7 +379,7 @@ impl SyncNode {
         proto::write_frame(&mut send, &offer).await?;
 
         let push: Push = proto::read_frame(&mut recv).await?;
-        let applied = self.with_store(|db| db.merge(&push.entries, &hello.vv))?;
+        let applied = self.merge_unless_closed(&push.entries, &hello.vv)?;
         if applied > 0 {
             tracing::info!(applied, "merged updates from an inbound peer");
         }
@@ -401,6 +405,31 @@ impl SyncNode {
     fn with_store<T>(&self, f: impl FnOnce(&mut Store) -> yaiba_core::Result<T>) -> Result<T> {
         let mut db = self.store.lock().unwrap_or_else(|e| e.into_inner());
         Ok(f(&mut db)?)
+    }
+
+    /// Merge, unless this node has been shut down.
+    ///
+    /// The check and the merge share the store's lock, and [`shutdown`]
+    /// takes that same lock to set the flag — so the two cannot interleave.
+    /// Checking `closed` on its own is not enough: several awaits sit
+    /// between the handshake and the merge, and a shutdown landing in that
+    /// gap would still let one write through.
+    ///
+    /// A merge already under way when shutdown is called therefore
+    /// completes, and shutdown waits for it. That is the boundary meaning
+    /// "nothing lands after the close", not "nothing lands during it".
+    ///
+    /// [`shutdown`]: SyncNode::shutdown
+    fn merge_unless_closed(
+        &self,
+        entries: &[yaiba_core::Entry],
+        vv: &yaiba_core::VersionVector,
+    ) -> Result<usize> {
+        let mut db = self.store.lock().unwrap_or_else(|e| e.into_inner());
+        if self.closed.load(Ordering::SeqCst) {
+            bail!("refused a merge: this node has been shut down");
+        }
+        Ok(db.merge(entries, vv)?)
     }
 }
 
