@@ -110,6 +110,7 @@ yaiba self-update --check    # just tell me whether one exists
 | `v` | visual line select — every edit above applies to the block |
 | `/` `n` `N` | search |
 | `tab` | split → list → gantt · `[` `]` zoom the timeline |
+| `gd` | plan-vs-actual date columns ⇄ compact |
 | `>>` `<<` | nest under the row above / move back out |
 | `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |
 | `za` | fold this row · `zf` focus its subtree, `zF` to come back |
@@ -144,6 +145,7 @@ require handing over the keybindings too:
 | drag a bar | move its start date |
 | drag its right edge | change the duration |
 | drag the dot past its end onto another bar | make that task wait for this one |
+| click a date cell | pick that date off a calendar (`gd` shows the columns) |
 
 Dragging a bar pins its start: a task placed by its dependencies gets an
 explicit date, which is what makes the gesture survive the next
@@ -210,6 +212,27 @@ offset between plan and actual reads without a legend — flush left
 started on time, a rail past the bar's right edge ran long. Work still
 in progress fades out at the reference date rather than claiming a
 finish it doesn't have.
+
+When the four dates are the point — a progress meeting, a status sheet
+someone else fills in — the list will show them as columns instead of
+its markers:
+
+```text
+gd              date columns <-> compact
+:dates          the same toggle by name · :cols compact
+```
+
+| | |
+|---|---|
+| `start` `end` | the plan · dim means the scheduler placed it, not you |
+| `began` `ended` | the record, quieter, behind a rule |
+
+Click a cell and a calendar opens over it — `hjkl` or the arrows walk
+the grid, `[` `]` page months, `t` jumps to the reference date, `x`
+clears, `⏎` commits. Every pick runs the command you could have typed,
+so it obeys the same rules: picking an `end` writes a duration, an
+actual span is refused if it would run backwards, and a summary's plan
+is not editable at all — those cells are plain text rather than buttons.
 
 The gantt draws a **progress line** (イナズマ線) from the reference date:
 each row steps left or right by how far it deviates from where the plan

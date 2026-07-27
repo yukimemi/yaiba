@@ -1,8 +1,17 @@
 import { Fragment, useEffect, useRef } from "react";
 
+import type { Columns, DateField } from "../commands";
+import {
+  DATE_COLUMNS,
+  dateDerived,
+  dateLocked,
+  dateValue,
+} from "../dateColumns";
 import { shortLabel } from "../dates";
 import type { SortKey } from "../filter";
 import type { Scheduled, Task } from "../types";
+
+import type { Anchor } from "./DatePicker";
 
 interface Props {
   tasks: Task[];
@@ -24,6 +33,12 @@ interface Props {
   onlyPane: boolean;
   emptyHint: string;
   sort: SortKey;
+  /** `dates` swaps the right-hand markers for the four date columns. */
+  columns: Columns;
+  /** The cell whose picker is open, so it can stay lit under the panel. */
+  picking: { id: string; field: DateField } | null;
+  /** Click a date cell to open the calendar over it. */
+  onOpenDate: (id: string, field: DateField, anchor: Anchor) => void;
   /** Rows folded individually, so the marker can show open vs closed. */
   collapsed: Set<string>;
   paneRef: React.RefObject<HTMLDivElement | null>;
@@ -61,6 +76,9 @@ export function TaskList({
   onlyPane,
   emptyHint,
   sort,
+  columns,
+  picking,
+  onOpenDate,
   collapsed,
   paneRef,
   onScroll,
@@ -100,6 +118,18 @@ export function TaskList({
         <span className="row__box">st</span>
         <span className="row__title">task</span>
         <span className="row__meta">due</span>
+        {columns === "dates" &&
+          DATE_COLUMNS.map((col) => (
+            <span
+              key={col.field}
+              className={`row__date${
+                col.opensActuals ? " row__date--opens-actuals" : ""
+              }`}
+              title={col.title}
+            >
+              {col.head}
+            </span>
+          ))}
         <span className="row__prio">p</span>
       </div>
     </div>
@@ -273,6 +303,63 @@ export function TaskList({
                       {shortLabel(task.due)}
                     </span>
                   )}
+                  {/* The plan and the record, side by side. A cell is a
+                      button because it opens something; the ones the
+                      scheduler owns are plain text, so they can't be
+                      clicked into a value the next recompute erases. */}
+                  {columns === "dates" &&
+                    DATE_COLUMNS.map((col) => {
+                      const value = dateValue(col.field, task, sched);
+                      const locked = dateLocked(col.field, sched);
+                      const classes = [
+                        "row__date",
+                        col.opensActuals && "row__date--opens-actuals",
+                        col.actual && "row__date--actual",
+                        dateDerived(col.field, task) && "row__date--derived",
+                        !value && "row__date--empty",
+                        locked && "row__date--locked",
+                        picking?.id === task.id &&
+                          picking.field === col.field &&
+                          "row__date--picking",
+                      ]
+                        .filter(Boolean)
+                        .join(" ");
+                      const text = value ? shortLabel(value) : "·";
+
+                      return locked ? (
+                        <span key={col.field} className={classes} title={locked}>
+                          {text}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          key={col.field}
+                          className={classes}
+                          title={col.title}
+                          onMouseDown={(e) => {
+                            // The row's own handler would move the
+                            // cursor as well; do that here so it lands
+                            // before the picker rather than behind it.
+                            e.stopPropagation();
+                            // And keep the focus this mousedown would
+                            // otherwise put on the cell: the panel
+                            // focuses itself as it mounts, the browser's
+                            // default lands *after* that, and the
+                            // calendar would open unable to hear a key.
+                            e.preventDefault();
+                            onPick(task.id);
+                            const box = e.currentTarget.getBoundingClientRect();
+                            onOpenDate(task.id, col.field, {
+                              left: box.left,
+                              top: box.top,
+                              bottom: box.bottom,
+                            });
+                          }}
+                        >
+                          {text}
+                        </button>
+                      );
+                    })}
                   <span className="row__prio">{PRIO[task.priority] ?? ""}</span>
                 </div>
               </Fragment>

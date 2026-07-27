@@ -32,6 +32,11 @@ apm_modules/
 crates/yaiba-server/web/node_modules/
 crates/yaiba-server/web/dist/
 
+# `tsc -b`'s incremental cache. Machine-local by nature — it records
+# absolute paths and mtimes — so a committed one lands in the diff of
+# every branch that so much as type-checks, and never usefully merges.
+crates/yaiba-server/web/*.tsbuildinfo
+
 # Scratch databases from `cargo make dev` and manual runs.
 *.db
 *.db-wal

@@ -457,6 +457,243 @@ body::after {
   color: var(--rust);
 }
 
+/* ---- the date columns --------------------------------------------- */
+
+/* Four fixed columns on the right of the list — the plan, then what
+   happened. Same width whether the cell is a button or plain text, so
+   a summary's uneditable dates still line up under their headings.
+
+   `08/07` is 5 characters; the extra makes room for the focus ring
+   without the column shifting when one appears. */
+.row__date {
+  flex: none;
+  width: 6ch;
+  padding: 0;
+  text-align: right;
+  font: inherit;
+  line-height: inherit;
+  background: transparent;
+  border: none;
+  color: var(--steel);
+}
+
+/* A heading is a label, not the brightest thing in the pane. */
+.row--head .row__date {
+  color: var(--ash-dim);
+}
+
+/* One rule between the plan and the record. Cheaper than a second
+   header row, and it survives the columns being read at a glance. */
+.row__date--opens-actuals {
+  border-left: 1px solid var(--grid-strong);
+  padding-left: 8px;
+  width: calc(6ch + 8px);
+}
+
+/* The actuals are achromatic on the gantt for a reason — a colour here
+   always means something, and "this happened" is not a status. The
+   columns keep that: the plan reads as text, the record reads quieter.
+
+   Every rule from here down is a single class, so the later state wins
+   over the earlier category without either having to out-specify the
+   other. */
+.row__date--actual {
+  color: var(--ash);
+}
+
+/* Placed by the scheduler rather than pinned, so it will move on its own
+   the next time a dependency does. */
+.row__date--derived {
+  color: var(--ash);
+}
+
+.row__date--empty {
+  color: var(--ash-dim);
+}
+
+button.row__date:hover,
+button.row__date:focus-visible {
+  color: var(--edge);
+  cursor: pointer;
+  outline: none;
+}
+
+/* A summary's dates come from its children. Not a button at all, so
+   there is nothing to click and the cursor says so before the status
+   line has to. */
+.row__date--locked {
+  color: var(--ash-dim);
+  cursor: not-allowed;
+}
+
+/* The cell the open calendar belongs to. Without it the panel floats
+   over a list with nothing marked, and a mis-click lands on a date you
+   did not mean to be setting. */
+.row__date--picking {
+  color: var(--edge);
+  box-shadow: inset 0 -1px 0 var(--edge);
+}
+
+/* ---- the date picker ---------------------------------------------- */
+
+/* Fixed rather than absolute: the list pane scrolls and clips, and a
+   calendar hanging off the last row would be cut in half by it. */
+.datepick {
+  position: fixed;
+  z-index: 70;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, calc(0.12 * var(--glow))),
+    0 12px 40px rgba(0, 0, 0, calc(0.6 * var(--glow)));
+  outline: none;
+  line-height: 20px;
+}
+
+.datepick__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 4px;
+  border-bottom: 1px solid var(--grid-strong);
+}
+
+.datepick__month {
+  min-width: 8ch;
+  text-align: center;
+  color: var(--edge);
+}
+
+/* Which of the four dates is being set. The panel is identical for all
+   of them otherwise, and a calendar with no label is a calendar you
+   have to remember the question for. */
+.datepick__field {
+  margin-left: auto;
+  color: var(--ash-dim);
+}
+
+.datepick__step {
+  font: inherit;
+  color: var(--ash);
+  background: transparent;
+  border: none;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.datepick__step:hover,
+.datepick__step:focus-visible {
+  color: var(--edge);
+  outline: none;
+}
+
+.datepick__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 3ch);
+  gap: 1px;
+  padding-top: 4px;
+}
+
+.datepick__wd {
+  text-align: center;
+  color: var(--ash-dim);
+}
+
+.datepick__wd--weekend {
+  color: var(--ash-dim);
+  opacity: 0.7;
+}
+
+.datepick__day {
+  font: inherit;
+  line-height: 20px;
+  text-align: center;
+  color: var(--steel);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* The days either side of the month stay legible — a plan crossing a
+   month boundary is the normal case, not an edge one — but they never
+   compete with the month you asked for. */
+.datepick__day--outside {
+  color: var(--ash-dim);
+}
+
+.datepick__day--weekend {
+  color: var(--ash);
+}
+
+.datepick__day--outside.datepick__day--weekend {
+  color: var(--ash-dim);
+}
+
+/* The reference date, marked the way the gantt marks it: a line, not a
+   fill, so it can coexist with the cursor and the current value on the
+   same day. */
+.datepick__day--today {
+  box-shadow: inset 0 -1px 0 var(--rust);
+}
+
+/* What the cell already holds. */
+.datepick__day--set {
+  color: var(--edge);
+  border: 1px solid var(--edge-dim);
+}
+
+/* Where the keyboard is. Filled, because this is the day <cr> commits —
+   it has to win against every other mark on the grid. */
+.datepick__day--cursor {
+  background: var(--edge);
+  color: var(--void);
+  border-color: var(--edge);
+}
+
+.datepick__day:hover {
+  color: var(--void);
+  background: var(--edge-dim);
+}
+
+.datepick__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--grid-strong);
+}
+
+.datepick__action {
+  font: inherit;
+  color: var(--ash);
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.datepick__action:hover,
+.datepick__action:focus-visible {
+  color: var(--edge);
+  border-color: var(--edge);
+  outline: none;
+}
+
+/* Says what this column means, in the panel that is setting it. Capped
+   so a long one can't stretch the calendar wider than its grid. */
+.datepick__hint {
+  flex: 1;
+  min-width: 0;
+  max-width: 26ch;
+  color: var(--ash-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .row__crit {
   flex: none;
   color: var(--blood);
