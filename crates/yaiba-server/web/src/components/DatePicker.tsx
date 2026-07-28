@@ -1,13 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import {
-  addDays,
-  isWeekend,
-  JP_WEEKDAYS,
-  monthLabel,
-  parseISO,
-  toISO,
-} from "../dates";
+import { addDays, isWeekend, monthLabel, parseISO, toISO, weekdays } from "../dates";
+import type { Lang } from "../lang";
 
 /** Six weeks, so the panel never changes height as you page months. */
 const CELLS = 42;
@@ -24,6 +18,8 @@ interface Props {
   value: string | null;
   /** The reference date — highlighted, and where an empty cell opens. */
   today: string;
+  /** Which language the column of weekday names is written in. */
+  lang: Lang;
   anchor: Anchor;
   /** Column heading and hover text, repeated here so the panel says
    *  which of the four dates is being set. */
@@ -71,6 +67,7 @@ function monthGrid(iso: string): string[] {
 export function DatePicker({
   value,
   today,
+  lang,
   anchor,
   label,
   hint,
@@ -200,7 +197,7 @@ export function DatePicker({
       </div>
 
       <div className="datepick__grid">
-        {JP_WEEKDAYS.map((day, i) => (
+        {weekdays(lang).map((day, i) => (
           <span
             key={day}
             className={`datepick__wd${i === 0 || i === 6 ? " datepick__wd--weekend" : ""}`}
