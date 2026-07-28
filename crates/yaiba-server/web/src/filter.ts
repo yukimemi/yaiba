@@ -162,6 +162,53 @@ export function siblingOrder(
   return flatten(tasks, children, null).map((t) => t.id);
 }
 
+/**
+ * Where a row dropped onto `targetId` lands: `target`'s slot, as its
+ * sibling, with the dragged row's own subtree in tow.
+ *
+ * The drop used to splice the flat `position` list, which below the top
+ * level moves a row past somebody else's child and leaves the drawn
+ * order untouched — the same silent no-op `J` / `K` had. Taking the
+ * target's *slot* is what the gesture looks like: you dropped the row
+ * where that one is, so that is where it goes, at that one's level.
+ *
+ * `null` when the drop cannot happen: an unknown row, itself, or a
+ * target inside the dragged row's own subtree, which would ask a task
+ * to become its own descendant.
+ */
+export function dropOrder(
+  tasks: Task[],
+  id: TaskId,
+  targetId: TaskId,
+): { parent: TaskId | null; ids: TaskId[] } | null {
+  if (id === targetId) return null;
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const task = byId.get(id);
+  const target = byId.get(targetId);
+  if (!task || !target) return null;
+  if (ancestorsOf(targetId, byId).includes(id)) return null;
+
+  const ids = new Set(tasks.map((t) => t.id));
+  const children = childBuckets(tasks);
+  const parent = effectiveParent(target, ids);
+
+  const from = children.get(effectiveParent(task, ids)) ?? [];
+  const to = children.get(parent) ?? [];
+  const at = from.findIndex((t) => t.id === id);
+  // The target's slot is read *before* the row is lifted out, which is
+  // what makes a drag read the same way in both directions when the two
+  // rows are siblings: dropping downwards, the removal shifts everything
+  // past it up by one, so the row lands below the target; dropping
+  // upwards nothing shifts and it lands above. Taking the index
+  // afterwards puts a downward drag back exactly where it started.
+  const slot = to.findIndex((t) => t.id === targetId);
+  if (at < 0 || slot < 0) return null;
+  from.splice(at, 1);
+  to.splice(slot, 0, task);
+
+  return { parent, ids: flatten(tasks, children, null).map((t) => t.id) };
+}
+
 /** Every ancestor of `id`, nearest first. */
 export function ancestorsOf(id: TaskId, byId: Map<TaskId, Task>): TaskId[] {
   const out: TaskId[] = [];

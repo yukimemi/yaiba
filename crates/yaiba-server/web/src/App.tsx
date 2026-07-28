@@ -25,6 +25,7 @@ import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
 import { addDays, toISO } from "./dates";
 import {
+  dropOrder,
   effectiveParent,
   siblingOrder,
   visibleTasks,
@@ -1073,7 +1074,17 @@ export function App() {
     [visible, enterMode],
   );
 
-  /** Drop `dragged` where `target` sits in the manual order. */
+  /**
+   * Drop `dragged` into the slot `target` occupies — its level as well
+   * as its place, subtree in tow.
+   *
+   * Splicing the flat `position` list, which is what this did, moves a
+   * nested row past somebody else's child and leaves the drawn order
+   * exactly as it was: the drag appeared to do nothing at all. Where you
+   * dropped it is the only statement of intent a drag makes, so the row
+   * takes the target's slot among the target's siblings, which for a
+   * cross-level drop means changing its parent too.
+   */
   const onDropRow = useCallback(
     (draggedId: string, targetId: string) => {
       if (!data) return;
@@ -1081,17 +1092,33 @@ export function App() {
         say("rows only move in manual order — :sort manual", "error");
         return;
       }
-      const ids = data.tasks.map((t) => t.id);
-      const from = ids.indexOf(draggedId);
-      const to = ids.indexOf(targetId);
-      if (from < 0 || to < 0 || from === to) return;
-      const next = [...ids];
-      next.splice(to, 0, ...next.splice(from, 1));
-      void run(
-        [{ kind: "reorder", ids: next }],
-        [{ kind: "reorder", ids }],
-        "move",
-      );
+      const dragged = data.tasks.find((t) => t.id === draggedId);
+      if (!dragged) return;
+      const dropped = dropOrder(data.tasks, draggedId, targetId);
+      if (!dropped) {
+        say("a row cannot be dropped inside itself", "error");
+        return;
+      }
+
+      const ops: Op[] = [];
+      const undo: Op[] = [];
+      // Re-parent first, so the reorder that follows is stamped onto the
+      // tree the drop asked for rather than the one it replaced.
+      if (dropped.parent !== (dragged.parent ?? null)) {
+        ops.push({
+          kind: "patch",
+          id: draggedId,
+          patch: { parent: dropped.parent },
+        });
+        undo.push({
+          kind: "patch",
+          id: draggedId,
+          patch: { parent: dragged.parent },
+        });
+      }
+      ops.push({ kind: "reorder", ids: dropped.ids });
+      undo.push({ kind: "reorder", ids: data.tasks.map((t) => t.id) });
+      void run(ops, undo, "move");
     },
     [data, sort, run],
   );
