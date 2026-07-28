@@ -24,7 +24,12 @@ import { Hud } from "./components/Hud";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
 import { addDays, toISO } from "./dates";
-import { visibleTasks, type SortKey } from "./filter";
+import {
+  effectiveParent,
+  siblingOrder,
+  visibleTasks,
+  type SortKey,
+} from "./filter";
 import { MODE_HINT, type Mode } from "./mode";
 import { applyTheme, initialTheme, type Theme } from "./theme";
 import { applyOps, inversePatch, type Op, type Step } from "./ops";
@@ -56,6 +61,9 @@ const NORMALIZE: Record<string, string> = {
   End: "G",
 };
 
+/** Which side of its anchor a new row lands on. */
+type Place = "after" | "before";
+
 const VIEW_CYCLE: View[] = ["split", "list", "gantt"];
 const ZOOM_CYCLE: Zoom[] = ["month", "week", "day"];
 
@@ -84,7 +92,12 @@ export function App() {
   } | null>(null);
   /** An unsaved row being typed. See `openNew`. */
   const [draft, setDraft] = useState<{
-    after: string | null;
+    /** The row it is placed next to. */
+    anchor: string | null;
+    /** Which side of the anchor it lands on — `O` is "before". */
+    place: Place;
+    /** The level it will land at — inherited from the row `o` was on. */
+    parent: string | null;
     value: string;
   } | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -202,6 +215,21 @@ export function App() {
   const cursorAt = visible.findIndex((t) => t.id === cursorId);
   const cursor = cursorAt >= 0 ? cursorAt : 0;
   const current: Task | null = visible[cursor] ?? null;
+
+  /**
+   * The parent a row opened at the cursor inherits.
+   *
+   * `o` on a level-3 row means "another one of these", not "back to the
+   * root three levels up" — the row you are looking at is the only
+   * statement of intent available, so new rows take its level. A parent
+   * whose task is gone (a peer deleted it mid-merge) reads as the root,
+   * which is where the list already draws the cursor row — hence
+   * `effectiveParent`, the same rule the tree walk itself applies.
+   */
+  const cursorParent = useMemo(() => {
+    if (!current || !data) return null;
+    return effectiveParent(current, new Set(data.tasks.map((t) => t.id)));
+  }, [current, data]);
 
   const selection = useMemo(() => {
     if (mode !== "visual" || !anchorId) return current ? [current] : [];
@@ -606,11 +634,22 @@ export function App() {
    * `after` stays authoritative.
    */
   const createTask = useCallback(
-    async (title: string, after: string | null, label: string) => {
+    async (
+      title: string,
+      anchor: string | null,
+      place: Place,
+      parent: string | null,
+      label: string,
+    ) => {
       if (!liveOnly()) return null;
       const known = new Set((data?.tasks ?? []).map((t) => t.id));
       try {
-        const next = await api.createTask({ title, after });
+        const next = await api.createTask({
+          title,
+          parent,
+          after: place === "after" ? anchor : null,
+          before: place === "before" ? anchor : null,
+        });
         setData(next);
         const created = next.tasks.find((t) => !known.has(t.id));
         if (created) {
@@ -638,10 +677,13 @@ export function App() {
    * typed in that window was swallowed as a normal-mode command — which
    * is exactly the moment a fast typist is already typing.
    */
-  const openNew = useCallback((after: string | null) => {
-    setDraft({ after, value: "" });
-    enterMode("insert");
-  }, []);
+  const openNew = useCallback(
+    (anchor: string | null, place: Place, parent: string | null) => {
+      setDraft({ anchor, place, parent, value: "" });
+      enterMode("insert");
+    },
+    [],
+  );
 
   const commitDraft = useCallback(
     async (openNext: boolean) => {
@@ -653,10 +695,25 @@ export function App() {
       const title = pending.value.trim();
       // An empty row is a cancelled thought, not a task.
       if (!title) return;
-      const created = await createTask(title, pending.after, "new task");
+      const created = await createTask(
+        title,
+        pending.anchor,
+        pending.place,
+        pending.parent,
+        "new task",
+      );
       if (created) setCursorId(created.id);
       if (openNext) {
-        setDraft({ after: created?.id ?? pending.after, value: "" });
+        // Same level again: <cr> continues the list you are writing, and
+        // dropping back to the root mid-list would be the surprise. It
+        // always continues *downward*, even out of an `O` — the row just
+        // committed is the one the next belongs under.
+        setDraft({
+          anchor: created?.id ?? pending.anchor,
+          place: created ? "after" : pending.place,
+          parent: pending.parent,
+          value: "",
+        });
         enterMode("insert");
       }
     },
@@ -698,7 +755,16 @@ export function App() {
     [visible],
   );
 
-  /** Reorder the manual list by moving the cursor row `delta` places. */
+  /**
+   * Move the cursor row `delta` places among its siblings, subtree in
+   * tow, and rewrite the manual order to match.
+   *
+   * Not `delta` places in the flat `position` list: below the top level
+   * the neighbour there belongs to another parent, and the tree walk
+   * regroups by parent afterwards — which put the row straight back
+   * where it started, so `J` on a nested row did nothing at all. See
+   * `siblingOrder`.
+   */
   const moveRow = useCallback(
     (delta: number) => {
       if (!current || !data) return;
@@ -711,11 +777,14 @@ export function App() {
         return;
       }
       const ids = data.tasks.map((t) => t.id);
-      const from = ids.indexOf(current.id);
-      const to = Math.min(Math.max(from + delta, 0), ids.length - 1);
-      if (from === to) return;
-      const next = [...ids];
-      next.splice(to, 0, ...next.splice(from, 1));
+      const next = siblingOrder(data.tasks, current.id, delta);
+      // Staying silent here is indistinguishable from the bug above, so
+      // the wall a row has hit says so.
+      if (!next) {
+        const edge = delta > 0 ? "last" : "first";
+        say(`already ${edge} at this level — >> / << change level`, "error");
+        return;
+      }
       void run(
         [{ kind: "reorder", ids: next }],
         [{ kind: "reorder", ids }],
@@ -746,18 +815,29 @@ export function App() {
     [data, visible, cursor, run],
   );
 
+  /** Paste the register next to `at`, at `parent`'s level. */
   const paste = useCallback(
-    async (after: string | null) => {
+    async (at: string | null, place: Place, parent: string | null) => {
       if (!liveOnly()) return;
       if (!register.current.length) {
         say("nothing yanked", "error");
         return;
       }
-      let anchor = after;
+      let anchor = at;
+      // Only the first row lands on the requested side; the rest follow
+      // it, so a `P` of three keeps the register's own order.
+      let side = place;
       for (const task of register.current) {
-        const created = await createTask(task.title, anchor, "paste");
+        const created = await createTask(
+          task.title,
+          anchor,
+          side,
+          parent,
+          "paste",
+        );
         if (!created) break;
         anchor = created.id;
+        side = "after";
         await api
           .patchTask(created.id, {
             notes: task.notes,
@@ -1240,10 +1320,13 @@ export function App() {
 
       // ---- editing
       case "o":
-        openNew(current?.id ?? null);
+        openNew(current?.id ?? null, "after", cursorParent);
         break;
       case "O":
-        openNew(visible[cursor - 1]?.id ?? null);
+        // Anchored on the cursor row, not on the row above it: there may
+        // not be one, and `after: null` means "append to the end of the
+        // store" — the opposite of what `O` says.
+        openNew(current?.id ?? null, "before", cursorParent);
         break;
       case "i":
       case "I":
@@ -1310,10 +1393,10 @@ export function App() {
         }
         break;
       case "p":
-        void paste(current?.id ?? null);
+        void paste(current?.id ?? null, "after", cursorParent);
         break;
       case "P":
-        void paste(visible[cursor - 1]?.id ?? null);
+        void paste(current?.id ?? null, "before", cursorParent);
         break;
       case "J":
         moveRow(count);
@@ -1680,13 +1763,29 @@ export function App() {
     );
   }
 
-  // Where the unsaved row sits in the visible list: right after its
-  // anchor, or at the top when there is none (`O` on the first row).
-  const draftIndex = draft
-    ? draft.after
-      ? Math.max(visible.findIndex((t) => t.id === draft.after) + 1, 0)
-      : 0
-    : -1;
+  /** The level the unsaved row will land at, so it is drawn at it. */
+  const draftLevel = draft?.parent
+    ? (bySchedule.get(draft.parent)?.level ?? 0) + 1
+    : 0;
+
+  // Where the unsaved row sits in the visible list. Above its anchor for
+  // `O`; for `o`, below it *and* below any of the anchor's subtree that
+  // is deeper than the draft itself — the server orders by `position`
+  // and the tree walk then groups those rows under the anchor, drawing
+  // them above a sibling that follows it. Without that the preview sat
+  // directly under the anchor and the committed row appeared below the
+  // subtree, which reads as <cr> having moved it.
+  const draftIndex = (() => {
+    if (!draft) return -1;
+    if (!draft.anchor) return 0;
+    const at = visible.findIndex((t) => t.id === draft.anchor);
+    if (at < 0) return 0;
+    if (draft.place === "before") return at;
+    let below = at + 1;
+    while ((bySchedule.get(visible[below]?.id ?? "")?.level ?? -1) > draftLevel)
+      below += 1;
+    return below;
+  })();
 
   // The window has to cover what *happened* as well as what is planned.
   // A backfilled `:astart` can predate every scheduled start — the plan
@@ -1768,6 +1867,7 @@ export function App() {
             }
             onEditKey={onEditKey}
             draftIndex={draftIndex}
+            draftLevel={draftLevel}
             draftValue={draft?.value ?? ""}
             onDraftChange={(value) =>
               setDraft((prev) => (prev ? { ...prev, value } : prev))

@@ -322,7 +322,7 @@ impl Store {
         let id = Uuid::now_v7();
         let key = task_key(id);
         let snapshot = self.snapshot()?;
-        let position = next_position(&snapshot.tasks, new.after);
+        let position = next_position(&snapshot.tasks, new.after, new.before);
         let now = Utc::now();
 
         let mut writes = vec![
@@ -820,7 +820,25 @@ fn normalise_tags(tags: &[String]) -> Vec<String> {
     out
 }
 
-fn next_position(tasks: &[Task], after: Option<TaskId>) -> f64 {
+/// The manual position a new task takes.
+///
+/// `before` wins over `after`: a caller that sets it is placing the task
+/// above a known row, and falling back to "append" there would put it as
+/// far from that row as the ordering allows.
+fn next_position(tasks: &[Task], after: Option<TaskId>, before: Option<TaskId>) -> f64 {
+    if let Some(anchor) = before.and_then(|id| tasks.iter().find(|t| t.id == id)) {
+        let previous = tasks
+            .iter()
+            .map(|t| t.position)
+            .filter(|p| *p < anchor.position)
+            .fold(f64::NEG_INFINITY, f64::max);
+        return if previous.is_finite() {
+            (previous + anchor.position) / 2.0
+        } else {
+            // Nothing above the anchor, so there is a whole gap to take.
+            anchor.position - POSITION_GAP
+        };
+    }
     match after.and_then(|id| tasks.iter().find(|t| t.id == id)) {
         Some(anchor) => {
             let next = tasks
@@ -1120,6 +1138,40 @@ mod tests {
             .create_task(NewTask {
                 title: "second".into(),
                 after: Some(first.id),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(titles(&store), ["first", "second", "third"]);
+    }
+
+    /// `O` on the topmost row: the anchor is the only thing above the
+    /// new task, and "no anchor above it" must not read as "append".
+    #[test]
+    fn insert_before_lands_above_its_anchor() {
+        let mut store = Store::open_in_memory().unwrap();
+        let first = store.create_task(new_task("second")).unwrap();
+        store.create_task(new_task("third")).unwrap();
+        store
+            .create_task(NewTask {
+                title: "first".into(),
+                before: Some(first.id),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(titles(&store), ["first", "second", "third"]);
+    }
+
+    #[test]
+    fn insert_before_a_middle_row_lands_between_its_neighbours() {
+        let mut store = Store::open_in_memory().unwrap();
+        store.create_task(new_task("first")).unwrap();
+        let third = store.create_task(new_task("third")).unwrap();
+        store
+            .create_task(NewTask {
+                title: "second".into(),
+                before: Some(third.id),
                 ..Default::default()
             })
             .unwrap();

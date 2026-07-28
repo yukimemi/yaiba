@@ -90,6 +90,8 @@ export interface NewTask {
   progress?: number;
   tags?: string[];
   after?: TaskId | null;
+  /** Placed above this row instead — what `O` means. Wins over `after`. */
+  before?: TaskId | null;
 }
 
 export type TaskPatch = Partial<

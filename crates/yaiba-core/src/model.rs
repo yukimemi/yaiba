@@ -125,6 +125,13 @@ pub struct NewTask {
     /// appends to the end.
     #[serde(default)]
     pub after: Option<TaskId>,
+    /// Insert directly *before* this task instead, which is what `O`
+    /// means. Without it the topmost row has nothing to anchor to and
+    /// the new task is appended to the end of the store — the opposite
+    /// of "above this one". Takes precedence over `after` when both are
+    /// set; `None` leaves the placement to `after`.
+    #[serde(default)]
+    pub before: Option<TaskId>,
 }
 
 /// Partial update for `PATCH /api/tasks/:id`.
