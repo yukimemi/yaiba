@@ -25,6 +25,12 @@
   --row-h: 26px;
   --gutter: 14px;
 
+  /* Trailing space below the last row, so the bottom of the list is
+     reachable to the middle of the screen rather than pinned to the
+     very edge. Both panes have to spend the *same* amount of it — see
+     `.rows` and `.gantt`. */
+  --pane-tail: 40vh;
+
   --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SFMono-Regular",
     Consolas, "Noto Sans Mono CJK JP", "Yu Gothic UI", monospace;
 
@@ -372,10 +378,12 @@ body::after {
 
 /* ---- task rows --------------------------------------------------- */
 
-/* No padding: row N here must line up with row N on the timeline, and
-   any offset here shifts every bar out of alignment. */
+/* No padding at the top or the sides: row N here must line up with row
+   N on the timeline, and any offset here shifts every bar out of
+   alignment. The tail at the bottom is shared with `.gantt` — see
+   `--pane-tail`. */
 .rows {
-  padding: 0 0 40vh;
+  padding: 0 0 var(--pane-tail);
 }
 
 /* Mirrors .gantt__head — same height, same sticky behaviour — so both
@@ -885,10 +893,20 @@ button.row__date:focus-visible {
 
 /* ---- gantt ------------------------------------------------------- */
 
+/* The tail matches `.rows` exactly, and it has to: the panes mirror each
+   other's `scrollTop`, so whichever one runs out of scrollable content
+   first freezes while the other keeps going — row N against bar N is off
+   by the difference for the whole of that stretch. It sits here rather
+   than on `.gantt__body` because everything that spans the full height of
+   the chart (the weekend stripes, the today line) is absolutely
+   positioned against the body, and padding on a containing block is
+   inside the box those resolve `bottom: 0` against — they would grow into
+   the empty tail. */
 .gantt {
   position: relative;
   min-width: 100%;
   width: max-content;
+  padding-bottom: var(--pane-tail);
 }
 
 .gantt__head {
