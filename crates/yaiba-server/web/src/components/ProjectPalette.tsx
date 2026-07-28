@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectInfo } from "../api";
+import { t } from "../i18n";
 
 interface Props {
   projects: ProjectInfo[];
@@ -187,10 +188,13 @@ export function ProjectPalette({
   const sigil =
     mode.kind === "rename" ? "rename" : mode.kind === "confirm" ? "forget" : ":proj";
 
+  // The sigil above stays as typed — `rename` and `forget` are the
+  // words `:proj` takes, and the panel is showing you which one you are
+  // in the middle of.
   const placeholder =
     mode.kind === "rename"
-      ? `new name for ${mode.from}`
-      : "type to filter, or a name that does not exist yet";
+      ? t("new name for {old}", { old: mode.from })
+      : t("type to filter, or a name that does not exist yet");
 
   return (
     <div className="palette" onMouseDown={onClose}>
@@ -198,14 +202,14 @@ export function ProjectPalette({
         className="palette__panel"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="projects"
+        aria-label={t("projects")}
       >
         <div className="palette__prompt">
           <span className="palette__sigil">{sigil}</span>
           {mode.kind === "confirm" ? (
             <span className="palette__ask">
-              forget <strong>{mode.target}</strong>? it leaves the list — the
-              database stays on disk
+              {t("forget")} <strong>{mode.target}</strong>
+              {t("? it leaves the list — the database stays on disk")}
             </span>
           ) : (
             <input
@@ -267,14 +271,14 @@ export function ProjectPalette({
               >
                 <span className="palette__name">{project.name}</span>
                 <span className="palette__meta">
-                  {project.name === active ? "current" : ""}
+                  {project.name === active ? t("current") : ""}
                 </span>
                 <span className="palette__peers">
                   {project.ticket === null
-                    ? "no sync"
+                    ? t("no sync")
                     : project.peers === 1
-                      ? "1 peer"
-                      : `${project.peers} peers`}
+                      ? t("1 peer")
+                      : t("{n} peers", { n: project.peers })}
                 </span>
                 <span className="palette__db" title={project.db}>
                   {project.db}
@@ -296,7 +300,7 @@ export function ProjectPalette({
                         startRename(project.name);
                       }}
                     >
-                      rename
+                      {t("rename")}
                     </button>
                     <button
                       type="button"
@@ -307,7 +311,7 @@ export function ProjectPalette({
                         setMode({ kind: "confirm", target: project.name });
                       }}
                     >
-                      forget
+                      {t("forget")}
                     </button>
                   </span>
                 )}
@@ -325,23 +329,27 @@ export function ProjectPalette({
                 onCreate(creatable);
               }}
             >
-              ＋ new project <strong>{creatable}</strong>
+              ＋ {t("new project")} <strong>{creatable}</strong>
             </li>
           )}
 
           {mode.kind === "filter" && !creatable && matches.length === 0 && (
-            <li className="palette__empty">no project matches</li>
+            <li className="palette__empty">{t("no project matches")}</li>
           )}
         </ul>
 
         <div className="palette__foot">
           {mode.kind === "rename" &&
-            "enter rename · esc back — the database keeps the name it was made with"}
-          {mode.kind === "confirm" && "enter forget · esc back"}
+            t(
+              "enter rename · esc back — the database keeps the name it was made with",
+            )}
+          {mode.kind === "confirm" && t("enter forget · esc back")}
           {mode.kind === "filter" &&
             (creatable
-              ? "enter creates it · esc cancel"
-              : "^n / ^p move · enter switch · ^r rename · ^d forget · esc cancel")}
+              ? t("enter creates it · esc cancel")
+              : t(
+                  "^n / ^p move · enter switch · ^r rename · ^d forget · esc cancel",
+                ))}
         </div>
       </div>
     </div>

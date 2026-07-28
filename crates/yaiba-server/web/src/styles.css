@@ -1445,7 +1445,13 @@ button.row__date:focus-visible {
 
 .help__key {
   flex: none;
-  width: 10ch;
+  /* A floor, not a width. `click the date` and `hjkl / arrows` are
+     wider than 10ch, and a fixed width plus `nowrap` printed them
+     straight over the description beside them — visible in English,
+     unreadable once the descriptions are long enough to reach back.
+     The column still lines up for every key that fits, which is
+     nearly all of them. */
+  min-width: 10ch;
   color: var(--edge);
   /* Command names like `:tag +a -b` must not wrap into the
      description column. */

@@ -9,6 +9,7 @@ import {
 } from "../dateColumns";
 import { shortLabel } from "../dates";
 import type { SortKey } from "../filter";
+import { t } from "../i18n";
 import type { Scheduled, Task } from "../types";
 
 import type { Anchor } from "./DatePicker";
@@ -122,10 +123,13 @@ export function TaskList({
     <div className="list__head">
       <div className="list__summary">
         <span>
-          {tasks.length} task{tasks.length === 1 ? "" : "s"}
+          {tasks.length === 1
+            ? t("1 task")
+            : t("{n} tasks", { n: tasks.length })}
         </span>
+        {/* The sort key is not translated: it is what `:sort` takes. */}
         <span className="list__summary-right">
-          {done} done · {sort} order
+          {t("{n} done", { n: done })} · {t("{k} order", { k: sort })}
         </span>
       </div>
       {/* Same flex skeleton as a real row, so these labels sit over the
@@ -133,9 +137,9 @@ export function TaskList({
       <div className="row row--head">
         <span className="row__num">#</span>
         <span className="row__caret"> </span>
-        <span className="row__box">st</span>
-        <span className="row__title">task</span>
-        <span className="row__meta">due</span>
+        <span className="row__box">{t("st")}</span>
+        <span className="row__title">{t("task")}</span>
+        <span className="row__meta">{t("due")}</span>
         {columns === "dates" &&
           DATE_COLUMNS.map((col) => (
             <span
@@ -143,12 +147,12 @@ export function TaskList({
               className={`row__date${
                 col.opensActuals ? " row__date--opens-actuals" : ""
               }`}
-              title={col.title}
+              title={t(col.title)}
             >
-              {col.head}
+              {t(col.head)}
             </span>
           ))}
-        <span className="row__prio">p</span>
+        <span className="row__prio">{t("p")}</span>
       </div>
     </div>
   );
@@ -197,7 +201,7 @@ export function TaskList({
         <p className="empty">
           {emptyHint}
           <br />
-          <b>o</b> to open a new task · <b>?</b> for keys
+          <b>o</b> {t("to open a new task")} · <b>?</b> {t("for keys")}
         </p>
       ) : (
         <div className="rows">
@@ -268,7 +272,7 @@ export function TaskList({
                   <span className="row__caret">▸</span>
                   <span
                     className="row__box row__box--clickable"
-                    title="complete / reopen"
+                    title={t("complete / reopen")}
                     onMouseDown={(e) => {
                       e.stopPropagation();
                       onToggleDone(task.id);
@@ -353,7 +357,11 @@ export function TaskList({
                       const text = value ? shortLabel(value) : "·";
 
                       return locked ? (
-                        <span key={col.field} className={classes} title={locked}>
+                        <span
+                          key={col.field}
+                          className={classes}
+                          title={t(locked)}
+                        >
                           {text}
                         </span>
                       ) : (
@@ -365,7 +373,7 @@ export function TaskList({
                           // open the same panel a click does.
                           data-date-cell={`${task.id}:${col.field}`}
                           className={classes}
-                          title={col.title}
+                          title={t(col.title)}
                           onMouseDown={(e) => {
                             // The row's own handler would move the
                             // cursor as well; do that here so it lands

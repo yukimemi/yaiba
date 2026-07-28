@@ -1,4 +1,5 @@
 import { diffDays, parseDateExpr } from "./dates";
+import { t } from "./i18n";
 import type { Lang } from "./lang";
 import type { Theme } from "./theme";
 import { SORT_KEYS, type SortKey } from "./filter";
@@ -252,14 +253,14 @@ function scheduled(data: AppData, task: Task): Scheduled | undefined {
  */
 function refuseSummary(data: AppData, task: Task, field: string): string | null {
   if (!scheduled(data, task)?.summary) return null;
-  return `“${task.title}” is a summary — its ${field} comes from its children`;
+  return t("“{title}” is a summary — its {field} comes from its children", { title: task.title, field });
 }
 
 /** Resolve a 1-based row number as typed on the command line. */
 function rowAt(ctx: CommandContext, arg: string): Task | string {
   const n = Number(arg);
   if (!Number.isInteger(n) || n < 1 || n > ctx.visible.length) {
-    return `no row ${arg} (1..${ctx.visible.length})`;
+    return t("no row {n} (1..{max})", { n: arg, max: ctx.visible.length });
   }
   return ctx.visible[n - 1];
 }
@@ -273,7 +274,7 @@ export function runCommand(
   const [head, ...rest] = line.split(/\s+/);
   const arg = rest.join(" ");
   const { current, selection, data } = ctx;
-  const needTask = (): CommandResult => ({ error: "no task under the cursor" });
+  const needTask = (): CommandResult => ({ error: t("no task under the cursor") });
 
   switch (head) {
     // ---- files & panes ------------------------------------------
@@ -281,7 +282,7 @@ export function runCommand(
     case "write":
       // Every edit is already persisted the moment it is made; `:w` is
       // here because the fingers expect it, and it says so plainly.
-      return { message: "saved on every edit — nothing to flush" };
+      return { message: t("saved on every edit — nothing to flush") };
     case "q":
     case "quit":
       return { ui: { quit: true } };
@@ -294,13 +295,13 @@ export function runCommand(
       return { ui: { view: head as View } };
     case "view": {
       if (!VIEWS.includes(arg as View)) {
-        return { error: `usage: :view ${VIEWS.join("|")}` };
+        return { error: t("usage: :view {list}", { list: VIEWS.join("|") }) };
       }
       return { ui: { view: arg as View } };
     }
     case "zoom": {
       if (!ZOOMS.includes(arg as Zoom)) {
-        return { error: `usage: :zoom ${ZOOMS.join("|")}` };
+        return { error: t("usage: :zoom {list}", { list: ZOOMS.join("|") }) };
       }
       return { ui: { zoom: arg as Zoom } };
     }
@@ -312,7 +313,7 @@ export function runCommand(
     case "columns": {
       if (!arg) return { ui: { columns: "toggle" } };
       if (!COLUMNS.includes(arg as Columns)) {
-        return { error: `usage: :cols ${COLUMNS.join("|")}  (bare :cols toggles)` };
+        return { error: t("usage: :cols {list}  (bare :cols toggles)", { list: COLUMNS.join("|") }) };
       }
       return { ui: { columns: arg as Columns } };
     }
@@ -322,22 +323,22 @@ export function runCommand(
     case "filter":
       return {
         ui: { filter: arg },
-        message: arg ? `filter: ${arg}` : "filter cleared",
+        message: arg ? t("filter: {q}", { q: arg }) : t("filter cleared"),
       };
     case "sort": {
       if (!SORT_KEYS.includes(arg as SortKey)) {
-        return { error: `usage: :sort ${SORT_KEYS.join("|")}` };
+        return { error: t("usage: :sort {list}", { list: SORT_KEYS.join("|") }) };
       }
-      return { ui: { sort: arg as SortKey }, message: `sorted by ${arg}` };
+      return { ui: { sort: arg as SortKey }, message: t("sorted by {k}", { k: arg }) };
     }
 
     // ---- tasks ---------------------------------------------------
     case "n":
     case "new": {
-      if (!arg) return { error: "usage: :new <title>" };
+      if (!arg) return { error: t("usage: :new <title>") };
       return {
         ops: [{ kind: "create", task: { title: arg, after: current?.id } }],
-        label: "new task",
+        label: t("new task"),
         message: arg,
       };
     }
@@ -353,8 +354,8 @@ export function runCommand(
       return {
         ops,
         undoOps: undo,
-        label: `delete ${selection.length}`,
-        message: `deleted ${selection.length}`,
+        label: t("delete {n}", { n: selection.length }),
+        message: t("deleted {n}", { n: selection.length }),
       };
     }
 
@@ -363,7 +364,7 @@ export function runCommand(
       if (!selection.length) return needTask();
       const clearing = !arg || ["none", "clear", "-"].includes(arg);
       const date = clearing ? null : parseDateExpr(arg, data.today);
-      if (!clearing && date === null) return { error: `bad date: ${arg}` };
+      if (!clearing && date === null) return { error: t("bad date: {d}", { d: arg }) };
       return patchSelection(
         selection,
         (task) => {
@@ -372,7 +373,7 @@ export function runCommand(
           // it against the rolled-up finish. Only the planned *start*
           // is derived from the children.
           if (head === "start") {
-            const refusal = refuseSummary(data, task, "start date");
+            const refusal = refuseSummary(data, task, t("start date"));
             if (refusal) return refusal;
           }
           return head === "due" ? { due: date } : { start: date };
@@ -395,24 +396,24 @@ export function runCommand(
       // instead.
       if (!arg || ["none", "clear", "-"].includes(arg)) {
         return {
-          error: "no end date is stored — set the span with :dur, or move it with :start none",
+          error: t("no end date is stored — set the span with :dur, or move it with :start none"),
         };
       }
       const date = parseDateExpr(arg, data.today);
-      if (date === null) return { error: `bad date: ${arg}` };
+      if (date === null) return { error: t("bad date: {d}", { d: arg }) };
       return patchSelection(
         selection,
         (task) => {
-          const refusal = refuseSummary(data, task, "dates");
+          const refusal = refuseSummary(data, task, t("dates"));
           if (refusal) return refusal;
           // A task with no `start` of its own is placed by the
           // scheduler. Pin it where it currently sits — the same thing
           // dragging its bar does — so the duration is measured from a
           // date that survives the next recompute.
           const start = task.start ?? scheduled(data, task)?.start;
-          if (!start) return `“${task.title}” has no start to measure from`;
+          if (!start) return t("“{title}” has no start to measure from", { title: task.title });
           const days = diffDays(start, date) + 1;
-          if (days < 1) return `${date} is before the start (${start})`;
+          if (days < 1) return t("{d} is before the start ({start})", { d: date, start });
           return { start, duration_days: days };
         },
         `end ${date}`,
@@ -428,7 +429,7 @@ export function runCommand(
       if (!selection.length) return needTask();
       const clearing = !arg || ["none", "clear", "-"].includes(arg);
       const date = clearing ? null : parseDateExpr(arg, data.today);
-      if (!clearing && date === null) return { error: `bad date: ${arg}` };
+      if (!clearing && date === null) return { error: t("bad date: {d}", { d: arg }) };
       return patchSelection(
         selection,
         (task) => {
@@ -437,12 +438,12 @@ export function runCommand(
           // every plan-vs-actual comparison drawn from it.
           if (date && head === "astart" && task.actual_end) {
             if (diffDays(date, task.actual_end) < 0) {
-              return `${date} is after work finished (${task.actual_end})`;
+              return t("{d} is after work finished ({end})", { d: date, end: task.actual_end });
             }
           }
           if (date && head === "aend" && task.actual_start) {
             if (diffDays(task.actual_start, date) < 0) {
-              return `${date} is before work started (${task.actual_start})`;
+              return t("{d} is before work started ({start})", { d: date, start: task.actual_start });
             }
           }
           return head === "astart"
@@ -457,12 +458,12 @@ export function runCommand(
       if (!selection.length) return needTask();
       const days = Number(arg.replace(/d$/, ""));
       if (!Number.isFinite(days) || days < 1) {
-        return { error: "usage: :dur <days ≥ 1>" };
+        return { error: t("usage: :dur <days ≥ 1>") };
       }
       return patchSelection(
         selection,
         (task) =>
-          refuseSummary(data, task, "span") ?? {
+          refuseSummary(data, task, t("span")) ?? {
             duration_days: Math.round(days),
           },
         `${Math.round(days)}d`,
@@ -473,7 +474,7 @@ export function runCommand(
       if (!selection.length) return needTask();
       const n = Number(arg);
       if (!Number.isInteger(n) || n < 0 || n > 3) {
-        return { error: "usage: :prio 0|1|2|3" };
+        return { error: t("usage: :prio 0|1|2|3") };
       }
       return patchSelection(selection, () => ({ priority: n }), `prio ${n}`);
     }
@@ -482,13 +483,13 @@ export function runCommand(
       if (!selection.length) return needTask();
       const n = Number(arg.replace(/%$/, ""));
       if (!Number.isFinite(n) || n < 0 || n > 100) {
-        return { error: "usage: :progress 0..100" };
+        return { error: t("usage: :progress 0..100") };
       }
       const value = Math.round(n);
       return patchSelection(
         selection,
         (task) =>
-          refuseSummary(data, task, "progress") ?? {
+          refuseSummary(data, task, t("progress")) ?? {
             progress: value,
             // 100% and "still todo" is a state nobody means to be in.
             ...(value === 100 ? { status: "done" as const } : {}),
@@ -499,7 +500,7 @@ export function runCommand(
     case "t":
     case "tag": {
       if (!selection.length) return needTask();
-      if (!arg) return { error: "usage: :tag +dev -ui" };
+      if (!arg) return { error: t("usage: :tag +dev -ui") };
       const terms = arg.split(/\s+/).filter(Boolean);
       return patchSelection(
         selection,
@@ -519,7 +520,7 @@ export function runCommand(
     case "note":
     case "notes": {
       if (!current) return needTask();
-      return patchSelection([current], () => ({ notes: arg }), "notes");
+      return patchSelection([current], () => ({ notes: arg }), t("notes"));
     }
 
     // ---- dependencies -------------------------------------------
@@ -528,15 +529,15 @@ export function runCommand(
       if (!current) return needTask();
       const target = rowAt(ctx, arg);
       if (typeof target === "string") return { error: target };
-      if (target.id === current.id) return { error: "a task can't block itself" };
+      if (target.id === current.id) return { error: t("a task can't block itself") };
       // `:dep 3` reads as "this one depends on row 3", so row 3 is the
       // predecessor.
       const dep = { from: target.id, to: current.id };
       return {
         ops: [{ kind: "addDep", dep }],
         undoOps: [{ kind: "removeDep", dep }],
-        label: "link",
-        message: `depends on “${target.title}”`,
+        label: t("link"),
+        message: t("depends on “{title}”", { title: target.title }),
       };
     }
     case "undep":
@@ -546,13 +547,13 @@ export function runCommand(
       if (typeof target === "string") return { error: target };
       const dep = { from: target.id, to: current.id };
       if (!data.deps.some((d) => d.from === dep.from && d.to === dep.to)) {
-        return { error: "no such dependency" };
+        return { error: t("no such dependency") };
       }
       return {
         ops: [{ kind: "removeDep", dep }],
         undoOps: [{ kind: "addDep", dep }],
-        label: "unlink",
-        message: `unlinked from “${target.title}”`,
+        label: t("unlink"),
+        message: t("unlinked from “{title}”", { title: target.title }),
       };
     }
 
@@ -563,7 +564,7 @@ export function runCommand(
       // overwritten before it can be read.
       if (arg === "dark" || arg === "light") return { ui: { theme: arg } };
       if (!arg) return { ui: { theme: "toggle" } };
-      return { error: "usage: :theme dark|light  (bare :theme toggles)" };
+      return { error: t("usage: :theme dark|light  (bare :theme toggles)") };
     }
     case "office":
       return { ui: { theme: "light" } };
@@ -572,60 +573,60 @@ export function runCommand(
       // language it became.
       if (arg === "en" || arg === "ja") return { ui: { lang: arg } };
       if (!arg) return { ui: { lang: "toggle" } };
-      return { error: "usage: :lang en|ja  (bare :lang toggles)" };
+      return { error: t("usage: :lang en|ja  (bare :lang toggles)") };
     }
 
     // ---- the reference date ---------------------------------------
     case "asof":
     case "as": {
       if (!arg || ["today", "now", "none", "-"].includes(arg)) {
-        return { ui: { asof: null }, message: "reference date: today" };
+        return { ui: { asof: null }, message: t("reference date: today") };
       }
       const date = parseDateExpr(arg, data.today);
-      if (!date) return { error: `bad date: ${arg}` };
-      return { ui: { asof: date }, message: `as of ${date}` };
+      if (!date) return { error: t("bad date: {d}", { d: arg }) };
+      return { ui: { asof: date }, message: t("as of {d}", { d: date }) };
     }
 
     // ---- the work breakdown ---------------------------------------
     case "only":
-      if (!current) return { error: "no task under the cursor" };
+      if (!current) return { error: t("no task under the cursor") };
       return {
         ui: { focus: current.id, foldLevel: null },
-        message: `focused “${current.title}” — :all to come back`,
+        message: t("focused “{title}” — :all to come back", { title: current.title }),
       };
     case "all":
-      return { ui: { focus: null, foldLevel: null }, message: "showing everything" };
+      return { ui: { focus: null, foldLevel: null }, message: t("showing everything") };
     case "level":
     case "lv": {
-      if (!arg) return { ui: { foldLevel: null }, message: "all levels" };
+      if (!arg) return { ui: { foldLevel: null }, message: t("all levels") };
       const n = Number(arg);
       if (!Number.isInteger(n) || n < 0) {
-        return { error: "usage: :level <0 or more>  (:level with no argument shows all)" };
+        return { error: t("usage: :level <0 or more>  (:level with no argument shows all)") };
       }
-      return { ui: { foldLevel: n }, message: `level ${n}` };
+      return { ui: { foldLevel: n }, message: t("level {n}", { n }) };
     }
     case "parent": {
-      if (!current) return { error: "no task under the cursor" };
+      if (!current) return { error: t("no task under the cursor") };
       if (!arg || arg === "none" || arg === "-") {
         return {
           ops: [{ kind: "patch", id: current.id, patch: { parent: null } }],
           undoOps: [
             { kind: "patch", id: current.id, patch: { parent: current.parent } },
           ],
-          label: "unparent",
-          message: "moved to the top level",
+          label: t("unparent"),
+          message: t("moved to the top level"),
         };
       }
       const target = rowAt(ctx, arg);
       if (typeof target === "string") return { error: target };
-      if (target.id === current.id) return { error: "a task can't contain itself" };
+      if (target.id === current.id) return { error: t("a task can't contain itself") };
       return {
         ops: [{ kind: "patch", id: current.id, patch: { parent: target.id } }],
         undoOps: [
           { kind: "patch", id: current.id, patch: { parent: current.parent } },
         ],
-        label: "reparent",
-        message: `moved under “${target.title}”`,
+        label: t("reparent"),
+        message: t("moved under “{title}”", { title: target.title }),
       };
     }
 
@@ -634,7 +635,7 @@ export function runCommand(
     case "share":
       return { peer: { showTicket: true } };
     case "join": {
-      if (!arg) return { error: "usage: :join <ticket>" };
+      if (!arg) return { error: t("usage: :join <ticket>") };
       return { peer: { join: arg } };
     }
 
@@ -662,14 +663,16 @@ export function runCommand(
         return {
           error:
             verb === "rename"
-              ? "usage: :proj rename ⟨new name⟩ — renames the project you are on"
-              : `usage: :proj ${verb} ⟨name⟩`,
+              ? t(
+                  "usage: :proj rename ⟨new name⟩ — renames the project you are on",
+                )
+              : t("usage: :proj {verb} ⟨name⟩", { verb }),
         };
       }
       return { project: { switch: arg } };
     }
 
     default:
-      return { error: `not a command: ${head}  (try :help)` };
+      return { error: t("not a command: {name}  (try :help)", { name: head }) };
   }
 }
