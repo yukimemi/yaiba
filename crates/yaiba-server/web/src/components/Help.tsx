@@ -143,6 +143,7 @@ const GROUPS: Group[] = [
       [":only / :all", "focus this subtree / clear"],
       [":theme ⟨t⟩", "dark / light — bare toggles"],
       [":office", "straight to office mode"],
+      [":lang ⟨l⟩", "weekday names: en / ja — bare toggles"],
     ],
   },
 ];

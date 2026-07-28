@@ -32,6 +32,7 @@ import {
   type SortKey,
 } from "./filter";
 import { MODE_HINT, type Mode } from "./mode";
+import { applyLang, initialLang, type Lang } from "./lang";
 import { applyTheme, initialTheme, type Theme } from "./theme";
 import { applyOps, inversePatch, type Op, type Step } from "./ops";
 import type { AppData, Dep, Status, Task, TaskPatch } from "./types";
@@ -167,6 +168,8 @@ export function App() {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("manual");
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  /** The language the weekday names are written in — nothing else. */
+  const [lang, setLang] = useState<Lang>(initialLang);
   /** Rows folded one at a time with za / zc. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /** Hide anything deeper than this; null shows every level. */
@@ -998,6 +1001,14 @@ export function App() {
           ui.theme === "toggle" ? (prev === "dark" ? "light" : "dark") : ui.theme!;
         applyTheme(next);
         say(next === "light" ? "office mode" : "neon mode");
+        return next;
+      });
+    }
+    if (ui.lang) {
+      setLang((prev) => {
+        const next = ui.lang === "toggle" ? (prev === "en" ? "ja" : "en") : ui.lang!;
+        applyLang(next);
+        say(next === "ja" ? "曜日を日本語で" : "weekdays in English");
         return next;
       });
     }
@@ -1979,6 +1990,8 @@ export function App() {
           setShowProjects(true);
         }}
         onToggleTheme={() => applyUi({ theme: "toggle" })}
+        lang={lang}
+        onToggleLang={() => applyUi({ lang: "toggle" })}
         focusTitle={
           focus ? (data.tasks.find((t) => t.id === focus)?.title ?? null) : null
         }
@@ -2031,6 +2044,7 @@ export function App() {
             deps={data.deps}
             cursor={cursor}
             today={data.today}
+            lang={lang}
             zoom={zoom}
             rangeStart={rangeStart}
             rangeEnd={rangeEnd}
@@ -2081,6 +2095,7 @@ export function App() {
             bySchedule.get(pickingTask.id),
           )}
           today={data.today}
+          lang={lang}
           anchor={picking.anchor}
           label={pickingColumn.head}
           hint={pickingColumn.title}

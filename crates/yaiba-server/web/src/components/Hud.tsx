@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { shortLabel, toISO, weekdayLabel } from "../dates";
+import type { Lang } from "../lang";
 import type { Mode } from "../mode";
 import type { Theme } from "../theme";
 import type { Task } from "../types";
@@ -49,6 +50,10 @@ interface Props {
   theme: Theme;
   /** Flip between the neon HUD and office mode. */
   onToggleTheme: () => void;
+  /** Which language the weekday beside the reference date is in. */
+  lang: Lang;
+  /** Flip the calendar between English and Japanese. */
+  onToggleLang: () => void;
   /** The project on screen, and the way in for a mouse. */
   project: string;
   projectCount: number;
@@ -79,6 +84,8 @@ export function Hud({
   focusTitle,
   theme,
   onToggleTheme,
+  lang,
+  onToggleLang,
   project,
   projectCount,
   onOpenProjects,
@@ -165,7 +172,7 @@ export function Hud({
           }
         >
           {shortLabel(reference)}
-          <span className="hud__asof-day">{weekdayLabel(reference)}</span>
+          <span className="hud__asof-day">{weekdayLabel(reference, lang)}</span>
         </button>
         {/* Forward runs past today on purpose: `:asof +3d` always did,
             and "if nothing moves, how far behind is this by Friday" is
@@ -264,6 +271,20 @@ export function Hud({
         }
       >
         {theme === "dark" ? "◐ neon" : "◑ office"}
+      </button>
+      {/* Beside the theme for the same reason: it is a setting about
+          what the screen says, and the only sign it exists is here. */}
+      <button
+        type="button"
+        className="hud__lang"
+        onClick={onToggleLang}
+        title={
+          lang === "en"
+            ? "曜日を日本語で (:lang ja)"
+            : "weekdays in English (:lang en)"
+        }
+      >
+        {lang === "en" ? "en" : "ja"}
       </button>
       <span
         className="hud__peers"

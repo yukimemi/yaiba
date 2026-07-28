@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { Zoom } from "../commands";
 import { addDays, diffDays, isWeekend, monthLabel, weekdayLabel } from "../dates";
+import type { Lang } from "../lang";
 import type { Dep, Scheduled, Task } from "../types";
 
 /** Must match `--row-h` in styles.css. */
@@ -15,6 +16,8 @@ interface Props {
   deps: Dep[];
   cursor: number;
   today: string;
+  /** Which language the weekday letters in the header are written in. */
+  lang: Lang;
   zoom: Zoom;
   rangeStart: string;
   rangeEnd: string;
@@ -40,6 +43,7 @@ export function Gantt({
   deps,
   cursor,
   today,
+  lang,
   zoom,
   rangeStart,
   rangeEnd,
@@ -234,7 +238,7 @@ export function Gantt({
                   style={{ left: x(iso), width: dayW * dayStep }}
                 >
                   {zoom === "day"
-                    ? `${Number(iso.slice(8))}${weekdayLabel(iso)}`
+                    ? `${Number(iso.slice(8))}${weekdayLabel(iso, lang)}`
                     : Number(iso.slice(8))}
                 </div>
               ) : null,

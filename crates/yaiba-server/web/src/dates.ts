@@ -5,6 +5,8 @@
  * and land on the previous day.
  */
 
+import type { Lang } from "./lang";
+
 export function parseISO(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d, 12, 0, 0, 0);
@@ -35,11 +37,26 @@ export function isWeekend(iso: string): boolean {
 }
 
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-/** Sunday first, indexed by `Date.getDay()` — and by the calendar grid. */
-export const JP_WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
-export function weekdayLabel(iso: string): string {
-  return JP_WEEKDAYS[parseISO(iso).getDay()];
+/**
+ * Sunday first, indexed by `Date.getDay()` — and by the calendar grid.
+ *
+ * Two characters wide in either language: a day column in the gantt
+ * header is 26px and the day number sits beside the name. One letter
+ * would fit better and be unreadable — `T` is Tuesday and Thursday.
+ */
+const WEEKDAY_LABELS: Record<Lang, string[]> = {
+  en: ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"],
+  ja: ["日", "月", "火", "水", "木", "金", "土"],
+};
+
+/** All seven in order, for anything drawing a calendar grid. */
+export function weekdays(lang: Lang): string[] {
+  return WEEKDAY_LABELS[lang];
+}
+
+export function weekdayLabel(iso: string, lang: Lang): string {
+  return WEEKDAY_LABELS[lang][parseISO(iso).getDay()];
 }
 
 export function monthLabel(iso: string): string {

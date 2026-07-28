@@ -1,4 +1,5 @@
 import { diffDays, parseDateExpr } from "./dates";
+import type { Lang } from "./lang";
 import type { Theme } from "./theme";
 import { SORT_KEYS, type SortKey } from "./filter";
 import { inversePatch, type Op } from "./ops";
@@ -44,6 +45,8 @@ export interface UiPatch {
   asof?: string | null;
   /** `"toggle"` flips to the other one — what bare `:theme` and `gt` do. */
   theme?: Theme | "toggle";
+  /** Weekday names only; `"toggle"` is what bare `:lang` does. */
+  lang?: Lang | "toggle";
   zoom?: Zoom;
   filter?: string;
   sort?: SortKey;
@@ -199,6 +202,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "undep", aliases: ["unlink"] },
   { name: "theme", args: first(() => ["dark", "light"]) },
   { name: "office" },
+  { name: "lang", args: first(() => ["en", "ja"]) },
   { name: "asof", aliases: ["as"], args: first(() => DATE_WORDS) },
   { name: "only" },
   { name: "all" },
@@ -563,6 +567,13 @@ export function runCommand(
     }
     case "office":
       return { ui: { theme: "light" } };
+    case "lang": {
+      // Same as `:theme`: applyUi says what the setting became, in the
+      // language it became.
+      if (arg === "en" || arg === "ja") return { ui: { lang: arg } };
+      if (!arg) return { ui: { lang: "toggle" } };
+      return { error: "usage: :lang en|ja  (bare :lang toggles)" };
+    }
 
     // ---- the reference date ---------------------------------------
     case "asof":
