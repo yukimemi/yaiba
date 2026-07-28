@@ -18,7 +18,7 @@ const GROUPS: Group[] = [
   {
     title: "EDIT",
     keys: [
-      ["o / O", "new task below / above"],
+      ["o / O", "new task below / above, at this level"],
       ["i / I", "edit the title (head)"],
       ["a / A", "edit the title (tail)"],
       ["cc", "clear the title and edit"],
@@ -26,7 +26,7 @@ const GROUPS: Group[] = [
       ["s", "cycle todo → doing → done"],
       ["dd", "delete"],
       ["yy / p", "yank / paste a copy"],
-      ["J / K", "move the row down / up"],
+      ["J / K", "move the row down / up among its siblings"],
       ["u / ^r", "undo / redo"],
     ],
   },

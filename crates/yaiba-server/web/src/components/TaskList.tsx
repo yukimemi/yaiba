@@ -23,6 +23,8 @@ interface Props {
   onEditKey: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   /** Row index the unsaved new task occupies, or -1 when there is none. */
   draftIndex: number;
+  /** Depth the unsaved row will land at, so it is drawn at that indent. */
+  draftLevel: number;
   draftValue: string;
   onDraftChange: (value: string) => void;
   onDraftKey: (e: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -67,6 +69,7 @@ export function TaskList({
   onEditChange,
   onEditKey,
   draftIndex,
+  draftLevel,
   draftValue,
   onDraftChange,
   onDraftKey,
@@ -153,6 +156,13 @@ export function TaskList({
   const draftRow = (
     <div className="row row--cursor row--draft">
       <span className="row__num">+</span>
+      {/* Same indent and fold columns a saved row draws, so the level the
+          new task is being created at is visible while it is typed and
+          the caret does not shift left when it commits. */}
+      <span className="row__indent">
+        {"  ".repeat(Math.min(draftLevel, 8))}
+      </span>
+      <span className="row__fold"> </span>
       <span className="row__caret">▸</span>
       <span className="row__box">[ ]</span>
       <input

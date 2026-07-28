@@ -70,23 +70,34 @@ function matchTerm(
 }
 
 /**
- * Depth-first order: every task immediately followed by its subtree.
+ * The parent a task is actually drawn under.
  *
- * Siblings keep the server's `position` order, which is what `J` / `K`
- * rewrite, so moving a row moves it within its own parent.
+ * Matches the server's rule: a parent that isn't in this list leaves the
+ * child at the root instead of hiding it.
  */
-export function treeOrder(tasks: Task[], root: TaskId | null = null): Task[] {
+export function effectiveParent(task: Task, ids: Set<TaskId>): TaskId | null {
+  return task.parent && ids.has(task.parent) ? task.parent : null;
+}
+
+/** Tasks grouped by their effective parent, each bucket in list order. */
+function childBuckets(tasks: Task[]): Map<TaskId | null, Task[]> {
   const ids = new Set(tasks.map((t) => t.id));
   const children = new Map<TaskId | null, Task[]>();
   for (const task of tasks) {
-    // Matches the server's rule: a parent that isn't here leaves the
-    // child at the root instead of hiding it.
-    const parent = task.parent && ids.has(task.parent) ? task.parent : null;
+    const parent = effectiveParent(task, ids);
     const bucket = children.get(parent);
     if (bucket) bucket.push(task);
     else children.set(parent, [task]);
   }
+  return children;
+}
 
+/** Walk the buckets depth-first from `root`, then append anything stranded. */
+function flatten(
+  tasks: Task[],
+  children: Map<TaskId | null, Task[]>,
+  root: TaskId | null,
+): Task[] {
   const out: Task[] = [];
   const seen = new Set<TaskId>();
   const walk = (parent: TaskId | null) => {
@@ -103,6 +114,52 @@ export function treeOrder(tasks: Task[], root: TaskId | null = null): Task[] {
   // Anything stranded by a cycle still gets rendered, at the end.
   for (const task of tasks) if (!seen.has(task.id)) out.push(task);
   return out;
+}
+
+/**
+ * Depth-first order: every task immediately followed by its subtree.
+ *
+ * Siblings keep the server's `position` order, which is what `J` / `K`
+ * rewrite, so moving a row moves it within its own parent.
+ */
+export function treeOrder(tasks: Task[], root: TaskId | null = null): Task[] {
+  return flatten(tasks, childBuckets(tasks), root);
+}
+
+/**
+ * The whole manual order, rewritten so `id` sits `delta` places further
+ * along **among its own siblings**, subtree in tow.
+ *
+ * Swapping two neighbours in the flat `position` list — which is what
+ * `J` / `K` used to do — is invisible the moment the breakdown has more
+ * than one level: the row above may be a child of something else, and
+ * the tree walk re-groups it by parent afterwards, restoring exactly the
+ * order that was just rewritten. Sibling order is the only order the
+ * list actually draws, so that is the one to rewrite; positions are then
+ * re-stamped in tree order, which keeps the flat list and the drawn list
+ * telling the same story for `o` / `O` to anchor against.
+ *
+ * `null` means the row is already the first or last of its siblings —
+ * there is nowhere to go without changing its level.
+ */
+export function siblingOrder(
+  tasks: Task[],
+  id: TaskId,
+  delta: number,
+): TaskId[] | null {
+  const children = childBuckets(tasks);
+  const ids = new Set(tasks.map((t) => t.id));
+  const task = tasks.find((t) => t.id === id);
+  if (!task) return null;
+
+  const siblings = children.get(effectiveParent(task, ids)) ?? [];
+  const from = siblings.findIndex((t) => t.id === id);
+  if (from < 0) return null;
+  const to = Math.min(Math.max(from + delta, 0), siblings.length - 1);
+  if (from === to) return null;
+
+  siblings.splice(to, 0, ...siblings.splice(from, 1));
+  return flatten(tasks, children, null).map((t) => t.id);
 }
 
 /** Every ancestor of `id`, nearest first. */
