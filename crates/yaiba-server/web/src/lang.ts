@@ -1,27 +1,31 @@
 /**
- * Which language the calendar is written in.
- *
- * Only the weekday names have one — every other word in the UI is
- * English, and a date is the one place where a reader's own language
- * is faster than a shared one: `29土` is read as "the weekend" without
- * being spelled out.
+ * Which language the UI is written in.
  *
  * English is the default rather than the browser's locale. `yaiba` is
  * read by people who did not install it, in screenshots and shared
- * screens, so what it says out of the box has to be the same everywhere
- * — a UI that is English apart from three characters reads as a bug,
- * and the reader has no way to know it is a setting. Choosing `ja` is
- * therefore a choice, and it is remembered.
+ * screens, so what it says out of the box has to be the same
+ * everywhere. Choosing `ja` is a choice, and it is remembered.
  *
- * Applied to `<html lang>` as well as stored, so a screen reader
- * announces the dates in the language they are actually written in.
+ * What is *not* translated is anything you type: command names, key
+ * names, `todo` / `doing` / `done`, tags. Translating those would make
+ * the help a description of a different program from the one under
+ * your fingers.
+ *
+ * Applied to `<html lang>` as well as stored, so a screen reader reads
+ * the page in the language it is actually written in. The strings
+ * themselves live in [`i18n.ts`](./i18n.ts); this module owns the
+ * setting, and `applyLang` is the one place either copy of it is
+ * written.
  */
+
+import { setLang } from "./i18n";
 
 export type Lang = "en" | "ja";
 
 const STORAGE_KEY = "yaiba:lang";
 
 export function applyLang(lang: Lang): void {
+  setLang(lang);
   document.documentElement.lang = lang;
   try {
     localStorage.setItem(STORAGE_KEY, lang);

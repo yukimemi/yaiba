@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { shortLabel, toISO, weekdayLabel } from "../dates";
+import { t } from "../i18n";
 import type { Lang } from "../lang";
 import type { Mode } from "../mode";
 import type { Theme } from "../theme";
@@ -120,6 +121,9 @@ export function Hud({
       <span className="hud__mark">
         YAIBA<span className="hud__kanji">刃</span>
       </span>
+      {/* The mode name stays English in either language, the way the
+          keys do: `INSERT` is what every modal editor calls it, and a
+          translated one would be a word you cannot look up. */}
       <span className="hud__mode" data-mode={mode}>
         {mode.toUpperCase()}
       </span>
@@ -132,8 +136,10 @@ export function Hud({
         onClick={onOpenProjects}
         title={
           projectCount > 1
-            ? `${projectCount} projects open — switch, rename, forget (or :proj)`
-            : "projects — new, rename, forget (or :proj)"
+            ? t("{n} projects open — switch, rename, forget (or :proj)", {
+                n: projectCount,
+              })
+            : t("projects — new, rename, forget (or :proj)")
         }
       >
         {project || "—"}
@@ -157,7 +163,7 @@ export function Hud({
           type="button"
           className="hud__asof-step"
           onClick={() => onStepAsof(-1)}
-          title="a day earlier (:asof -1d)"
+          title={t("a day earlier (:asof -1d)")}
         >
           ◀
         </button>
@@ -167,8 +173,13 @@ export function Hud({
           onClick={onToggleAsof}
           title={
             isAsOf
-              ? `computed as of ${reference} — edits stay refused until you are back at now`
-              : "reference date — everything on screen is computed against it (:asof)"
+              ? t(
+                  "computed as of {d} — edits stay refused until you are back at now",
+                  { d: reference },
+                )
+              : t(
+                  "reference date — everything on screen is computed against it (:asof)",
+                )
           }
         >
           {shortLabel(reference)}
@@ -182,7 +193,7 @@ export function Hud({
           type="button"
           className="hud__asof-step"
           onClick={() => onStepAsof(1)}
-          title="a day later (:asof +1d)"
+          title={t("a day later (:asof +1d)")}
         >
           ▶
         </button>
@@ -198,7 +209,7 @@ export function Hud({
               }}
               disabled={!isAsOf}
             >
-              now
+              {t("now")}
             </button>
             {ASOF_STEPS.map(([label, days]) => (
               <button
@@ -231,24 +242,24 @@ export function Hud({
       </div>
       {focusTitle && (
         <span className="hud__stat">
-          only <b>{focusTitle}</b>
+          {t("only")} <b>{focusTitle}</b>
         </span>
       )}
       {foldLevel !== null && (
         <span className="hud__stat">
-          level <b>{foldLevel}</b>
+          {t("level")} <b>{foldLevel}</b>
         </span>
       )}
       {filter && (
         <span className="hud__stat">
-          filter <b>{filter}</b> · {visibleCount}
+          {t("filter")} <b>{filter}</b> · {visibleCount}
         </span>
       )}
       <span className="hud__stat">
-        crit <b>{criticalCount}</b>
+        {t("crit")} <b>{criticalCount}</b>
       </span>
       <span className="hud__stat">
-        ends <b>{projectEnd}</b>
+        {t("ends")} <b>{projectEnd}</b>
       </span>
       <span className="hud__meter">
         <span className="hud__bar">
@@ -266,11 +277,11 @@ export function Hud({
         onClick={onToggleTheme}
         title={
           theme === "dark"
-            ? "office mode — light, no glow (gt)"
-            : "neon mode (gt)"
+            ? t("office mode — light, no glow (gt)")
+            : t("neon mode (gt)")
         }
       >
-        {theme === "dark" ? "◐ neon" : "◑ office"}
+        {theme === "dark" ? t("◐ neon") : t("◑ office")}
       </button>
       {/* Beside the theme for the same reason: it is a setting about
           what the screen says, and the only sign it exists is here. */}
@@ -278,11 +289,10 @@ export function Hud({
         type="button"
         className="hud__lang"
         onClick={onToggleLang}
-        title={
-          lang === "en"
-            ? "曜日を日本語で (:lang ja)"
-            : "weekdays in English (:lang en)"
-        }
+        // Written in the language it switches *to*, not the one you are
+        // in: the person who needs this button is the one who cannot
+        // read the language currently on screen.
+        title={lang === "en" ? "日本語で表示 (:lang ja)" : "in English (:lang en)"}
       >
         {lang === "en" ? "en" : "ja"}
       </button>
@@ -291,15 +301,19 @@ export function Hud({
         data-live={peerCount > 0}
         title={
           syncOn
-            ? `node ${nodeId} · :ticket to share, :join <ticket> to connect`
-            : "started with --no-sync"
+            ? t("node {id} · :ticket to share, :join <ticket> to connect", {
+                id: nodeId,
+              })
+            : t("started with --no-sync")
         }
       >
         {!syncOn
-          ? "◌ local"
+          ? t("◌ local")
           : peerCount === 0
-            ? "◉ solo"
-            : `◉ ${peerCount} peer${peerCount === 1 ? "" : "s"}`}
+            ? t("◉ solo")
+            : peerCount === 1
+              ? t("◉ 1 peer")
+              : t("◉ {n} peers", { n: peerCount })}
       </span>
     </header>
   );

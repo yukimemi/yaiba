@@ -67,3 +67,13 @@ jobs:
         # definition — so this checks what `cargo make web-build`
         # produces rather than a second, drifting copy of the command.
         run: bun run build
+
+      - name: Check the translations
+        working-directory: crates/yaiba-server/web
+        # `t()` takes a string, so neither half of this is a type error:
+        # a phrase added without a Japanese line ships silently in
+        # English, and one reworded in English strands its old
+        # translation as a line nothing will ever print. Both stay
+        # invisible until somebody runs the UI in `ja` and reads every
+        # screen.
+        run: node scripts/check-i18n.mjs

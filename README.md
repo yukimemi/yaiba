@@ -143,18 +143,25 @@ gt              office mode <-> neon mode
 The choice is remembered, and a fresh install follows your OS
 preference.
 
-The calendar has a language, and that one starts in English:
+The UI has a language too, and that one starts in English:
 
 ```
-:lang ja        29土 — weekday names in Japanese
-:lang en        29Sa — back to English (bare :lang toggles)
+:lang ja        日本語で表示します
+:lang en        back to English (bare :lang toggles)
 ```
 
-Weekday names are the only words in `yaiba` that are ever translated —
-the rest of the UI is English in either setting. English is the default
-rather than your browser's locale, because a screenshot of `yaiba`
-should read the same wherever it is opened; `ja` is a choice, and it is
-remembered. Both toggles sit at the right of the top bar for a mouse.
+It is the whole surface, not a veneer: the `?` panel, the status line's
+replies, every refusal the `:` line can give you, the column heads and
+the project palette. English is the default rather than your browser's
+locale, because a screenshot of `yaiba` should read the same wherever it
+is opened; `ja` is a choice, and it is remembered. Both toggles sit at
+the right of the top bar for a mouse.
+
+What is *not* translated is anything you type. Key names, command names,
+`todo` / `doing` / `done`, tag names and the words a command accepts
+(`day, week, month`) read the same in either language — a help that
+renamed the keys would be describing a different program from the one
+under your fingers.
 
 The keyboard remains the point, but every common action has a mouse
 equivalent, because handing the screen to someone else should not

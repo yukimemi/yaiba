@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { addDays, isWeekend, monthLabel, parseISO, toISO, weekdays } from "../dates";
+import { t } from "../i18n";
 import type { Lang } from "../lang";
 
 /** Six weeks, so the panel never changes height as you page months. */
@@ -179,7 +180,7 @@ export function DatePicker({
         <button
           type="button"
           className="datepick__step"
-          title="previous month — ["
+          title={t("previous month — [")}
           onClick={() => setCursor((c) => shiftMonth(c, -1))}
         >
           ‹
@@ -188,7 +189,7 @@ export function DatePicker({
         <button
           type="button"
           className="datepick__step"
-          title="next month — ]"
+          title={t("next month — ]")}
           onClick={() => setCursor((c) => shiftMonth(c, 1))}
         >
           ›
@@ -232,7 +233,7 @@ export function DatePicker({
           className="datepick__action"
           onClick={() => onPick(today)}
         >
-          today
+          {t("today")}
         </button>
         {clearable && (
           <button
@@ -240,7 +241,7 @@ export function DatePicker({
             className="datepick__action"
             onClick={() => onPick(null)}
           >
-            clear
+            {t("clear")}
           </button>
         )}
         {/* Its own title as well: the line is capped so a long one

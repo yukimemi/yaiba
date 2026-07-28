@@ -31,7 +31,8 @@ import {
   visibleTasks,
   type SortKey,
 } from "./filter";
-import { MODE_HINT, type Mode } from "./mode";
+import { modeHint, type Mode } from "./mode";
+import { t } from "./i18n";
 import { applyLang, initialLang, type Lang } from "./lang";
 import { applyTheme, initialTheme, type Theme } from "./theme";
 import { applyOps, inversePatch, type Op, type Step } from "./ops";
@@ -349,7 +350,7 @@ export function App() {
         setFilter("");
         return load();
       })
-      .then(() => say(`project · ${name}`, "ok"))
+      .then(() => say(t("project · {name}", { name }), "ok"))
       .catch((e: Error) => failProject(e));
   };
 
@@ -404,7 +405,7 @@ export function App() {
         // cursor, filter and folds — resetting them here would be the
         // "switch lost my data" surprise for an operation that changed
         // nothing but a label.
-        say(`renamed ${from} → ${to}`, "ok");
+        say(t("renamed {from} → {to}", { from, to }), "ok");
       })
       .catch((e: Error) => failProject(e));
   };
@@ -550,7 +551,7 @@ export function App() {
    */
   const liveOnly = useCallback((): boolean => {
     if (!asofRef.current) return true;
-    say("viewing the past — :asof today to make changes", "error");
+    say(t("viewing the past — :asof today to make changes"), "error");
     return false;
   }, []);
 
@@ -628,7 +629,7 @@ export function App() {
         });
       }
       if (!ops.length) {
-        say("nothing above to nest under", "error");
+        say(t("nothing above to nest under"), "error");
         return;
       }
       void run(ops, undo, "indent");
@@ -658,7 +659,7 @@ export function App() {
         });
       }
       if (!ops.length) {
-        say("already at the top level", "error");
+        say(t("already at the top level"), "error");
         return;
       }
       void run(ops, undo, "outdent");
@@ -817,11 +818,11 @@ export function App() {
     (row: Task | null, delta: number) => {
       if (!row || !data) return;
       if (sort !== "manual") {
-        say("rows only move in manual order — :sort manual", "error");
+        say(t("rows only move in manual order — :sort manual"), "error");
         return;
       }
       if (filter) {
-        say("clear the filter before moving rows — :f", "error");
+        say(t("clear the filter before moving rows — :f"), "error");
         return;
       }
       const ids = data.tasks.map((t) => t.id);
@@ -829,8 +830,16 @@ export function App() {
       // Staying silent here is indistinguishable from the bug above, so
       // the wall a row has hit says so.
       if (!next) {
-        const edge = delta > 0 ? "last" : "first";
-        say(`already ${edge} at this level — >> / << change level`, "error");
+        // Two whole sentences rather than a translated noun dropped into
+        // one: "first" and "last" inflect differently in the two
+        // languages, and a catalogue that has to translate a fragment
+        // out of context is where the wrong word gets picked.
+        say(
+          delta > 0
+            ? t("already last at this level — >> / << change level")
+            : t("already first at this level — >> / << change level"),
+          "error",
+        );
         return;
       }
       void run(
@@ -882,7 +891,7 @@ export function App() {
       if (!liveOnly()) return;
       const block = register.current;
       if (!block.length) {
-        say("nothing yanked", "error");
+        say(t("nothing yanked"), "error");
         return;
       }
       // Kept across the loop because `createTask` diffs against a
@@ -945,7 +954,7 @@ export function App() {
       // The head of what was pasted, the way a linewise `p` in vim
       // leaves the cursor on the first line it put down.
       if (first) putCursor(first);
-      say(`pasted ${filed.length}`, "ok");
+      say(t("pasted {n}", { n: filed.length }), "ok");
     },
     [createTask, data, liveOnly],
   );
@@ -954,13 +963,13 @@ export function App() {
     if (!liveOnly()) return;
     const step = undoStack.current.pop();
     if (!step) {
-      say("already at the oldest change");
+      say(t("already at the oldest change"));
       return;
     }
     try {
       setData(await applyOps(step.undo));
       redoStack.current.push(step);
-      say(`undo: ${step.label}`, "ok");
+      say(t("undo: {label}", { label: step.label }), "ok");
     } catch (e) {
       setMessage({ text: (e as Error).message, kind: "error" });
       void load();
@@ -971,13 +980,13 @@ export function App() {
     if (!liveOnly()) return;
     const step = redoStack.current.pop();
     if (!step) {
-      say("already at the newest change");
+      say(t("already at the newest change"));
       return;
     }
     try {
       setData(await applyOps(step.redo));
       undoStack.current.push(step);
-      say(`redo: ${step.label}`, "ok");
+      say(t("redo: {label}", { label: step.label }), "ok");
     } catch (e) {
       setMessage({ text: (e as Error).message, kind: "error" });
       void load();
@@ -1000,7 +1009,7 @@ export function App() {
           return;
         }
       }
-      say(`pattern not found: ${term}`, "error");
+      say(t("pattern not found: {q}", { q: term }), "error");
     },
     [visible],
   );
@@ -1014,7 +1023,7 @@ export function App() {
         const next =
           ui.theme === "toggle" ? (prev === "dark" ? "light" : "dark") : ui.theme!;
         applyTheme(next);
-        say(next === "light" ? "office mode" : "neon mode");
+        say(next === "light" ? t("office mode") : t("neon mode"));
         return next;
       });
     }
@@ -1022,7 +1031,10 @@ export function App() {
       setLang((prev) => {
         const next = ui.lang === "toggle" ? (prev === "en" ? "ja" : "en") : ui.lang!;
         applyLang(next);
-        say(next === "ja" ? "曜日を日本語で" : "weekdays in English");
+        // The one line that cannot come out of the catalogue: it is
+        // said in the language just switched *to*, so whichever way you
+        // flipped it the confirmation is readable.
+        say(next === "ja" ? "日本語で表示します" : "now in English");
         return next;
       });
     }
@@ -1036,8 +1048,8 @@ export function App() {
             : ui.columns!;
         say(
           next === "dates"
-            ? "dates — click a cell to pick one"
-            : "compact columns",
+            ? t("dates — click a cell to pick one")
+            : t("compact columns"),
         );
         return next;
       });
@@ -1051,7 +1063,7 @@ export function App() {
       // Only works for script-opened tabs; say so instead of failing
       // silently.
       window.close();
-      say("close the tab to quit — the server keeps running", "info");
+      say(t("close the tab to quit — the server keeps running"), "info");
     }
   }, []);
 
@@ -1059,7 +1071,7 @@ export function App() {
     (row: Task | null, remove: boolean) => {
       if (!linkAnchor || !row || !data) return;
       if (row.id === linkAnchor) {
-        say("a task can't depend on itself", "error");
+        say(t("a task can't depend on itself"), "error");
         return;
       }
       // The anchor is the task that waits; the row you land on is what
@@ -1069,11 +1081,11 @@ export function App() {
         (d) => d.from === dep.from && d.to === dep.to,
       );
       if (remove && !exists) {
-        say("no dependency between those two", "error");
+        say(t("no dependency between those two"), "error");
         return;
       }
       if (!remove && exists) {
-        say("already linked", "error");
+        say(t("already linked"), "error");
         return;
       }
       void run(
@@ -1140,14 +1152,14 @@ export function App() {
     (draggedId: string, targetId: string) => {
       if (!data) return;
       if (sort !== "manual") {
-        say("rows only move in manual order — :sort manual", "error");
+        say(t("rows only move in manual order — :sort manual"), "error");
         return;
       }
       const dragged = data.tasks.find((t) => t.id === draggedId);
       if (!dragged) return;
       const dropped = dropOrder(data.tasks, draggedId, targetId);
       if (!dropped) {
-        say("a row cannot be dropped inside itself", "error");
+        say(t("a row cannot be dropped inside itself"), "error");
         return;
       }
 
@@ -1216,7 +1228,7 @@ export function App() {
     (from: string, to: string) => {
       const dep = { from, to };
       if (data?.deps.some((d) => d.from === from && d.to === to)) {
-        say("already linked", "error");
+        say(t("already linked"), "error");
         return;
       }
       void run(
@@ -1259,14 +1271,14 @@ export function App() {
   const openDate = useCallback(
     (row: Task | null, field: DateField) => {
       if (!row) {
-        say("no task under the cursor", "error");
+        say(t("no task under the cursor"), "error");
         return;
       }
       // The same refusal the cell renders as plain text, said out loud —
       // from the keyboard there is no shape to notice instead.
       const locked = dateLocked(field, bySchedule.get(row.id));
       if (locked) {
-        say(locked, "error");
+        say(t(locked), "error");
         return;
       }
       const box = (
@@ -1541,7 +1553,7 @@ export function App() {
         break;
       case "yy":
         register.current = selection;
-        say(`yanked ${selection.length}`, "ok");
+        say(t("yanked {n}", { n: selection.length }), "ok");
         if (activeMode === "visual") {
           enterMode("normal");
           putAnchor(null);
@@ -1615,14 +1627,14 @@ export function App() {
         if (current) {
           setLinkAnchor(current.id);
           enterMode("link");
-          say("pick what this task waits for — ⏎ to confirm");
+          say(t("pick what this task waits for — ⏎ to confirm"));
         }
         break;
       case "X":
         if (current) {
           setLinkAnchor(current.id);
           enterMode("unlink");
-          say("pick the dependency to cut — ⏎ to confirm");
+          say(t("pick the dependency to cut — ⏎ to confirm"));
         }
         break;
       case "<cr>":
@@ -1684,12 +1696,12 @@ export function App() {
         if (current) {
           setFocus(current.id);
           setFoldLevel(null);
-          say(`focused “${current.title}” — zF to come back`);
+          say(t("focused “{title}” — zF to come back", { title: current.title }));
         }
         break;
       case "zF":
         setFocus(null);
-        say("showing everything");
+        say(t("showing everything"));
         break;
 
       // ---- the breakdown itself
@@ -1710,7 +1722,7 @@ export function App() {
 
       case "R":
         void load();
-        say("reloaded", "ok");
+        say(t("reloaded"), "ok");
         break;
 
       default:
@@ -1867,14 +1879,15 @@ export function App() {
     if (result.ui) applyUi(result.ui);
     if (result.peer?.showTicket) {
       if (!peers.ticket) {
-        say("sync is off — started with --no-sync", "error");
+        say(t("sync is off — started with --no-sync"), "error");
       } else {
         // Copying is best-effort: it needs a secure context, which
         // plain http://localhost happens to qualify as, but a LAN
         // address would not.
+        const ticket = peers.ticket;
         void navigator.clipboard
-          ?.writeText(peers.ticket)
-          .then(() => say(`ticket copied · ${peers.ticket}`, "ok"))
+          ?.writeText(ticket)
+          .then(() => say(t("ticket copied · {ticket}", { ticket }), "ok"))
           .catch(() => say(peers.ticket ?? "", "ok"));
       }
     }
@@ -1883,7 +1896,7 @@ export function App() {
         .joinPeer(result.peer.join)
         .then((info) => {
           setPeers(info);
-          say(`joined · ${info.peers.length} peer(s)`, "ok");
+          say(t("joined · {n} peer(s)", { n: info.peers.length }), "ok");
           void load();
         })
         .catch((e: Error) => say(e.message, "error"));
@@ -2035,7 +2048,7 @@ export function App() {
             linkAnchor={linkAnchor}
             onlyPane={view === "list"}
             emptyHint={
-              filter ? "nothing matches this filter." : "no tasks yet."
+              filter ? t("nothing matches this filter.") : t("no tasks yet.")
             }
             sort={sort}
             columns={columns}
@@ -2089,7 +2102,7 @@ export function App() {
         completion={completion}
         message={message}
         pending={pending}
-        hint={MODE_HINT[mode]}
+        hint={modeHint(mode)}
       />
 
       {/* Keyed on the cell, because clicking straight from one open
@@ -2111,8 +2124,8 @@ export function App() {
           today={data.today}
           lang={lang}
           anchor={picking.anchor}
-          label={pickingColumn.head}
-          hint={pickingColumn.title}
+          label={t(pickingColumn.head)}
+          hint={t(pickingColumn.title)}
           clearable={pickingColumn.clearable}
           onPick={(iso) => commitDate(pickingTask.id, pickingColumn.field, iso)}
           onClose={() => setPicking(null)}
