@@ -505,6 +505,15 @@ export function App() {
    * stay aligned if they scroll together — otherwise row 20's bar sits
    * next to row 8's title. The flag breaks the feedback loop where each
    * scroll triggers the other's handler.
+   *
+   * The assignment is clamped to what the *target* can actually reach,
+   * and the source is pulled back to match. A pane that is asked for a
+   * `scrollTop` past its own end silently stops there and then holds
+   * still while the other one keeps moving — which reads as the list
+   * scrolling on its own with the gantt stuck beside it, and is worse
+   * than a few pixels of unreachable tail. The panes carry the same
+   * trailing space by CSS (`--pane-tail`), so what is left here is the
+   * gantt's horizontal scrollbar eating into its visible height.
    */
   const syncScroll = useCallback(
     (from: React.RefObject<HTMLDivElement | null>) => () => {
@@ -512,7 +521,12 @@ export function App() {
       const target = (from === listPane ? ganttPane : listPane).current;
       if (!source || !target || syncingScroll.current) return;
       syncingScroll.current = true;
-      target.scrollTop = source.scrollTop;
+      const top = Math.min(
+        source.scrollTop,
+        target.scrollHeight - target.clientHeight,
+      );
+      if (target.scrollTop !== top) target.scrollTop = top;
+      if (source.scrollTop !== top) source.scrollTop = top;
       requestAnimationFrame(() => {
         syncingScroll.current = false;
       });

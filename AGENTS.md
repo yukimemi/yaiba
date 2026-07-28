@@ -433,6 +433,17 @@ tab title — it has to survive a shared screen in a meeting.
   whatever received `pointerdown`, so `e.target` at release is the drag
   handle. `onMove` uses the same call, so the drop highlight and the
   commit can never disagree.
+- **The two panes must be able to scroll equally far.** They stay in
+  step by mirroring `scrollTop`, and a pane asked for a position past
+  its own end simply stops there — so any difference in scrollable
+  height becomes a stretch of scrolling where the list moves and the
+  gantt does not, growing until it is capped at the difference. The list
+  carried a `40vh` tail below the last row that the gantt did not, so
+  the last 40vh of scrolling silently slid every bar out from under its
+  title. Both spend `--pane-tail` now, and `syncScroll` clamps to what
+  the target can reach for what CSS cannot equalise — the gantt's
+  horizontal scrollbar, which eats into its visible height. Anything
+  added below either pane's rows has to be added to both.
 
 ### The date columns, and the picker over them
 
