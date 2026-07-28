@@ -632,17 +632,23 @@ export function App() {
    * The id is discovered by diffing against the previous state rather
    * than minted here, so the manual `position` the server computes for
    * `after` stays authoritative.
+   *
+   * `known` exists because that diff is against `data`, which is a
+   * render-old snapshot: a caller creating several rows in one pass
+   * would rediscover its *first* row every time, and anchoring each row
+   * on that one pastes a block back to front. Such a caller keeps its
+   * own set and adds each id as it lands.
    */
   const createTask = useCallback(
     async (
       title: string,
-      anchor: string | null,
-      place: Place,
-      parent: string | null,
+      at: { anchor: string | null; place: Place; parent: string | null },
       label: string,
+      known?: Set<string>,
     ) => {
       if (!liveOnly()) return null;
-      const known = new Set((data?.tasks ?? []).map((t) => t.id));
+      const { anchor, place, parent } = at;
+      const seen = known ?? new Set((data?.tasks ?? []).map((t) => t.id));
       try {
         const next = await api.createTask({
           title,
@@ -651,7 +657,7 @@ export function App() {
           before: place === "before" ? anchor : null,
         });
         setData(next);
-        const created = next.tasks.find((t) => !known.has(t.id));
+        const created = next.tasks.find((t) => !seen.has(t.id));
         if (created) {
           undoStack.current.push({
             redo: [{ kind: "restore", task: created, deps: [] }],
@@ -697,9 +703,11 @@ export function App() {
       if (!title) return;
       const created = await createTask(
         title,
-        pending.anchor,
-        pending.place,
-        pending.parent,
+        {
+          anchor: pending.anchor,
+          place: pending.place,
+          parent: pending.parent,
+        },
         "new task",
       );
       if (created) setCursorId(created.id);
@@ -815,27 +823,54 @@ export function App() {
     [data, visible, cursor, run],
   );
 
-  /** Paste the register next to `at`, at `parent`'s level. */
+  /**
+   * Paste the register next to `at`, with its root rows at `parent`'s
+   * level.
+   *
+   * The register is a block in the order it was drawn, so the copies
+   * keep the shape it had: a row whose parent came along in the same
+   * yank is re-parented onto that parent's *copy*, and only the rows
+   * whose parent stayed behind land at the paste level. Flattening the
+   * block instead threw away the breakdown that made it worth yanking.
+   */
   const paste = useCallback(
     async (at: string | null, place: Place, parent: string | null) => {
       if (!liveOnly()) return;
-      if (!register.current.length) {
+      const block = register.current;
+      if (!block.length) {
         say("nothing yanked", "error");
         return;
       }
+      // Kept across the loop because `createTask` diffs against a
+      // render-old `data` — see its `known` parameter.
+      const seen = new Set((data?.tasks ?? []).map((t) => t.id));
+      const yanked = new Set(block.map((t) => t.id));
+      /** Yanked id → the copy of it, for re-parenting the rows below. */
+      const copies = new Map<string, string>();
+      // One gesture is one undo: `createTask` files a step per row, and
+      // four presses of `u` to take back one `p` is not an undo.
+      const filedBefore = undoStack.current.length;
+
       let anchor = at;
       // Only the first row lands on the requested side; the rest follow
       // it, so a `P` of three keeps the register's own order.
       let side = place;
-      for (const task of register.current) {
+      let first: string | null = null;
+      for (const task of block) {
+        const under =
+          task.parent && yanked.has(task.parent)
+            ? (copies.get(task.parent) ?? parent)
+            : parent;
         const created = await createTask(
           task.title,
-          anchor,
-          side,
-          parent,
+          { anchor, place: side, parent: under },
           "paste",
+          seen,
         );
         if (!created) break;
+        seen.add(created.id);
+        copies.set(task.id, created.id);
+        first ??= created.id;
         anchor = created.id;
         side = "after";
         await api
@@ -849,11 +884,26 @@ export function App() {
           })
           .then(setData)
           .catch(() => undefined);
-        setCursorId(created.id);
       }
-      say(`pasted ${register.current.length}`, "ok");
+
+      const filed = undoStack.current.splice(filedBefore);
+      if (filed.length > 1) {
+        undoStack.current.push({
+          redo: filed.flatMap((step) => step.redo),
+          // Newest first, so a parent's copy outlives its children's.
+          undo: filed.flatMap((step) => step.undo).reverse(),
+          label: `paste ${filed.length}`,
+        });
+      } else if (filed.length) {
+        undoStack.current.push(filed[0]);
+      }
+
+      // The head of what was pasted, the way a linewise `p` in vim
+      // leaves the cursor on the first line it put down.
+      if (first) setCursorId(first);
+      say(`pasted ${filed.length}`, "ok");
     },
-    [createTask, liveOnly],
+    [createTask, data, liveOnly],
   );
 
   const undo = useCallback(async () => {
