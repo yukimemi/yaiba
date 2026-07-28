@@ -70,9 +70,18 @@ export function App() {
   /** The open `<tab>` cycle, or null when nothing is being completed. */
   const [completion, setCompletion] = useState<Completion | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
-  const [editing, setEditing] = useState<{ id: string; value: string } | null>(
-    null,
-  );
+  /**
+   * The row being renamed, and where the text caret opens.
+   *
+   * A row is a line, not a buffer with a column, so `i` and `a` have no
+   * character position to insert before or after — the only thing left
+   * of vim's distinction is which end of the title you land on.
+   */
+  const [editing, setEditing] = useState<{
+    id: string;
+    value: string;
+    caret: "head" | "tail";
+  } | null>(null);
   /** An unsaved row being typed. See `openNew`. */
   const [draft, setDraft] = useState<{
     after: string | null;
@@ -900,7 +909,7 @@ export function App() {
   // ---- mouse ------------------------------------------------------
   //
   // Every one of these maps onto a key: clicking a row is `j`/`k` to it,
-  // the checkbox is `x`, the marker is `za`, a double-click is `i`, and
+  // the checkbox is `x`, the marker is `za`, a double-click is `a`, and
   // dragging a row is `J`/`K`. Sharing the same actions keeps the two
   // input methods from drifting apart.
 
@@ -928,7 +937,7 @@ export function App() {
       const task = visible.find((t) => t.id === id);
       if (!task) return;
       setCursorId(id);
-      setEditing({ id, value: task.title });
+      setEditing({ id, value: task.title, caret: "tail" });
       enterMode("insert");
     },
     [visible, enterMode],
@@ -1237,11 +1246,20 @@ export function App() {
         openNew(visible[cursor - 1]?.id ?? null);
         break;
       case "i":
+      case "I":
       case "a":
       case "A":
       case "cc":
         if (current) {
-          setEditing({ id: current.id, value: current.title });
+          // `cc` changes the line rather than entering it, so it opens
+          // empty. Backing out costs nothing: `finishEdit` refuses a
+          // blank title, so <esc> *and* <cr> both leave the old one.
+          const clear = cmd === "cc";
+          setEditing({
+            id: current.id,
+            value: clear ? "" : current.title,
+            caret: cmd === "i" || cmd === "I" ? "head" : "tail",
+          });
           enterMode("insert");
         }
         break;

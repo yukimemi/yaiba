@@ -18,7 +18,7 @@ interface Props {
   bySchedule: Map<string, Scheduled>;
   cursor: number;
   selected: Set<string>;
-  editing: { id: string; value: string } | null;
+  editing: { id: string; value: string; caret: "head" | "tail" } | null;
   onEditChange: (value: string) => void;
   onEditKey: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   /** Row index the unsaved new task occupies, or -1 when there is none. */
@@ -89,12 +89,27 @@ export function TaskList({
   onDropRow,
 }: Props) {
   const cursorRef = useRef<HTMLDivElement>(null);
+  const editRef = useRef<HTMLInputElement>(null);
 
   // Keep the cursor row on screen the way a terminal editor would —
   // scrolled into view, but never yanked to the middle.
   useEffect(() => {
     cursorRef.current?.scrollIntoView({ block: "nearest" });
   }, [cursor, tasks.length]);
+
+  // Where the caret opens is the whole of what `i` and `a` mean here, so
+  // it cannot be left to `autoFocus` — the browser puts it at the tail
+  // either way. Keyed on the row and the requested end rather than on
+  // `editing` itself, so typing (which changes `value` on every stroke)
+  // doesn't drag the caret back.
+  const editingId = editing?.id;
+  const editingCaret = editing?.caret;
+  useEffect(() => {
+    const el = editRef.current;
+    if (!el || !editingId) return;
+    const at = editingCaret === "head" ? 0 : el.value.length;
+    el.setSelectionRange(at, at);
+  }, [editingId, editingCaret]);
 
   const done = tasks.filter((t) => t.status === "done").length;
 
@@ -255,6 +270,7 @@ export function TaskList({
                   {editing?.id === task.id ? (
                     <input
                       className="row__edit"
+                      ref={editRef}
                       value={editing.value}
                       autoFocus
                       spellCheck={false}
