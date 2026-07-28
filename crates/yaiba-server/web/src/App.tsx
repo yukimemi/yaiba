@@ -65,6 +65,25 @@ const NORMALIZE: Record<string, string> = {
 /** Which side of its anchor a new row lands on. */
 type Place = "after" | "before";
 
+/**
+ * The rows a command applies to: the block between the visual anchor and
+ * the cursor, or just the cursor row when there is no anchor.
+ *
+ * Written as a plain function so the key handler can compute it from
+ * live refs rather than the memo, which is a render behind.
+ */
+function selectionIn(
+  visible: Task[],
+  cursor: number,
+  anchor: string | null,
+): Task[] {
+  const current = visible[cursor] ?? null;
+  const at = anchor ? visible.findIndex((t) => t.id === anchor) : -1;
+  if (at < 0) return current ? [current] : [];
+  const [lo, hi] = at <= cursor ? [at, cursor] : [cursor, at];
+  return visible.slice(lo, hi + 1);
+}
+
 const VIEW_CYCLE: View[] = ["split", "list", "gantt"];
 const ZOOM_CYCLE: Zoom[] = ["month", "week", "day"];
 
@@ -73,6 +92,15 @@ export function App() {
   const [mode, setMode] = useState<Mode>("normal");
   const [cursorId, setCursorId] = useState<string | null>(null);
   const [anchorId, setAnchorId] = useState<string | null>(null);
+  /**
+   * The same two, mirrored out of state for the reason `modeRef` and
+   * `pendingRef` are: a burst of keys outruns React. `v j yy` typed at
+   * speed had every handler after the first reading a render-old cursor
+   * and a null anchor, so the yank took the row `v` was pressed on
+   * instead of the block that was selected on screen.
+   */
+  const cursorRef = useRef<string | null>(null);
+  const anchorRef = useRef<string | null>(null);
   const [linkAnchor, setLinkAnchor] = useState<string | null>(null);
   const [pending, setPending] = useState("");
   const [cmdline, setCmdline] = useState("");
@@ -217,28 +245,10 @@ export function App() {
   const cursor = cursorAt >= 0 ? cursorAt : 0;
   const current: Task | null = visible[cursor] ?? null;
 
-  /**
-   * The parent a row opened at the cursor inherits.
-   *
-   * `o` on a level-3 row means "another one of these", not "back to the
-   * root three levels up" — the row you are looking at is the only
-   * statement of intent available, so new rows take its level. A parent
-   * whose task is gone (a peer deleted it mid-merge) reads as the root,
-   * which is where the list already draws the cursor row — hence
-   * `effectiveParent`, the same rule the tree walk itself applies.
-   */
-  const cursorParent = useMemo(() => {
-    if (!current || !data) return null;
-    return effectiveParent(current, new Set(data.tasks.map((t) => t.id)));
-  }, [current, data]);
-
-  const selection = useMemo(() => {
-    if (mode !== "visual" || !anchorId) return current ? [current] : [];
-    const a = visible.findIndex((t) => t.id === anchorId);
-    if (a < 0) return current ? [current] : [];
-    const [lo, hi] = a <= cursor ? [a, cursor] : [cursor, a];
-    return visible.slice(lo, hi + 1);
-  }, [mode, anchorId, visible, cursor, current]);
+  const selection = useMemo(
+    () => selectionIn(visible, cursor, mode === "visual" ? anchorId : null),
+    [mode, anchorId, visible, cursor],
+  );
 
   const selectedIds = useMemo(
     () => new Set(mode === "visual" ? selection.map((t) => t.id) : []),
@@ -276,7 +286,7 @@ export function App() {
   }, [mode, picking, load]);
 
   useEffect(() => {
-    if (!cursorId && visible.length) setCursorId(visible[0].id);
+    if (!cursorId && visible.length) putCursor(visible[0].id);
   }, [cursorId, visible]);
 
   /**
@@ -323,8 +333,8 @@ export function App() {
       .switchProject(name)
       .then((info) => {
         setProjects(info);
-        setCursorId(null);
-        setAnchorId(null);
+        putCursor(null);
+        putAnchor(null);
         setPicking(null);
         setFocus(null);
         // Both halves of the folding state. `foldLevel` is a raw depth
@@ -364,8 +374,8 @@ export function App() {
   const adoptProjects = (info: ProjectsInfo, note: string) => {
     setProjects(info);
     setShowProjects(false);
-    setCursorId(null);
-    setAnchorId(null);
+    putCursor(null);
+    putAnchor(null);
     setPicking(null);
     setFocus(null);
     setFoldLevel(null);
@@ -422,6 +432,18 @@ export function App() {
   const enterMode = useCallback((next: Mode) => {
     modeRef.current = next;
     setMode(next);
+  }, []);
+
+  /** Move the cursor, keeping the ref in lockstep. See `cursorRef`. */
+  const putCursor = useCallback((id: string | null) => {
+    cursorRef.current = id;
+    setCursorId(id);
+  }, []);
+
+  /** Set the visual anchor, keeping the ref in lockstep. */
+  const putAnchor = useCallback((id: string | null) => {
+    anchorRef.current = id;
+    setAnchorId(id);
   }, []);
 
   /** Set the pending key sequence, keeping the ref in lockstep. */
@@ -711,7 +733,7 @@ export function App() {
         },
         "new task",
       );
-      if (created) setCursorId(created.id);
+      if (created) putCursor(created.id);
       if (openNext) {
         // Same level again: <cr> continues the list you are writing, and
         // dropping back to the root mid-list would be the surprise. It
@@ -759,7 +781,7 @@ export function App() {
     (index: number) => {
       if (!visible.length) return;
       const clamped = Math.min(Math.max(index, 0), visible.length - 1);
-      setCursorId(visible[clamped].id);
+      putCursor(visible[clamped].id);
     },
     [visible],
   );
@@ -775,8 +797,8 @@ export function App() {
    * `siblingOrder`.
    */
   const moveRow = useCallback(
-    (delta: number) => {
-      if (!current || !data) return;
+    (row: Task | null, delta: number) => {
+      if (!row || !data) return;
       if (sort !== "manual") {
         say("rows only move in manual order — :sort manual", "error");
         return;
@@ -786,7 +808,7 @@ export function App() {
         return;
       }
       const ids = data.tasks.map((t) => t.id);
-      const next = siblingOrder(data.tasks, current.id, delta);
+      const next = siblingOrder(data.tasks, row.id, delta);
       // Staying silent here is indistinguishable from the bug above, so
       // the wall a row has hit says so.
       if (!next) {
@@ -800,13 +822,17 @@ export function App() {
         "move",
       );
     },
-    [current, data, sort, filter, run],
+    [data, sort, filter, run],
   );
 
   const deleteSelection = useCallback(
     (tasks: Task[]) => {
       if (!tasks.length || !data) return;
-      const below = visible[Math.min(cursor + tasks.length, visible.length - 1)];
+      const at = visible.findIndex((t) => t.id === cursorRef.current);
+      const below =
+        visible[
+          Math.min((at >= 0 ? at : 0) + tasks.length, visible.length - 1)
+        ];
       register.current = tasks;
       void run(
         tasks.map((t) => ({ kind: "delete", id: t.id })),
@@ -818,10 +844,10 @@ export function App() {
         `delete ${tasks.length}`,
       );
       enterMode("normal");
-      setAnchorId(null);
-      if (below && !tasks.some((t) => t.id === below.id)) setCursorId(below.id);
+      putAnchor(null);
+      if (below && !tasks.some((t) => t.id === below.id)) putCursor(below.id);
     },
-    [data, visible, cursor, run],
+    [data, visible, run],
   );
 
   /**
@@ -901,7 +927,7 @@ export function App() {
 
       // The head of what was pasted, the way a linewise `p` in vim
       // leaves the cursor on the first line it put down.
-      if (first) setCursorId(first);
+      if (first) putCursor(first);
       say(`pasted ${filed.length}`, "ok");
     },
     [createTask, data, liveOnly],
@@ -953,7 +979,7 @@ export function App() {
           task.title.toLowerCase().includes(needle) ||
           task.tags.some((t) => t.toLowerCase().includes(needle))
         ) {
-          setCursorId(task.id);
+          putCursor(task.id);
           return;
         }
       }
@@ -1005,15 +1031,15 @@ export function App() {
   }, []);
 
   const commitLink = useCallback(
-    (remove: boolean) => {
-      if (!linkAnchor || !current || !data) return;
-      if (current.id === linkAnchor) {
+    (row: Task | null, remove: boolean) => {
+      if (!linkAnchor || !row || !data) return;
+      if (row.id === linkAnchor) {
         say("a task can't depend on itself", "error");
         return;
       }
       // The anchor is the task that waits; the row you land on is what
       // it waits for.
-      const dep = { from: current.id, to: linkAnchor };
+      const dep = { from: row.id, to: linkAnchor };
       const exists = data.deps.some(
         (d) => d.from === dep.from && d.to === dep.to,
       );
@@ -1032,9 +1058,9 @@ export function App() {
       );
       enterMode("normal");
       setLinkAnchor(null);
-      setCursorId(linkAnchor);
+      putCursor(linkAnchor);
     },
-    [linkAnchor, current, data, run],
+    [linkAnchor, data, run],
   );
 
   // ---- mouse ------------------------------------------------------
@@ -1044,7 +1070,7 @@ export function App() {
   // dragging a row is `J`/`K`. Sharing the same actions keeps the two
   // input methods from drifting apart.
 
-  const onPick = useCallback((id: string) => setCursorId(id), []);
+  const onPick = useCallback((id: string) => putCursor(id), []);
 
   const onToggleDone = useCallback(
     (id: string) => {
@@ -1067,7 +1093,7 @@ export function App() {
     (id: string) => {
       const task = visible.find((t) => t.id === id);
       if (!task) return;
-      setCursorId(id);
+      putCursor(id);
       setEditing({ id, value: task.title, caret: "tail" });
       enterMode("insert");
     },
@@ -1206,30 +1232,30 @@ export function App() {
    * it into state would only give us a second copy to keep in step.
    */
   const openDate = useCallback(
-    (field: DateField) => {
-      if (!current) {
+    (row: Task | null, field: DateField) => {
+      if (!row) {
         say("no task under the cursor", "error");
         return;
       }
       // The same refusal the cell renders as plain text, said out loud —
       // from the keyboard there is no shape to notice instead.
-      const locked = dateLocked(field, bySchedule.get(current.id));
+      const locked = dateLocked(field, bySchedule.get(row.id));
       if (locked) {
         say(locked, "error");
         return;
       }
       const box = (
-        document.querySelector(`[data-date-cell="${current.id}:${field}"]`) ??
+        document.querySelector(`[data-date-cell="${row.id}:${field}"]`) ??
         document.querySelector(".row--cursor") ??
         // Gantt-only: the bar *is* where that task lives on screen. It
         // can be scrolled out of view horizontally, which the panel's
         // own clamp then pulls back on screen.
         document.querySelector(
-          `.gantt__row[data-task-id="${current.id}"] .gantt__bar`,
+          `.gantt__row[data-task-id="${row.id}"] .gantt__bar`,
         )
       )?.getBoundingClientRect();
       setPicking({
-        id: current.id,
+        id: row.id,
         field,
         // Nothing on screen to hang it off — no rows at all. The panel
         // still has to appear somewhere it can be read and dismissed.
@@ -1238,7 +1264,7 @@ export function App() {
           : { left: 40, top: 60, bottom: 60 },
       });
     },
-    [current, bySchedule],
+    [bySchedule],
   );
 
   /**
@@ -1307,6 +1333,33 @@ export function App() {
     // handlers own the keystroke.
     if (activeMode === "insert" || activeMode === "command" || activeMode === "search") return;
 
+    // Everything below acts on the row under the cursor, so it is read
+    // from the refs rather than from the memos, which are a render
+    // behind. `v` `j` `yy` typed as one burst is the case that made this
+    // necessary: React had not re-rendered by the time `yy` ran, so the
+    // yank saw a null anchor and took the single row `v` was pressed on
+    // while the screen showed a block. Two `j`s in a row had the same
+    // shape — both moved from the same starting index, so the second
+    // went nowhere. These names shadow the memoised ones on purpose:
+    // the body below is written against the live values.
+    const cursorAt = visible.findIndex((t) => t.id === cursorRef.current);
+    const cursor = cursorAt >= 0 ? cursorAt : 0;
+    const current: Task | null = visible[cursor] ?? null;
+    const selection = selectionIn(
+      visible,
+      cursor,
+      activeMode === "visual" ? anchorRef.current : null,
+    );
+    // The parent a row opened here inherits. `o` on a level-3 row means
+    // "another one of these", not "back to the root three levels up".
+    // A parent whose task is gone (a peer deleted it mid-merge) reads as
+    // the root, which is where the list already draws the cursor row —
+    // hence `effectiveParent`, the rule the tree walk itself applies.
+    const cursorParent =
+      current && data
+        ? effectiveParent(current, new Set(data.tasks.map((t) => t.id)))
+        : null;
+
     if (e.ctrlKey || e.metaKey) {
       if (e.ctrlKey && !e.metaKey) {
         if (e.key === "d") moveTo(cursor + HALF_PAGE);
@@ -1363,16 +1416,16 @@ export function App() {
       // ---- modes
       case "<esc>":
         enterMode("normal");
-        setAnchorId(null);
+        putAnchor(null);
         setLinkAnchor(null);
         break;
       case "v":
         if (activeMode === "visual") {
           enterMode("normal");
-          setAnchorId(null);
+          putAnchor(null);
         } else if (current) {
           enterMode("visual");
-          setAnchorId(current.id);
+          putAnchor(current.id);
         }
         break;
       case ":":
@@ -1427,23 +1480,23 @@ export function App() {
       // the other four things a row holds. The letters follow the column
       // headings: start, end, and the two actuals under `a`.
       case "cs":
-        openDate("start");
+        openDate(current, "start");
         break;
       case "ce":
-        openDate("end");
+        openDate(current, "end");
         break;
       case "ca":
-        openDate("astart");
+        openDate(current, "astart");
         break;
       case "cA":
-        openDate("aend");
+        openDate(current, "aend");
         break;
       case "<space>":
       case "x":
         toggleDone(selection);
         if (activeMode === "visual") {
           enterMode("normal");
-          setAnchorId(null);
+          putAnchor(null);
         }
         break;
       case "s":
@@ -1466,7 +1519,7 @@ export function App() {
         say(`yanked ${selection.length}`, "ok");
         if (activeMode === "visual") {
           enterMode("normal");
-          setAnchorId(null);
+          putAnchor(null);
         }
         break;
       case "p":
@@ -1476,10 +1529,10 @@ export function App() {
         void paste(current?.id ?? null, "before", cursorParent);
         break;
       case "J":
-        moveRow(count);
+        moveRow(current, count);
         break;
       case "K":
-        moveRow(-count);
+        moveRow(current, -count);
         break;
       case "u":
         void undo();
@@ -1548,8 +1601,8 @@ export function App() {
         }
         break;
       case "<cr>":
-        if (activeMode === "link") commitLink(false);
-        else if (activeMode === "unlink") commitLink(true);
+        if (activeMode === "link") commitLink(current, false);
+        else if (activeMode === "unlink") commitLink(current, true);
         break;
 
       // ---- view
@@ -1826,7 +1879,7 @@ export function App() {
       void run(result.ops, result.undoOps ?? [], result.label ?? line);
     }
     if (result.message) say(result.message, result.ops ? "ok" : "info");
-    setAnchorId(null);
+    putAnchor(null);
     if (mode === "visual") enterMode("normal");
   };
 
