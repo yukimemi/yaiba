@@ -10,6 +10,17 @@
 scheduling with a critical path, and peer-to-peer replication over
 [iroh](https://iroh.computer). `cargo install yaiba`.**
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/yukimemi/yaiba/main/assets/demo.gif" alt="a row opened with o, lengthened with +, made to wait for another with D — and the gantt following" width="900">
+</p>
+
+<p align="center">
+  <sub><code>o</code> opens a row · <code>+</code> lengthens it ·
+  <code>D</code> makes it wait for another, and the critical path
+  moves to follow · <code>zm</code> folds an altitude ·
+  <code>gt</code> is office mode</sub>
+</p>
+
 ## Why
 
 Task tools make you choose. Terminal tools are fast to type into but
