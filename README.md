@@ -170,9 +170,11 @@ require handing over the keybindings too:
 | | |
 |---|---|
 | click a row | put the cursor on it |
+| click the `+` on it | a new task below, at the same level — what `o` does |
 | click `[ ]` | complete / reopen |
 | click `▾` | fold a summary |
 | double-click | edit the title |
+| click the owner cell | pick who it belongs to (`gd` shows the column) |
 | drag a row | reorder |
 | drag a bar | move its start date |
 | drag its right edge | change the duration |
@@ -185,6 +187,19 @@ Dragging a bar pins its start: a task placed by its dependencies gets an
 explicit date, which is what makes the gesture survive the next
 recompute. Summary bars cannot be dragged — their dates are a
 consequence of what is inside them.
+
+The `+` shows on the cursor row only. On every row it is a column of plus
+signs and the eye stops reading the tasks; and the row it sits on is the
+one whose level the new task inherits, so the indent it will land at is
+the indent you are looking at. An empty project has no row to hover, so
+there the prompt itself — *o to open a new task* — is the button.
+
+The owner panel is the mouse's way to a field the command line reached
+first, and it lists the names already in use rather than offering a bare
+box. That list is the only thing keeping a team to one spelling, since
+there is no roster behind the names: `tab` does that job on the `:` line,
+and clicking has no `tab`. `co` opens the same panel from the keyboard —
+nothing in yaiba should be reachable *only* by clicking.
 
 ## Projects, and the level you look at them from
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type PeersInfo, type ProjectsInfo } from "./api";
 import {
+  assigneeNames,
   runCommand,
   type Columns,
   type DateField,
@@ -21,6 +22,7 @@ import { DatePicker, type Anchor } from "./components/DatePicker";
 import { Help } from "./components/Help";
 import { ProjectPalette } from "./components/ProjectPalette";
 import { Hud } from "./components/Hud";
+import { OwnerPicker } from "./components/OwnerPicker";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
 import { addDays, toISO } from "./dates";
@@ -166,6 +168,19 @@ export function App() {
     field: DateField;
     anchor: Anchor;
   } | null>(null);
+  /**
+   * The row whose owner panel is up.
+   *
+   * Its own state rather than a fifth `DateField`: that type indexes
+   * `DATE_COLUMNS` and drives `commitDate`, and an owner is neither a
+   * date nor one of those columns. Every lifecycle rule `picking` has
+   * applies here too — polling stands down, the key handler stands down,
+   * and it is dropped when its row leaves `visible`.
+   */
+  const [pickingOwner, setPickingOwner] = useState<{
+    id: string;
+    anchor: Anchor;
+  } | null>(null);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("manual");
   const [theme, setTheme] = useState<Theme>(initialTheme);
@@ -238,6 +253,22 @@ export function App() {
    *  something to compare. */
   const showProgressLine = (data?.tasks.length ?? 0) > 0;
 
+  /**
+   * The vocabulary the owner panel offers — see `assigneeNames`.
+   *
+   * Up here with the other memos, and not beside the `pickingOwner` row it
+   * feeds, because the render below returns early while `data` is null: a
+   * hook after that point is skipped on the first render and called on the
+   * second, which is React error #310 and takes the whole app down rather
+   * than degrading. It cost this branch every one of its hand-verification
+   * rounds — the app never mounted at all, and an empty `#root` reads
+   * exactly like a page that was never given a chance to paint.
+   */
+  const ownerNames = useMemo(
+    () => (data ? assigneeNames({ data, projects: [] }) : []),
+    [data],
+  );
+
   /** Deepest level present, so zr knows when it has fully unfolded. */
   const maxLevel = useMemo(
     () =>
@@ -309,10 +340,10 @@ export function App() {
     // The picker is an input like any other, even though the mode stays
     // normal behind it: a refresh mid-pick re-renders the cell the panel
     // is anchored to.
-    if (picking) return;
+    if (picking || pickingOwner) return;
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(timer);
-  }, [mode, picking, load]);
+  }, [mode, picking, pickingOwner, load]);
 
   useEffect(() => {
     if (!cursorId && visible.length) putCursor(visible[0].id);
@@ -328,7 +359,10 @@ export function App() {
    */
   useEffect(() => {
     if (picking && !visible.some((t) => t.id === picking.id)) setPicking(null);
-  }, [picking, visible]);
+    if (pickingOwner && !visible.some((t) => t.id === pickingOwner.id)) {
+      setPickingOwner(null);
+    }
+  }, [picking, pickingOwner, visible]);
 
   // Peer roster, for the HUD. Slower than the data poll — peers come and
   // go on a human timescale.
@@ -1397,6 +1431,87 @@ export function App() {
     [data, visible, projects, run],
   );
 
+  /**
+   * The level a new sibling of `id` lands at.
+   *
+   * The same rule the key handler applies to the cursor row: a parent
+   * whose task is gone reads as the root, which is where the list already
+   * draws the row. Written out here because the `+` names a row directly
+   * rather than going through the cursor.
+   */
+  const parentOfRow = useCallback(
+    (id: string): string | null => {
+      const row = data?.tasks.find((t) => t.id === id);
+      if (!row || !data) return null;
+      return effectiveParent(row, new Set(data.tasks.map((t) => t.id)));
+    },
+    [data],
+  );
+
+  /**
+   * Open the owner panel over a row.
+   *
+   * Anchored the way `openDate` anchors the calendar: the owner cell when
+   * the `:dates` columns are up, the cursor row when they are not, the
+   * gantt bar when the list is gone entirely. A display mode is a choice
+   * about what to look at, not a precondition for an edit — `co` reaches
+   * this field from every view, exactly as `cs` / `ce` reach the dates.
+   */
+  const openOwner = useCallback((row: Task | null) => {
+    if (!row) {
+      say(t("no task under the cursor"), "error");
+      return;
+    }
+    const box = (
+      document.querySelector(`[data-owner-cell="${row.id}"]`) ??
+      document.querySelector(".row--cursor") ??
+      document.querySelector(
+        `.gantt__row[data-task-id="${row.id}"] .gantt__bar`,
+      )
+    )?.getBoundingClientRect();
+    setPickingOwner({
+      id: row.id,
+      anchor: box
+        ? { left: box.left, top: box.top, bottom: box.bottom }
+        : { left: 40, top: 60, bottom: 60 },
+    });
+  }, []);
+
+  /**
+   * Commit a name picked out of the owner panel.
+   *
+   * Through `:assign`, not by patching the field — the same bargain
+   * `commitDate` makes. That is what keeps the one-word rule, the `@`
+   * stripping and the message in one place instead of two that drift.
+   * `selection: [task]` because a click names one row, even in visual
+   * mode where the keyboard's `:assign` takes the block.
+   */
+  const commitOwner = useCallback(
+    (id: string, name: string | null) => {
+      setPickingOwner(null);
+      if (!data) return;
+      const task = visible.find((t) => t.id === id);
+      if (!task) return;
+      const result = runCommand(`assign ${name ?? "none"}`, {
+        data,
+        visible,
+        current: task,
+        selection: [task],
+        projects: projects.projects.map((p) => p.name),
+      });
+      if (!result) return;
+      if (result.error) {
+        say(result.error, "error");
+        return;
+      }
+      if (result.ops) {
+        void run(result.ops, result.undoOps ?? [], result.label ?? "assign");
+      }
+      if (result.message) say(result.message, "ok");
+    },
+    [data, visible, projects, run],
+  );
+
   // ---- key handling -----------------------------------------------
 
   const onKey = (e: KeyboardEvent) => {
@@ -1404,7 +1519,7 @@ export function App() {
     const activeMode = modeRef.current;
     // The palette and the date picker each run their own input and own
     // every key while up, exactly as insert / command / search do.
-    if (showProjects || picking) return;
+    if (showProjects || picking || pickingOwner) return;
     // Same bargain for the reference-date picker, which carries a date
     // field of its own. Escape is the one key it hands back, so the
     // popover closes the way every other overlay here does.
@@ -1583,6 +1698,14 @@ export function App() {
         break;
       case "cA":
         openDate(current, "aend");
+        break;
+      // `o` for owner, and it opens the same panel the mouse does. Without
+      // it the panel would be the first thing in yaiba reachable only by
+      // clicking — `:assign` can set a name, but it cannot show you the
+      // spellings already in use, which is the whole reason the panel
+      // lists them.
+      case "co":
+        openOwner(current);
         break;
       case "<space>":
       case "x":
@@ -2057,6 +2180,9 @@ export function App() {
   const pickingColumn = picking
     ? (DATE_COLUMNS.find((c) => c.field === picking.field) ?? null)
     : null;
+  const ownerTask = pickingOwner
+    ? (visible.find((t) => t.id === pickingOwner.id) ?? null)
+    : null;
 
   return (
     <div className="app">
@@ -2123,6 +2249,12 @@ export function App() {
             columns={columns}
             picking={picking}
             onOpenDate={(id, field, anchor) => setPicking({ id, field, anchor })}
+            pickingOwner={pickingOwner?.id ?? null}
+            onOpenOwner={(id, anchor) => setPickingOwner({ id, anchor })}
+            // Both go through `openNew`, the one `o` uses, so a row born
+            // from a click and one born from a key are the same row.
+            onNewBelow={(id) => openNew(id, "after", parentOfRow(id))}
+            onNewFirst={() => openNew(null, "after", null)}
             collapsed={collapsed}
             paneRef={listPane}
             onScroll={syncScroll(listPane)}
@@ -2198,6 +2330,21 @@ export function App() {
           clearable={pickingColumn.clearable}
           onPick={(iso) => commitDate(pickingTask.id, pickingColumn.field, iso)}
           onClose={() => setPicking(null)}
+        />
+      )}
+
+      {/* Keyed on the row for the reason above: clicking from one open
+          owner panel straight onto another row batches the close and the
+          open into one render, and an unkeyed instance would carry the
+          query you typed for the previous row into this one. */}
+      {pickingOwner && ownerTask && (
+        <OwnerPicker
+          key={pickingOwner.id}
+          value={ownerTask.assignee}
+          names={ownerNames}
+          anchor={pickingOwner.anchor}
+          onPick={(name) => commitOwner(ownerTask.id, name)}
+          onClose={() => setPickingOwner(null)}
         />
       )}
 

@@ -595,6 +595,61 @@ body::after {
   color: var(--ash-dim);
 }
 
+/* It is a <button> now, so the browser's own button skin has to go —
+   otherwise the cell sits a pixel off the dates beside it. Same reset the
+   date cells take. */
+.row__owner-col {
+  text-align: left;
+  padding: 0;
+  font: inherit;
+  line-height: inherit;
+  background: transparent;
+  border: none;
+}
+
+.row__owner-col:hover,
+.row__owner-col:focus-visible {
+  color: var(--edge);
+  cursor: pointer;
+  outline: none;
+}
+
+/* Stays lit while the panel is over it, so the row being edited is
+   obvious with the panel covering its neighbours. */
+.row__owner-col--picking {
+  color: var(--edge);
+  background: var(--grid);
+}
+
+/* The `+` that means `o`. Hidden until the row is the cursor row — see
+   the comment at its call site — and even then quiet, because it sits at
+   the end of every row you walk past. */
+/* Worn by the button on the cursor row *and* by an empty span on every
+   other row, so the slot is the same width everywhere and the columns to
+   its left line up. Only the button gets the affordances — a placeholder
+   that lit up under the pointer would be advertising something that is
+   not there. */
+.row__new {
+  flex: none;
+  width: 2ch;
+  padding: 0;
+  font: inherit;
+  line-height: inherit;
+  color: var(--ash-dim);
+  background: transparent;
+  border: none;
+}
+
+button.row__new {
+  cursor: pointer;
+}
+
+button.row__new:hover,
+button.row__new:focus-visible {
+  color: var(--edge);
+  outline: none;
+}
+
 .row__tag {
   flex: none;
   color: var(--edge-dim);
@@ -955,6 +1010,165 @@ button.row__date:focus-visible {
 .empty b {
   color: var(--edge);
   font-weight: 500;
+}
+
+/* The one prompt in the app that has to be clickable: with no rows there
+   is nothing to hover a `+` on, so this is the whole way in for a mouse.
+   Styled as the sentence it already was rather than as a button — the
+   underline on hover is the only thing that says it can be pressed,
+   which is enough next to a cursor that changes. */
+.empty__new {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.empty__new:hover,
+.empty__new:focus-visible {
+  color: var(--edge);
+  text-decoration: underline;
+  outline: none;
+}
+
+/*
+ * The owner panel.
+ *
+ * Deliberately the calendar's skeleton — same fixed positioning, same
+ * panel fill, same cyan hairline — because it is the same *kind* of
+ * thing: a small box that opens over one cell of one row and closes when
+ * you look away. A second visual language for the second popover would
+ * make the pair read as unrelated.
+ *
+ * The `z-index` matches `.datepick` on purpose, and that is safe because
+ * the two can never be mounted together: whichever panel is up owns the
+ * keyboard (`onKey` returns early on either), and a *click* on the other
+ * kind of cell closes this one first — the outside-`pointerdown`
+ * listener fires before the cell's `mousedown`, so the close and the open
+ * batch into one render. It is the same mechanism that lets one date cell
+ * hand off to the next. Inventing a different value here would imply a
+ * stacking order that nothing needs and nothing tests.
+ */
+.ownerpick {
+  position: fixed;
+  z-index: 70;
+  padding: 6px;
+  min-width: 18ch;
+  max-width: 30ch;
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, calc(0.12 * var(--glow))),
+    0 12px 40px rgba(0, 0, 0, calc(0.6 * var(--glow)));
+  outline: none;
+  line-height: 20px;
+}
+
+.ownerpick__head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.ownerpick__field {
+  color: var(--ash-dim);
+}
+
+.ownerpick__current {
+  color: var(--ash);
+}
+
+.ownerpick__input {
+  width: 100%;
+  font: inherit;
+  line-height: inherit;
+  color: var(--steel);
+  background: var(--void);
+  border: 1px solid var(--grid-strong);
+  padding: 0 4px;
+  outline: none;
+}
+
+.ownerpick__input:focus {
+  border-color: var(--edge-dim);
+}
+
+.ownerpick__list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  /* Long rosters scroll rather than growing a panel taller than the
+     window — the clamp in the component moves it, it cannot shrink it. */
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.ownerpick__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  line-height: inherit;
+  color: var(--ash);
+  background: transparent;
+  border: none;
+  padding: 0 4px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ownerpick__item:hover {
+  color: var(--edge);
+}
+
+/* The keyboard highlight, which is not the same thing as the name the
+   row currently holds — one is where <cr> would land, the other is what
+   is already true. */
+.ownerpick__item--on {
+  color: var(--edge);
+  background: var(--grid);
+}
+
+.ownerpick__item--set {
+  color: var(--steel);
+}
+
+.ownerpick__foot {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.ownerpick__action {
+  font: inherit;
+  color: var(--ash);
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
+  padding: 0 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ownerpick__action:hover,
+.ownerpick__action:focus-visible {
+  color: var(--edge);
+  border-color: var(--edge);
+  outline: none;
+}
+
+.ownerpick__hint {
+  flex: 1;
+  min-width: 0;
+  color: var(--ash-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- gantt ------------------------------------------------------- */
