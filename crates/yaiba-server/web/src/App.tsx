@@ -257,11 +257,16 @@ export function App() {
    * pressed — silently, since the highlight went with it. Every
    * multi-row command was affected (`:tag`, `:prio`, `:delete`), which
    * is why `patchSelection` builds a `label · N` message no `:` command
-   * could ever produce, and why the submit handler ends with a
+   * could ever produce, and why the submit handler used to end with a
    * `mode === "visual"` branch that could never be reached from a
-   * command line. The anchor, not the mode, is what says a block is
-   * being addressed; `command` keeps reading it, and the submit handler
-   * clears it afterwards.
+   * command line.
+   *
+   * The anchor, not the mode, is what says a block is being addressed,
+   * so `command` keeps reading it. That makes a *stale* anchor load-
+   * bearing where it used to be inert: leaving one behind means the next
+   * unrelated `:` rebuilds a block nobody selected. Both exits from the
+   * command line drop it — submit does it before its early returns, esc
+   * before its own.
    *
    * `search` is deliberately not on this list: `/` from visual does not
    * extend the block here, and pretending it does would be a second
@@ -949,6 +954,7 @@ export function App() {
         await api
           .patchTask(created.id, {
             notes: task.notes,
+            assignee: task.assignee,
             priority: task.priority,
             start: task.start,
             duration_days: task.duration_days,
@@ -1877,6 +1883,16 @@ export function App() {
     setCmdline("");
     setCompletion(null);
     enterMode("normal");
+    // Submitting the line ends the block, whatever the command does with
+    // it — including nothing. Clearing this at the *end* of the handler
+    // instead left a live anchor behind every early return (an empty
+    // line, a refusal, no data yet), and since `selecting` now reads the
+    // anchor in `command` mode, the next unrelated `:` would silently
+    // rebuild a block from that stale anchor to wherever the cursor had
+    // moved. `selection` below is the memo captured at render, so
+    // dropping the anchor here cannot shrink the block this command is
+    // about to act on.
+    putAnchor(null);
 
     if (mode === "search") {
       setLastSearch(line);
@@ -1942,11 +1958,6 @@ export function App() {
       void run(result.ops, result.undoOps ?? [], result.label ?? line);
     }
     if (result.message) say(result.message, result.ops ? "ok" : "info");
-    // The block is spent. `enterMode("normal")` already ran above, when
-    // the line was submitted — the `mode === "visual"` branch that used
-    // to sit here could not fire from a command line and was the trace
-    // of the bug `selecting` describes.
-    putAnchor(null);
   };
 
   // ---- render -----------------------------------------------------

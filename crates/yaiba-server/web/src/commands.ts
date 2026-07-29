@@ -129,6 +129,27 @@ function tagNames(ctx: ArgContext): string[] {
 }
 
 /**
+ * Every name already assigned to something.
+ *
+ * There is no user table, so the people who exist are exactly the people
+ * somebody has already been given work — the same shape as tags. Which
+ * makes completion the only thing keeping a roster consistent: typed
+ * from scratch each time, `Yuki` and `yuki` become two names in a report
+ * that nobody notices are one person.
+ */
+export function assigneeNames(ctx: ArgContext): string[] {
+  const seen = new Map<string, string>();
+  for (const task of ctx.data.tasks) {
+    const name = task.assignee.trim();
+    // The first spelling wins, so the list doesn't churn as rows change.
+    if (name && !seen.has(name.toLowerCase())) {
+      seen.set(name.toLowerCase(), name);
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/**
  * The words `parseDateExpr` understands, minus the open-ended ones —
  * `+3d` stands in for the whole relative family, and no completion can
  * guess a calendar date for you.
@@ -158,6 +179,7 @@ const FILTER_WORDS = [
   "crit",
   "blocked",
   "overdue",
+  "unassigned",
   "status:todo",
   "status:doing",
   "status:done",
@@ -178,7 +200,11 @@ export const COMMANDS: CommandSpec[] = [
     name: "filter",
     aliases: ["f"],
     // Every term ANDs with the last, so this one completes at any depth.
-    args: (ctx) => [...FILTER_WORDS, ...tagNames(ctx).map((t) => `tag:${t}`)],
+    args: (ctx) => [
+      ...FILTER_WORDS,
+      ...tagNames(ctx).map((t) => `tag:${t}`),
+      ...assigneeNames(ctx).map((n) => `@${n}`),
+    ],
   },
   { name: "sort", args: first(() => SORT_KEYS) },
   { name: "new", aliases: ["n"] },
@@ -199,6 +225,13 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ["t"],
   },
   { name: "notes", aliases: ["note"] },
+  {
+    name: "assign",
+    aliases: ["owner"],
+    // Only the people already on something; a new name is typed in
+    // full, which is exactly the moment to see whether it is new.
+    args: first(assigneeNames),
+  },
   { name: "dep", aliases: ["link"] },
   { name: "undep", aliases: ["unlink"] },
   { name: "theme", args: first(() => ["dark", "light"]) },
@@ -521,6 +554,29 @@ export function runCommand(
     case "notes": {
       if (!current) return needTask();
       return patchSelection([current], () => ({ notes: arg }), t("notes"));
+    }
+    case "assign":
+    case "owner": {
+      // The whole selection, unlike `:notes`: handing a block of rows to
+      // one person is the ordinary way this gets used, where a note is
+      // prose about one task.
+      if (!selection.length) return needTask();
+      // Bare clears, and so do the words the date commands already
+      // train — `:due none` and `:assign none` should not be two things
+      // to remember. Somebody actually called "none" is a stretch worth
+      // trading for one grammar.
+      const clearing = !arg || ["none", "clear", "-"].includes(arg);
+      // The server strips the sigil as well; doing it here too is what
+      // makes the message read back as the name that was meant.
+      const name = clearing ? "" : arg.replace(/^@/, "").trim();
+      if (!clearing && !name) {
+        return { error: t("usage: :assign ⟨name⟩  (bare clears)") };
+      }
+      return patchSelection(
+        selection,
+        () => ({ assignee: name }),
+        name ? `@${name}` : t("unassigned"),
+      );
     }
 
     // ---- dependencies -------------------------------------------

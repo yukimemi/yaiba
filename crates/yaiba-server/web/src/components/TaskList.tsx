@@ -307,6 +307,18 @@ export function TaskList({
                     </span>
                   )}
 
+                  {/* Who, then what: the owner sits ahead of the tags
+                      because it answers the question the tags cannot,
+                      and it takes no colour of its own — the palette is
+                      spent on things that mean trouble, and an owner is
+                      not one. */}
+                  {task.assignee && (
+                    <span className="row__owner" title={t("assigned to {who}", {
+                      who: task.assignee,
+                    })}>
+                      @{task.assignee}
+                    </span>
+                  )}
                   {task.tags.map((tag) => (
                     <span key={tag} className="row__tag">
                       #{tag}

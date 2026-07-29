@@ -537,6 +537,29 @@ body::after {
   color: var(--ash);
 }
 
+/* No hue of its own, on purpose. The palette at the top of this file is
+   spent on things that mean trouble — cyan for structure, magenta for
+   the critical path, amber for overdue — and an owner is not one of
+   them. `--ash` puts it a step above the `--ash-dim` metadata to its
+   right without claiming a signal, and the `@` is what tells it apart
+   from the `#` tags beside it. */
+.row__owner {
+  flex: none;
+  color: var(--ash);
+  /* A long name must not squeeze the title out; the title has `flex: 1`
+     and would lose every fight without this. */
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Done rows are already struck through and greyed; the owner following
+   suit keeps the eye on what is still open. */
+.row--done .row__owner {
+  color: var(--ash-dim);
+}
+
 .row__tag {
   flex: none;
   color: var(--edge-dim);

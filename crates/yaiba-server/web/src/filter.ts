@@ -6,7 +6,8 @@ export type SortKey =
   | "prio"
   | "start"
   | "title"
-  | "status";
+  | "status"
+  | "owner";
 
 export const SORT_KEYS: SortKey[] = [
   "manual",
@@ -15,6 +16,7 @@ export const SORT_KEYS: SortKey[] = [
   "start",
   "title",
   "status",
+  "owner",
 ];
 
 const STATUS_ORDER = { doing: 0, todo: 1, done: 2 } as const;
@@ -23,6 +25,8 @@ const STATUS_ORDER = { doing: 0, todo: 1, done: 2 } as const;
  * Filter query grammar, space separated and ANDed:
  *
  *   `tag:dev`      has that tag
+ *   `@yuki`        assigned to that person (`owner:yuki` reads the same)
+ *   `unassigned`   nobody has taken it — `@` on its own does too
  *   `status:todo`  exact status
  *   `open`         anything not done
  *   `done`         completed
@@ -55,6 +59,17 @@ function matchTerm(
     const want = term.slice(4).replace(/^#/, "");
     return task.tags.some((t) => t.toLowerCase() === want);
   }
+  // `@yuki` and `owner:yuki` are one term with two spellings: `@` is
+  // what the row shows, `owner:` is what the `tag:`-shaped half of this
+  // grammar leads you to try. Matching is exact and case-insensitive —
+  // a substring would make `@sato` also answer for `@satoshi`, and the
+  // one thing a per-person view has to be is complete.
+  if (term.startsWith("@") || term.startsWith("owner:")) {
+    const want = term.startsWith("@") ? term.slice(1) : term.slice(6);
+    if (!want || want === "none") return !task.assignee;
+    return task.assignee.toLowerCase() === want;
+  }
+  if (term === "unassigned") return !task.assignee;
   if (term.startsWith("status:")) return task.status === term.slice(7);
   if (term === "open") return task.status !== "done";
   if (term === "done") return task.status === "done";
@@ -65,6 +80,7 @@ function matchTerm(
   return (
     task.title.toLowerCase().includes(term) ||
     task.notes.toLowerCase().includes(term) ||
+    task.assignee.toLowerCase().includes(term) ||
     task.tags.some((t) => t.toLowerCase().includes(term))
   );
 }
@@ -295,6 +311,12 @@ function flatSorted(
         return task.title.toLowerCase();
       case "status":
         return STATUS_ORDER[task.status];
+      case "owner":
+        // Unowned rows sort last, the same way undated ones do: the
+        // point of the order is to read one person's work in a block,
+        // and a wall of blanks at the top buries every block below it.
+        // `￿` beats any real name without special-casing the sort.
+        return task.assignee.toLowerCase() || "￿";
       case "manual":
         return task.position;
     }

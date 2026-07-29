@@ -71,6 +71,7 @@ export function snapshotPatch(task: Task): Required<TaskPatch> {
     parent: task.parent,
     title: task.title,
     notes: task.notes,
+    assignee: task.assignee,
     status: task.status,
     priority: task.priority,
     start: task.start,

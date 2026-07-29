@@ -103,6 +103,9 @@ const JA: Record<string, string> = {
   "complete / reopen": "完了 / 再開",
   "to open a new task": "で新しいタスク",
   "for keys": "でキー一覧",
+  // 担当 rather than 担当者: the row shows the name already, so the
+  // tooltip only has to say what the `@` means.
+  "assigned to {who}": "担当: {who}",
   "no tasks yet.": "まだタスクがありません。",
   "nothing matches this filter.": "この絞り込みに一致するものがありません。",
 
@@ -212,6 +215,7 @@ const JA: Record<string, string> = {
   link: "依存",
   unlink: "依存解除",
   notes: "メモ",
+  unassigned: "担当なし",
   unparent: "階層を外す",
   reparent: "階層を変更",
 
@@ -226,6 +230,8 @@ const JA: Record<string, string> = {
   "usage: :prio 0|1|2|3": "使い方: :prio 0|1|2|3",
   "usage: :progress 0..100": "使い方: :progress 0..100",
   "usage: :tag +dev -ui": "使い方: :tag +dev -ui",
+  "usage: :assign ⟨name⟩  (bare clears)":
+    "使い方: :assign ⟨名前⟩（引数なしで担当を外す）",
   "usage: :theme dark|light  (bare :theme toggles)":
     "使い方: :theme dark|light（引数なしで切替）",
   "usage: :lang en|ja  (bare :lang toggles)":
@@ -342,6 +348,7 @@ const JA: Record<string, string> = {
   "0 none … 3 high": "0 なし … 3 高",
   "progress percent": "進捗（%）",
   "add / remove tags": "タグを追加 / 削除",
+  "hand it to somebody — bare clears": "担当を決める（引数なしで外す）",
   "wait for row n": "n 行目を待つ",
   "when work really began": "実際に着手した日",
   "when it really finished — none clears": "実際に終えた日 — none で消去",

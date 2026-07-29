@@ -24,6 +24,11 @@ use crate::hlc::{Hlc, NodeId};
 pub const FIELD_PARENT: &str = "parent";
 pub const FIELD_TITLE: &str = "title";
 pub const FIELD_NOTES: &str = "notes";
+/// Who owns the task. One LWW entry rather than a `tag:`-style set: the
+/// field exists to give "whose is this" a single answer, so two peers
+/// naming different people have to *converge* on one rather than both
+/// stick the way concurrent tags do.
+pub const FIELD_ASSIGNEE: &str = "assignee";
 pub const FIELD_STATUS: &str = "status";
 pub const FIELD_PRIORITY: &str = "priority";
 pub const FIELD_START: &str = "start";
