@@ -566,10 +566,16 @@ body::after {
    away for being visible without a mode change. Right-aligned like the
    dates would put the ragged edge on the side the eye scans. No `@` — the
    heading already says what these are, and the sigil is what the chip
-   needs to tell itself apart from a tag. */
+   needs to tell itself apart from a tag.
+
+   Same box as the chip, so `gd` changes where the name sits and not how
+   much of it you can read. Narrower would have sat more tidily beside
+   the 6ch date columns, and that is exactly the wrong trade: the column
+   exists to make a roster scannable, and a roster of `yamada…` is not
+   one. */
 .row__owner-col {
   flex: none;
-  width: 8ch;
+  width: 12ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
