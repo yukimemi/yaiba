@@ -249,14 +249,34 @@ export function App() {
   const cursor = cursorAt >= 0 ? cursorAt : 0;
   const current: Task | null = visible[cursor] ?? null;
 
+  /**
+   * The block survives the `:` line, the way `'<,'>` does in vim.
+   *
+   * Typing `:` moves the mode to `command`, so gating on `visual` alone
+   * collapsed the selection to the cursor row the instant the colon was
+   * pressed — silently, since the highlight went with it. Every
+   * multi-row command was affected (`:tag`, `:prio`, `:delete`), which
+   * is why `patchSelection` builds a `label · N` message no `:` command
+   * could ever produce, and why the submit handler ends with a
+   * `mode === "visual"` branch that could never be reached from a
+   * command line. The anchor, not the mode, is what says a block is
+   * being addressed; `command` keeps reading it, and the submit handler
+   * clears it afterwards.
+   *
+   * `search` is deliberately not on this list: `/` from visual does not
+   * extend the block here, and pretending it does would be a second
+   * change wearing this one's clothes.
+   */
+  const selecting = mode === "visual" || mode === "command";
+
   const selection = useMemo(
-    () => selectionIn(visible, cursor, mode === "visual" ? anchorId : null),
-    [mode, anchorId, visible, cursor],
+    () => selectionIn(visible, cursor, selecting ? anchorId : null),
+    [selecting, anchorId, visible, cursor],
   );
 
   const selectedIds = useMemo(
-    () => new Set(mode === "visual" ? selection.map((t) => t.id) : []),
-    [mode, selection],
+    () => new Set(selecting ? selection.map((t) => t.id) : []),
+    [selecting, selection],
   );
 
   // ---- data -------------------------------------------------------
@@ -1814,6 +1834,11 @@ export function App() {
       enterMode("normal");
       setCmdline("");
       setSearchTerm("");
+      // A cancelled command leaves no block armed. The submit path
+      // clears the anchor for the same reason; without this, backing
+      // out of `:` would keep one alive with nothing on screen saying
+      // so — see `selecting`.
+      putAnchor(null);
       return;
     }
     if (e.key === "Tab") {
@@ -1917,8 +1942,11 @@ export function App() {
       void run(result.ops, result.undoOps ?? [], result.label ?? line);
     }
     if (result.message) say(result.message, result.ops ? "ok" : "info");
+    // The block is spent. `enterMode("normal")` already ran above, when
+    // the line was submitted — the `mode === "visual"` branch that used
+    // to sit here could not fire from a command line and was the trace
+    // of the bug `selecting` describes.
     putAnchor(null);
-    if (mode === "visual") enterMode("normal");
   };
 
   // ---- render -----------------------------------------------------
