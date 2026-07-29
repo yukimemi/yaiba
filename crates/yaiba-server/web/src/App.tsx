@@ -27,7 +27,7 @@ import { addDays, toISO } from "./dates";
 import {
   dropOrder,
   effectiveParent,
-  siblingOrder,
+  stepOrder,
   visibleTasks,
   type SortKey,
 } from "./filter";
@@ -805,14 +805,17 @@ export function App() {
   );
 
   /**
-   * Move the cursor row `delta` places among its siblings, subtree in
-   * tow, and rewrite the manual order to match.
+   * Move the cursor row `delta` rows up or down the list it is drawn
+   * in, subtree in tow, taking the level of wherever it lands.
    *
-   * Not `delta` places in the flat `position` list: below the top level
-   * the neighbour there belongs to another parent, and the tree walk
-   * regroups by parent afterwards — which put the row straight back
-   * where it started, so `J` on a nested row did nothing at all. See
-   * `siblingOrder`.
+   * Sibling-only movement stopped dead at the ends of a parent, so
+   * carrying a row past one meant `<<`, `J`, `>>` — the level fixed up
+   * by hand around every crossing. A row now leaves and enters parents
+   * on its own, which is what the key looks like it does. See
+   * `stepOrder`: the level only ever changes by the one step being
+   * taken, so `K` puts back exactly what `J` moved, and the screen's
+   * own state — what is folded, what is focused — is what stops a row
+   * from moving somewhere it could not be seen afterwards.
    */
   const moveRow = useCallback(
     (row: Task | null, delta: number) => {
@@ -825,30 +828,53 @@ export function App() {
         say(t("clear the filter before moving rows — :f"), "error");
         return;
       }
-      const ids = data.tasks.map((t) => t.id);
-      const next = siblingOrder(data.tasks, row.id, delta);
-      // Staying silent here is indistinguishable from the bug above, so
-      // the wall a row has hit says so.
+      // The focused row's own siblings are off screen, so moving it
+      // would be a move nobody can see happen.
+      if (focus && row.id === focus) {
+        say(t("this row is the focus — zF to come back, then move it"), "error");
+        return;
+      }
+      // A row counts as open when a child of it is on screen: that is
+      // the same folding state the list draws, collapsed rows and
+      // `foldLevel` alike, without either having to be passed in.
+      const drawn = new Set(visible.map((task) => task.id));
+      const open = new Set<string>();
+      for (const task of visible) {
+        if (task.parent && drawn.has(task.parent)) open.add(task.parent);
+      }
+      const ids = data.tasks.map((task) => task.id);
+      const next = stepOrder(data.tasks, row.id, delta, { open, bound: focus });
+      // Staying silent is indistinguishable from a move that did
+      // nothing, so the one wall left says so.
       if (!next) {
         // Two whole sentences rather than a translated noun dropped into
         // one: "first" and "last" inflect differently in the two
         // languages, and a catalogue that has to translate a fragment
         // out of context is where the wrong word gets picked.
         say(
-          delta > 0
-            ? t("already last at this level — >> / << change level")
-            : t("already first at this level — >> / << change level"),
+          delta > 0 ? t("already the last row") : t("already the first row"),
           "error",
         );
         return;
       }
-      void run(
-        [{ kind: "reorder", ids: next }],
-        [{ kind: "reorder", ids }],
-        "move",
-      );
+
+      const ops: Op[] = [];
+      const undoOps: Op[] = [];
+      // Re-parent first, so the reorder is stamped onto the tree the
+      // move asked for rather than the one it left.
+      if (next.parent !== (row.parent ?? null)) {
+        ops.push({ kind: "patch", id: row.id, patch: { parent: next.parent } });
+        undoOps.push({
+          kind: "patch",
+          id: row.id,
+          patch: { parent: row.parent },
+        });
+      }
+      ops.push({ kind: "reorder", ids: next.ids });
+      undoOps.push({ kind: "reorder", ids });
+      void run(ops, undoOps, "move");
     },
-    [data, sort, filter, run],
+    [data, visible, sort, filter, focus, run],
   );
 
   const deleteSelection = useCallback(

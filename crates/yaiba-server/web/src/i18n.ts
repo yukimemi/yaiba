@@ -178,10 +178,10 @@ const JA: Record<string, string> = {
   "a row cannot be dropped inside itself": "行を自分自身の中へは落とせません",
   "nothing above to nest under": "上に入れ子にできる行がありません",
   "already at the top level": "すでに最上位です",
-  "already first at this level — >> / << change level":
-    "この階層ではすでに先頭です — 階層を変えるなら >> / <<",
-  "already last at this level — >> / << change level":
-    "この階層ではすでに末尾です — 階層を変えるなら >> / <<",
+  "already the first row": "すでに先頭の行です",
+  "already the last row": "すでに末尾の行です",
+  "this row is the focus — zF to come back, then move it":
+    "この行がフォーカス元です — zF で戻ってから動かしてください",
   "rows only move in manual order — :sort manual":
     "行を動かせるのは manual 順のときだけです — :sort manual",
   "clear the filter before moving rows — :f":
@@ -308,7 +308,7 @@ const JA: Record<string, string> = {
   "toggle done": "完了 / 未完了",
   delete: "削除",
   "yank / paste a copy": "ヤンク / 複製を貼り付け",
-  "move the row down / up among its siblings": "兄弟の中で行を下 / 上へ",
+  "move the row down / up, level and all": "行を下 / 上へ（階層ごと）",
   "undo / redo": "元に戻す / やり直す",
   "duration ±1 day": "期間 ±1日",
   "priority up / down": "優先度を上げる / 下げる",
