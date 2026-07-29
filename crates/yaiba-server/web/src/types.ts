@@ -13,6 +13,12 @@ export interface Task {
   parent: TaskId | null;
   title: string;
   notes: string;
+  /**
+   * Who the task belongs to; `""` means nobody has taken it. A free-text
+   * name — there is no user table, so the server normalises the sigil
+   * and the whitespace and leaves the spelling alone.
+   */
+  assignee: string;
   status: Status;
   /** 0 none, 1 low, 2 mid, 3 high. */
   priority: number;
@@ -80,6 +86,7 @@ export interface NewTask {
   parent?: TaskId | null;
   title: string;
   notes?: string;
+  assignee?: string;
   status?: Status;
   priority?: number;
   start?: string | null;
@@ -100,6 +107,7 @@ export type TaskPatch = Partial<
     | "parent"
     | "title"
     | "notes"
+    | "assignee"
     | "status"
     | "priority"
     | "start"

@@ -129,6 +129,30 @@ function tagNames(ctx: ArgContext): string[] {
 }
 
 /**
+ * Every name already assigned to something.
+ *
+ * There is no user table, so the people who exist are exactly the people
+ * somebody has already been given work — the same shape as tags. Which
+ * makes completion the only thing keeping a roster consistent: typed
+ * from scratch each time, `Yuki` and `yuki` become two names in a report
+ * that nobody notices are one person.
+ */
+export function assigneeNames(ctx: ArgContext): string[] {
+  const seen = new Map<string, string>();
+  for (const task of ctx.data.tasks) {
+    const name = task.assignee.trim();
+    // A name with a space in it can only have arrived through the API,
+    // since `:assign` refuses one. Completing it would hand back a line
+    // that command then rejects, and as a `:f` term it would silently
+    // split into two — so it is left out rather than offered broken.
+    if (!name || /\s/.test(name)) continue;
+    // The first spelling wins, so the list doesn't churn as rows change.
+    if (!seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/**
  * The words `parseDateExpr` understands, minus the open-ended ones —
  * `+3d` stands in for the whole relative family, and no completion can
  * guess a calendar date for you.
@@ -158,6 +182,7 @@ const FILTER_WORDS = [
   "crit",
   "blocked",
   "overdue",
+  "unassigned",
   "status:todo",
   "status:doing",
   "status:done",
@@ -178,7 +203,11 @@ export const COMMANDS: CommandSpec[] = [
     name: "filter",
     aliases: ["f"],
     // Every term ANDs with the last, so this one completes at any depth.
-    args: (ctx) => [...FILTER_WORDS, ...tagNames(ctx).map((t) => `tag:${t}`)],
+    args: (ctx) => [
+      ...FILTER_WORDS,
+      ...tagNames(ctx).map((t) => `tag:${t}`),
+      ...assigneeNames(ctx).map((n) => `@${n}`),
+    ],
   },
   { name: "sort", args: first(() => SORT_KEYS) },
   { name: "new", aliases: ["n"] },
@@ -199,6 +228,13 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ["t"],
   },
   { name: "notes", aliases: ["note"] },
+  {
+    name: "assign",
+    aliases: ["owner"],
+    // Only the people already on something; a new name is typed in
+    // full, which is exactly the moment to see whether it is new.
+    args: first(assigneeNames),
+  },
   { name: "dep", aliases: ["link"] },
   { name: "undep", aliases: ["unlink"] },
   { name: "theme", args: first(() => ["dark", "light"]) },
@@ -521,6 +557,41 @@ export function runCommand(
     case "notes": {
       if (!current) return needTask();
       return patchSelection([current], () => ({ notes: arg }), t("notes"));
+    }
+    case "assign":
+    case "owner": {
+      // The whole selection, unlike `:notes`: handing a block of rows to
+      // one person is the ordinary way this gets used, where a note is
+      // prose about one task.
+      if (!selection.length) return needTask();
+      // Bare clears, and so do the words the date commands already
+      // train — `:due none` and `:assign none` should not be two things
+      // to remember. Somebody actually called "none" is a stretch worth
+      // trading for one grammar.
+      const clearing = !arg || ["none", "clear", "-"].includes(arg);
+      // The server strips the sigil as well; doing it here too is what
+      // makes the message read back as the name that was meant.
+      const name = clearing ? "" : arg.replace(/^@/, "").trim();
+      if (!clearing && !name) {
+        return { error: t("usage: :assign ⟨name⟩  (bare clears)") };
+      }
+      // One word, the way a tag is. The filter grammar is
+      // space-separated, so `Mary Jane` would be stored fine and then be
+      // unfindable: `:f @Mary Jane` reads as `@mary` AND `jane`, which
+      // misses the row it names and quietly matches every other row with
+      // "jane" in it. Refusing at the one place names are created keeps
+      // assignment, completion, filtering and the column all agreeing on
+      // what a name is, instead of teaching four of them to quote.
+      if (/\s/.test(name)) {
+        return { error: t("one word per name — try {joined}", {
+          joined: name.replace(/\s+/g, "-"),
+        }) };
+      }
+      return patchSelection(
+        selection,
+        () => ({ assignee: name }),
+        name ? `@${name}` : t("unassigned"),
+      );
     }
 
     // ---- dependencies -------------------------------------------

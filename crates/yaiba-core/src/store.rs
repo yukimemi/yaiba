@@ -16,10 +16,10 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::crdt::{
-    Entry, FIELD_ACTUAL_END, FIELD_ACTUAL_START, FIELD_CREATED, FIELD_DELETED, FIELD_DUE,
-    FIELD_DURATION, FIELD_EXISTS, FIELD_NOTES, FIELD_PARENT, FIELD_POSITION, FIELD_PRIORITY,
-    FIELD_PROGRESS, FIELD_START, FIELD_STATUS, FIELD_TITLE, TAG_PREFIX, VersionVector, dep_key,
-    log_key, parse_dep_key, parse_log_key, parse_task_key, task_key,
+    Entry, FIELD_ACTUAL_END, FIELD_ACTUAL_START, FIELD_ASSIGNEE, FIELD_CREATED, FIELD_DELETED,
+    FIELD_DUE, FIELD_DURATION, FIELD_EXISTS, FIELD_NOTES, FIELD_PARENT, FIELD_POSITION,
+    FIELD_PRIORITY, FIELD_PROGRESS, FIELD_START, FIELD_STATUS, FIELD_TITLE, TAG_PREFIX,
+    VersionVector, dep_key, log_key, parse_dep_key, parse_log_key, parse_task_key, task_key,
 };
 use crate::graph;
 use crate::hlc::{Clock, Hlc, NodeId};
@@ -329,6 +329,11 @@ impl Store {
             (key.clone(), FIELD_PARENT.into(), json!(new.parent)),
             (key.clone(), FIELD_TITLE.into(), json!(new.title)),
             (key.clone(), FIELD_NOTES.into(), json!(new.notes)),
+            (
+                key.clone(),
+                FIELD_ASSIGNEE.into(),
+                json!(normalise_assignee(&new.assignee)),
+            ),
             (key.clone(), FIELD_STATUS.into(), json!(new.status.as_str())),
             (
                 key.clone(),
@@ -395,6 +400,11 @@ impl Store {
             (key.clone(), FIELD_PARENT.into(), json!(task.parent)),
             (key.clone(), FIELD_TITLE.into(), json!(task.title)),
             (key.clone(), FIELD_NOTES.into(), json!(task.notes)),
+            (
+                key.clone(),
+                FIELD_ASSIGNEE.into(),
+                json!(normalise_assignee(&task.assignee)),
+            ),
             (
                 key.clone(),
                 FIELD_STATUS.into(),
@@ -478,6 +488,13 @@ impl Store {
         }
         if let Some(v) = patch.notes {
             writes.push((key.clone(), FIELD_NOTES.into(), json!(v)));
+        }
+        if let Some(v) = patch.assignee {
+            writes.push((
+                key.clone(),
+                FIELD_ASSIGNEE.into(),
+                json!(normalise_assignee(&v)),
+            ));
         }
         if let Some(v) = patch.status {
             writes.push((key.clone(), FIELD_STATUS.into(), json!(v.as_str())));
@@ -808,6 +825,17 @@ fn is_descendant(tasks: &[Task], candidate: TaskId, ancestor: TaskId) -> bool {
     false
 }
 
+/// Strip the display `@` and trim, so `@yuki` and `yuki` are one person.
+///
+/// Case is *kept*: with no user table behind the name, the only record
+/// of how somebody spells their own name is what was typed. Folding it
+/// would be the store deciding that for them. Matching in the UI is
+/// case-insensitive instead, which costs nothing and gets `Yuki` and
+/// `yuki` to the same rows.
+fn normalise_assignee(name: &str) -> String {
+    name.trim().trim_start_matches('@').trim().to_string()
+}
+
 /// Strip the display `#` and drop blanks so `#dev` and `dev` are one tag.
 fn normalise_tags(tags: &[String]) -> Vec<String> {
     let mut out: Vec<String> = tags
@@ -933,6 +961,7 @@ fn materialize(entries: &[Entry]) -> Snapshot {
                 .and_then(|s| s.parse().ok()),
             title: field_str(fields, FIELD_TITLE).unwrap_or_default(),
             notes: field_str(fields, FIELD_NOTES).unwrap_or_default(),
+            assignee: field_str(fields, FIELD_ASSIGNEE).unwrap_or_default(),
             status,
             priority: field_i64(fields, FIELD_PRIORITY).unwrap_or(0),
             start: field_date(fields, FIELD_START),
@@ -1050,6 +1079,50 @@ mod tests {
         assert_eq!(fetched.duration_days, 3);
         // The leading '#' is stripped so `#ui` and `ui` are one tag.
         assert_eq!(fetched.tags, vec!["dev".to_string(), "ui".to_string()]);
+        assert_eq!(fetched.assignee, "", "nobody owns it until someone does");
+    }
+
+    #[test]
+    fn an_assignee_is_stripped_of_its_sigil_but_keeps_its_case() {
+        let mut store = Store::open_in_memory().unwrap();
+        let task = store
+            .create_task(NewTask {
+                title: "assign me".into(),
+                assignee: "  @Yuki ".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(task.assignee, "Yuki");
+
+        // Empty is how the field is cleared; there is no separate null.
+        let cleared = store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    assignee: Some("  ".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(cleared.assignee, "");
+    }
+
+    #[test]
+    fn restoring_a_task_brings_its_assignee_back() {
+        let mut store = Store::open_in_memory().unwrap();
+        let task = store
+            .create_task(NewTask {
+                title: "undo me".into(),
+                assignee: "yuki".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        store.delete_task(task.id).unwrap();
+
+        // `put_task` is what undo replays, so a field it forgets to
+        // write comes back empty after a delete is taken back.
+        let restored = store.put_task(&task).unwrap();
+        assert_eq!(restored.assignee, "yuki");
     }
 
     #[test]
@@ -1570,6 +1643,41 @@ mod tests {
             a.get_task(task.id).unwrap().title,
             b.get_task(task.id).unwrap().title
         );
+    }
+
+    #[test]
+    fn concurrent_assignees_converge_on_one() {
+        let mut a = Store::open_in_memory().unwrap();
+        let mut b = Store::open_in_memory().unwrap();
+        let task = a.create_task(new_task("whose is this")).unwrap();
+        sync(&mut a, &mut b);
+
+        a.patch_task(
+            task.id,
+            TaskPatch {
+                assignee: Some("yuki".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        b.patch_task(
+            task.id,
+            TaskPatch {
+                assignee: Some("sato".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        sync(&mut a, &mut b);
+
+        // The opposite of `concurrent_tag_adds_both_stick`, and
+        // deliberately so: one owner is the point of the field, so the
+        // two replicas have to land on the *same* one rather than
+        // accumulate both.
+        let settled = a.get_task(task.id).unwrap().assignee;
+        assert_eq!(settled, b.get_task(task.id).unwrap().assignee);
+        assert!(settled == "yuki" || settled == "sato");
     }
 
     #[test]

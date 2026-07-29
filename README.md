@@ -213,8 +213,46 @@ Commands take dates the way you'd say them: `:due tom`, `:due mon`,
 
 `tab` completes on the `:` line, wildmenu and all: the command name
 first, then that command's own vocabulary — `:sort` its keys, `:tag` the
-tags already in use, `:due` the words above. `shift-tab` walks back, and
-either one past the end of the list returns what you had typed.
+tags already in use, `:assign` the people already on something, `:due`
+the words above. `shift-tab` walks back, and either one past the end of
+the list returns what you had typed.
+
+## Who owns what
+
+One person per task. In the working view it rides the row as `@name`,
+next to the tags; switch to the date columns with `gd` and it becomes an
+`owner` column instead — fixed width, so a roster reads straight down the
+page. The chip keeps "whose is this" answerable without a mode change;
+the column is what a progress meeting scans. Never both at once, which
+would be the same name twice on one row.
+
+```
+:assign yuki      hand it over — the visual block, if one is selected
+:assign           and bare takes it back (`none` / `-` read the same)
+:f @yuki          just theirs
+:f unassigned     the rows nobody has picked up
+:sort owner       one person's work in a block, unowned last
+```
+
+There is no user table behind the name and there deliberately isn't
+one: inventing a roster would mean every replica agreeing on it before
+anybody could be assigned anything. So the people who exist are exactly
+the people already on something, which is what `tab` completes from —
+and completing rather than retyping is the only thing keeping `Yuki` and
+`yuki` from becoming two names in a report nobody notices are one
+person. Matching ignores case regardless; the spelling you typed is the
+one that is stored, because with no registry it is the only record of
+how somebody writes their own name.
+
+Unlike tags, the owner is a single last-writer-wins field: two peers
+naming different people converge on the later write rather than both
+sticking, and every replica picks the same one. The loser's name is
+gone, not merged — which is the point. A task never ends up with two
+owners, and it only ends up with none if clearing it is what won.
+
+A name is one word, the way a tag is: the filter grammar is
+space-separated, so `mary jane` would be two terms and match neither.
+`:assign` says so rather than storing something you cannot then find.
 
 ## Plan vs actual, and the progress line
 
@@ -458,7 +496,9 @@ clock](https://cse.buffalo.edu/tech-reports/2014-04.pdf). Granularity at
 the *field* level is what makes concurrent editing feel unremarkable:
 if you set a due date while someone else raises the priority of the same
 task, both survive. Tags are one entry per tag rather than one array, so
-`+dev` and `+ui` added at the same moment both stick. Deletes leave a
+`+dev` and `+ui` added at the same moment both stick — where the
+assignee is a single entry precisely so two people naming different
+owners *don't* both stick. Deletes leave a
 tombstone, so a peer that hasn't heard about them can't resurrect the
 task on its next sync.
 

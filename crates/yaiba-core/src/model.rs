@@ -60,6 +60,15 @@ pub struct Task {
     pub title: String,
     #[serde(default)]
     pub notes: String,
+    /// Who the task belongs to. Empty means nobody has taken it.
+    ///
+    /// A free-text name rather than an id: there is no user table here
+    /// and inventing one would mean every replica agreeing on it before
+    /// anyone could be assigned anything. What keeps `Yuki` and `yuki`
+    /// from becoming two people is normalisation on the way in, not a
+    /// registry.
+    #[serde(default)]
+    pub assignee: String,
     #[serde(default)]
     pub status: Status,
     /// 0 = none, 1 = low, 2 = mid, 3 = high. Rendered as the vim-ish
@@ -104,6 +113,8 @@ pub struct NewTask {
     #[serde(default)]
     pub notes: String,
     #[serde(default)]
+    pub assignee: String,
+    #[serde(default)]
     pub status: Status,
     #[serde(default)]
     pub priority: i64,
@@ -146,6 +157,10 @@ pub struct TaskPatch {
     pub title: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
+    /// Empty clears it, so this needs no `Option<Option<_>>` — unlike the
+    /// dates, "unassigned" already has a representable value.
+    #[serde(default)]
+    pub assignee: Option<String>,
     #[serde(default)]
     pub status: Option<Status>,
     #[serde(default)]

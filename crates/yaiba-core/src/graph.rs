@@ -411,6 +411,7 @@ mod tests {
             parent: None,
             title: format!("task {n}"),
             notes: String::new(),
+            assignee: String::new(),
             status: Status::Todo,
             priority: 0,
             start,

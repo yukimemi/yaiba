@@ -103,6 +103,14 @@ const JA: Record<string, string> = {
   "complete / reopen": "完了 / 再開",
   "to open a new task": "で新しいタスク",
   "for keys": "でキー一覧",
+  // 担当 rather than 担当者: the row shows the name already, so the
+  // tooltip only has to say what the `@` means. The column heading is
+  // the same two characters — 担当者 would not fit the 8ch cell it sits
+  // over, and the header row is where a label has least room to spare.
+  "assigned to {who}": "担当: {who}",
+  owner: "担当",
+  "who owns it": "このタスクの担当者",
+  "nobody has taken it — :assign ⟨name⟩": "担当なし — :assign ⟨名前⟩",
   "no tasks yet.": "まだタスクがありません。",
   "nothing matches this filter.": "この絞り込みに一致するものがありません。",
 
@@ -212,6 +220,7 @@ const JA: Record<string, string> = {
   link: "依存",
   unlink: "依存解除",
   notes: "メモ",
+  unassigned: "担当なし",
   unparent: "階層を外す",
   reparent: "階層を変更",
 
@@ -226,6 +235,11 @@ const JA: Record<string, string> = {
   "usage: :prio 0|1|2|3": "使い方: :prio 0|1|2|3",
   "usage: :progress 0..100": "使い方: :progress 0..100",
   "usage: :tag +dev -ui": "使い方: :tag +dev -ui",
+  "usage: :assign ⟨name⟩  (bare clears)":
+    "使い方: :assign ⟨名前⟩（引数なしで担当を外す）",
+  // The suggestion carries the fix, so the sentence only has to say
+  // what the rule is — 空白は使えません would say it twice.
+  "one word per name — try {joined}": "名前は1語です — {joined} はどうですか",
   "usage: :theme dark|light  (bare :theme toggles)":
     "使い方: :theme dark|light（引数なしで切替）",
   "usage: :lang en|ja  (bare :lang toggles)":
@@ -342,10 +356,12 @@ const JA: Record<string, string> = {
   "0 none … 3 high": "0 なし … 3 高",
   "progress percent": "進捗（%）",
   "add / remove tags": "タグを追加 / 削除",
+  "hand it to somebody — bare clears": "担当を決める（引数なしで外す）",
   "wait for row n": "n 行目を待つ",
   "when work really began": "実際に着手した日",
   "when it really finished — none clears": "実際に終えた日 — none で消去",
-  "plan vs actual columns — gd toggles": "計画と実績の列 — gd で切替",
+  "plan vs actual, and an owner column — gd toggles":
+    "計画と実績、担当の列 — gd で切替",
   "calendar on the planned start / end": "計画の開始 / 終了にカレンダー",
   "calendar on the actual start / end": "実績の着手 / 完了にカレンダー",
   "open the calendar over it": "そのセルの上にカレンダーを開く",
