@@ -837,10 +837,14 @@ export function App() {
       // A row counts as open when a child of it is on screen: that is
       // the same folding state the list draws, collapsed rows and
       // `foldLevel` alike, without either having to be passed in.
+      // `effectiveParent` against the drawn set is the same rule the
+      // tree walk applies, one list narrower — a parent that is not
+      // drawn is not a parent anything can be filed under here.
       const drawn = new Set(visible.map((task) => task.id));
       const open = new Set<string>();
       for (const task of visible) {
-        if (task.parent && drawn.has(task.parent)) open.add(task.parent);
+        const parent = effectiveParent(task, drawn);
+        if (parent) open.add(parent);
       }
       const ids = data.tasks.map((task) => task.id);
       const next = stepOrder(data.tasks, row.id, delta, { open, bound: focus });
