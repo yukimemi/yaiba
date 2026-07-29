@@ -114,7 +114,7 @@ yaiba self-update --check    # just tell me whether one exists
 | `i` `a` `c` | edit the title |
 | `x` | complete (the row gets cut) · `s` cycles todo → doing → done |
 | `dd` `yy` `p` | delete, yank, paste · `u` / `^r` undo, redo |
-| `J` `K` | move the row within the manual order |
+| `J` `K` | move the row down / up, changing level to suit where it lands |
 | `+` `-` | duration ±1 day · `gp` `gP` priority · `(` `)` progress |
 | `D` | add a dependency: pick the task this one waits for, `⏎` |
 | `X` | cut a dependency |

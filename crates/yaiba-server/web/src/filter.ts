@@ -127,39 +127,94 @@ export function treeOrder(tasks: Task[], root: TaskId | null = null): Task[] {
 }
 
 /**
- * The whole manual order, rewritten so `id` sits `delta` places further
- * along **among its own siblings**, subtree in tow.
+ * The whole manual order, rewritten so `id` sits `delta` **drawn rows**
+ * further along, subtree in tow, taking whatever level that spot has.
  *
- * Swapping two neighbours in the flat `position` list — which is what
- * `J` / `K` used to do — is invisible the moment the breakdown has more
- * than one level: the row above may be a child of something else, and
- * the tree walk re-groups it by parent afterwards, restoring exactly the
- * order that was just rewritten. Sibling order is the only order the
- * list actually draws, so that is the one to rewrite; positions are then
- * re-stamped in tree order, which keeps the flat list and the drawn list
- * telling the same story for `o` / `O` to anchor against.
+ * One press is one row on screen, which below the top level means the
+ * level moves too: a row that has run out of siblings steps out to its
+ * parent's level rather than stopping, and a row that meets an expanded
+ * neighbour steps into it. Sibling-only movement — what `J` / `K` did —
+ * made every crossing a manual `<<` / `>>` and back again, so reordering
+ * a breakdown of any depth was a two-handed operation.
  *
- * `null` means the row is already the first or last of its siblings —
- * there is nowhere to go without changing its level.
+ * `view` is what the screen currently shows: `open` are the rows whose
+ * children are drawn, so a step never files the row inside something
+ * folded, where it would move and vanish at the same time; `bound` is
+ * the focused subtree, which the row may not climb out of for the same
+ * reason.
+ *
+ * The level is only ever changed by a step that crosses a boundary, and
+ * a step in the other direction undoes it exactly — `J` then `K` always
+ * puts a row back where it started. Positions are re-stamped in tree
+ * order, keeping the flat list and the drawn list telling the same story
+ * for `o` / `O` to anchor against.
+ *
+ * `null` means the row could not move at all: it is already the first or
+ * last row of the plan — or of the focused subtree — which are the only
+ * walls left.
  */
-export function siblingOrder(
+export function stepOrder(
   tasks: Task[],
   id: TaskId,
   delta: number,
-): TaskId[] | null {
-  const children = childBuckets(tasks);
+  view: { open: Set<TaskId>; bound: TaskId | null },
+): { parent: TaskId | null; ids: TaskId[] } | null {
   const ids = new Set(tasks.map((t) => t.id));
   const task = tasks.find((t) => t.id === id);
   if (!task) return null;
 
-  const siblings = children.get(effectiveParent(task, ids)) ?? [];
-  const from = siblings.findIndex((t) => t.id === id);
-  if (from < 0) return null;
-  const to = Math.min(Math.max(from + delta, 0), siblings.length - 1);
-  if (from === to) return null;
+  const children = childBuckets(tasks);
+  // Every other row keeps the parent it has — only `task` moves — so one
+  // static map answers "whose child is this?" for the whole walk.
+  const parentOf = new Map(tasks.map((t) => [t.id, effectiveParent(t, ids)]));
+  const bucketOf = (parent: TaskId | null): Task[] => {
+    const bucket = children.get(parent) ?? [];
+    if (!children.has(parent)) children.set(parent, bucket);
+    return bucket;
+  };
 
-  siblings.splice(to, 0, ...siblings.splice(from, 1));
-  return flatten(tasks, children, null).map((t) => t.id);
+  let parent = effectiveParent(task, ids);
+  let moved = 0;
+  const down = delta > 0;
+
+  for (let n = Math.abs(delta); n > 0; n--) {
+    const siblings = bucketOf(parent);
+    const at = siblings.findIndex((t) => t.id === id);
+    if (at < 0) break;
+    const neighbour = siblings[down ? at + 1 : at - 1];
+
+    if (neighbour) {
+      const kids = children.get(neighbour.id) ?? [];
+      siblings.splice(at, 1);
+      if (kids.length && view.open.has(neighbour.id)) {
+        // Into the neighbour: nearest end first, so the row lands on the
+        // side of the subtree it arrived from and moves exactly one row.
+        if (down) kids.unshift(task);
+        else kids.push(task);
+        parent = neighbour.id;
+      } else {
+        // A leaf, or a folded row whose subtree is drawn as one line:
+        // stepping past it is a single row either way.
+        siblings.splice(down ? at + 1 : at - 1, 0, task);
+      }
+    } else {
+      // Out of siblings. At the root — or at the top of the subtree the
+      // view is zoomed into — that is the end of the list; below it, the
+      // row leaves its parent and lands beside it.
+      if (parent === null || parent === view.bound) break;
+      const above = parentOf.get(parent) ?? null;
+      const uncles = bucketOf(above);
+      const slot = uncles.findIndex((t) => t.id === parent);
+      if (slot < 0) break;
+      siblings.splice(at, 1);
+      uncles.splice(down ? slot + 1 : slot, 0, task);
+      parent = above;
+    }
+    moved++;
+  }
+
+  if (!moved) return null;
+  return { parent, ids: flatten(tasks, children, null).map((t) => t.id) };
 }
 
 /**

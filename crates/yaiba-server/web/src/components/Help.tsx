@@ -40,7 +40,7 @@ const groups = (): Group[] => [
       ["s", "cycle todo → doing → done"],
       ["dd", t("delete")],
       ["yy / p", t("yank / paste a copy")],
-      ["J / K", t("move the row down / up among its siblings")],
+      ["J / K", t("move the row down / up, level and all")],
       ["u / ^r", t("undo / redo")],
     ],
   },
