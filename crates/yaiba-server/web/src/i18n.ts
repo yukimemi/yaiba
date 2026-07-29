@@ -237,6 +237,9 @@ const JA: Record<string, string> = {
   "usage: :tag +dev -ui": "使い方: :tag +dev -ui",
   "usage: :assign ⟨name⟩  (bare clears)":
     "使い方: :assign ⟨名前⟩（引数なしで担当を外す）",
+  // The suggestion carries the fix, so the sentence only has to say
+  // what the rule is — 空白は使えません would say it twice.
+  "one word per name — try {joined}": "名前は1語です — {joined} はどうですか",
   "usage: :theme dark|light  (bare :theme toggles)":
     "使い方: :theme dark|light（引数なしで切替）",
   "usage: :lang en|ja  (bare :lang toggles)":

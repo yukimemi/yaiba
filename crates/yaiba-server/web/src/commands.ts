@@ -141,10 +141,13 @@ export function assigneeNames(ctx: ArgContext): string[] {
   const seen = new Map<string, string>();
   for (const task of ctx.data.tasks) {
     const name = task.assignee.trim();
+    // A name with a space in it can only have arrived through the API,
+    // since `:assign` refuses one. Completing it would hand back a line
+    // that command then rejects, and as a `:f` term it would silently
+    // split into two — so it is left out rather than offered broken.
+    if (!name || /\s/.test(name)) continue;
     // The first spelling wins, so the list doesn't churn as rows change.
-    if (name && !seen.has(name.toLowerCase())) {
-      seen.set(name.toLowerCase(), name);
-    }
+    if (!seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
@@ -571,6 +574,18 @@ export function runCommand(
       const name = clearing ? "" : arg.replace(/^@/, "").trim();
       if (!clearing && !name) {
         return { error: t("usage: :assign ⟨name⟩  (bare clears)") };
+      }
+      // One word, the way a tag is. The filter grammar is
+      // space-separated, so `Mary Jane` would be stored fine and then be
+      // unfindable: `:f @Mary Jane` reads as `@mary` AND `jane`, which
+      // misses the row it names and quietly matches every other row with
+      // "jane" in it. Refusing at the one place names are created keeps
+      // assignment, completion, filtering and the column all agreeing on
+      // what a name is, instead of teaching four of them to quote.
+      if (/\s/.test(name)) {
+        return { error: t("one word per name — try {joined}", {
+          joined: name.replace(/\s+/g, "-"),
+        }) };
       }
       return patchSelection(
         selection,

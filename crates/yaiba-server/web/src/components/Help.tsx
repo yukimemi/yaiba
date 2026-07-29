@@ -98,7 +98,7 @@ const groups = (): Group[] => [
       [":assign ⟨n⟩", t("hand it to somebody — bare clears")],
       [":dep ⟨n⟩", t("wait for row n")],
       [":undep ⟨n⟩", t("cut that dependency")],
-      [":f ⟨q⟩", "tag:dev, @yuki, unassigned, open, crit, overdue"],
+      [":f ⟨q⟩", "tag:dev, @yuki / owner:yuki, unassigned, open, crit"],
       [":sort ⟨k⟩", "manual, due, prio, start, title, owner"],
       [":zoom ⟨z⟩", "day, week, month"],
     ],

@@ -64,6 +64,10 @@ function matchTerm(
   // grammar leads you to try. Matching is exact and case-insensitive —
   // a substring would make `@sato` also answer for `@satoshi`, and the
   // one thing a per-person view has to be is complete.
+  //
+  // One token, because this grammar has already split on whitespace by
+  // the time it gets here. That is why `:assign` refuses a name with a
+  // space rather than teaching this line to unquote one.
   if (term.startsWith("@") || term.startsWith("owner:")) {
     const want = term.startsWith("@") ? term.slice(1) : term.slice(6);
     if (!want || want === "none") return !task.assignee;

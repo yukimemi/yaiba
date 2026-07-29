@@ -245,8 +245,14 @@ one that is stored, because with no registry it is the only record of
 how somebody writes their own name.
 
 Unlike tags, the owner is a single last-writer-wins field: two peers
-naming different people converge on one rather than both sticking. A
-task with two owners has none.
+naming different people converge on the later write rather than both
+sticking, and every replica picks the same one. The loser's name is
+gone, not merged — which is the point. A task never ends up with two
+owners, and it only ends up with none if clearing it is what won.
+
+A name is one word, the way a tag is: the filter grammar is
+space-separated, so `mary jane` would be two terms and match neither.
+`:assign` says so rather than storing something you cannot then find.
 
 ## Plan vs actual, and the progress line
 
