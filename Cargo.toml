@@ -25,27 +25,36 @@ debug = "line-tables-only"
 # Shared dependency pins. Member crates declare them with
 #   foo = { workspace = true }
 # so version bumps happen in one place.
-anyhow             = "1.0.104"
-axum               = { version = "0.8.9", features = ["macros"] }
-chrono             = { version = "0.4.45", features = ["serde"] }
-clap               = { version = "4.6.4", features = ["derive", "env"] }
+anyhow              = "1.0.104"
+axum                = { version = "0.8.9", features = ["macros"] }
+chrono              = { version = "0.4.45", features = ["serde"] }
+clap                = { version = "4.6.4", features = ["derive", "env"] }
 # Only the fuzzy picker is used; the default feature set drags in the
 # password / editor / history prompts this binary never shows.
-dialoguer          = { version = "0.12.0", default-features = false, features = ["fuzzy-select"] }
-dirs               = "6.0.0"
-iroh               = "1.0.3"
-kaishin            = "0.6.4"
-mime_guess         = "2.0.5"
-rusqlite           = { version = "0.40.1", features = ["bundled", "chrono"] }
-rust-embed         = "8.12.0"
-serde              = { version = "1.0.229", features = ["derive"] }
-serde_json         = "1.0.151"
-thiserror          = "2.0.19"
-tokio              = { version = "1.53.1", features = ["full"] }
+dialoguer           = { version = "0.12.0", default-features = false, features = ["fuzzy-select"] }
+dirs                = "6.0.0"
+iroh                = "1.0.3"
+kaishin             = "0.6.4"
+mime_guess          = "2.0.5"
+# Dev-only: generates the throwaway CA that stands in for a proxy's.
+# The test reads DER straight out of it, so the default `pem` feature is
+# dead weight; `ring` is the backend iroh already builds.
+rcgen               = { version = "0.14.8", default-features = false, features = ["ring"] }
+rusqlite            = { version = "0.40.1", features = ["bundled", "chrono"] }
+rust-embed          = "8.12.0"
+# Reads the machine's own CA roots, which yaiba-sync hands to iroh so a
+# TLS-inspecting proxy's CA is trusted. See `ca_tls_config` there.
+rustls-native-certs = "0.8.4"
+# Dev-only: `ServerName` / `UnixTime` for driving the verifier directly.
+rustls-pki-types    = "1.15.1"
+serde               = { version = "1.0.229", features = ["derive"] }
+serde_json          = "1.0.151"
+thiserror           = "2.0.19"
+tokio               = { version = "1.53.1", features = ["full"] }
 # Dev-only: `ServiceExt::oneshot`, for driving handlers without a socket.
-tower              = { version = "0.5.3", features = ["util"] }
-toml               = "1.1.4"
-tower-http         = { version = "0.7.0", features = ["cors", "trace"] }
-tracing            = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-uuid               = { version = "1.24.0", features = ["v4", "v7", "serde"] }
+tower               = { version = "0.5.3", features = ["util"] }
+toml                = "1.1.4"
+tower-http          = { version = "0.7.0", features = ["cors", "trace"] }
+tracing             = "0.1.44"
+tracing-subscriber  = { version = "0.3.23", features = ["env-filter"] }
+uuid                = { version = "1.24.0", features = ["v4", "v7", "serde"] }

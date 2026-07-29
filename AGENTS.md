@@ -582,6 +582,33 @@ it returns forever — is `SyncNode::start`, via iroh.
   a public key; which transport answers is not part of the ticket, so
   relay-only and direct replicas pair up in either direction.
 
+### Whose CA roots iroh trusts, and why not `platform-verifier`
+
+`ca_tls_config` in `yaiba-sync` hands iroh the machine's own CA roots
+on top of the embedded Mozilla list, so a TLS-inspecting proxy's
+interception CA is trusted for relays, pkarr and DNS-over-HTTPS. Without
+it those connections fail `UnknownIssuer` and relay-only sync — what a
+locked-down machine is told to use — does not work at all.
+
+- **`CaTlsConfig::system()` is the trap, not the fix.** iroh ships a
+  `platform-verifier` feature and it is the obvious answer; on Windows
+  it breaks *every* relay. The default relay hostnames are absolute —
+  `aps1-1.relay.n0.iroh.link.`, trailing dot — and
+  `rustls-platform-verifier` passes that name to CryptoAPI verbatim,
+  which compares it against the certificate's dot-less SAN and returns
+  `CERT_E_INVALID_NAME`. The symptom is `NotValidForName` on a
+  certificate that is perfectly valid; webpki folds the root label away
+  and never sees a problem. Roots from the OS, name matching from
+  webpki, is the combination that works.
+- **The embedded roots stay underneath.** A host with no CA bundle at
+  all — a bare container — would otherwise have nothing to verify with,
+  and that is `bind()` failing, which for the active project is the
+  server refusing to start.
+- **`SSL_CERT_FILE` / `SSL_CERT_DIR` now work**, because
+  `rustls-native-certs` honours them. `webpki-roots` reads neither,
+  which is why no environment variable could rescue a shipped binary
+  before this.
+
 ### The project palette
 
 - **Switching clears everything derived from the old project.** Cursor,

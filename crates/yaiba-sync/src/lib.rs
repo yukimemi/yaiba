@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use iroh::endpoint::{Connection, PortmapperConfig};
+use iroh::tls::CaTlsConfig;
 use iroh::{Endpoint, EndpointId, SecretKey};
 use tokio::sync::Notify;
 use yaiba_core::Store;
@@ -153,8 +154,18 @@ impl SyncNode {
             (secret, room)
         };
 
+        // Reading the store is file / registry / keychain I/O, and one
+        // process holds every project, so this runs once per project on
+        // whatever worker thread `start_with` landed on. Off the runtime
+        // it cannot stall anything else, however slow the store is —
+        // `SSL_CERT_DIR` can point at a network mount.
+        let roots = tokio::task::spawn_blocking(ca_tls_config)
+            .await
+            .context("reading the system certificate store failed")?;
+
         let mut builder = Endpoint::builder(iroh::endpoint::presets::N0)
             .secret_key(secret)
+            .ca_tls_config(roots)
             .alpns(vec![ALPN.to_vec()]);
         if transport == Transport::RelayOnly {
             // Both halves are needed: dropping the IP transports stops
@@ -388,6 +399,52 @@ impl SyncNode {
     }
 }
 
+/// Trust anchors for the TLS iroh speaks to *external* services —
+/// relays, pkarr, DNS-over-HTTPS.
+///
+/// iroh trusts a compiled-in copy of the Mozilla root list and nothing
+/// else, and no environment variable can widen it: `webpki-roots` reads
+/// neither `SSL_CERT_FILE` nor `SSL_CERT_DIR`, so a shipped binary has
+/// no way out from the outside. On a machine behind a TLS-inspecting
+/// proxy the interception CA sits in the OS store, where every browser
+/// and every other tool on the box finds it, and is invisible to iroh —
+/// so every relay probe fails `UnknownIssuer`, and with it the relay
+/// connection and the discovery lookups. Relay-only sync, the mode a
+/// locked-down machine is told to use, cannot connect at all.
+///
+/// This does not widen what a *peer* can claim to be: iroh authenticates
+/// its own connections by key and never consults these roots.
+///
+/// **Not `CaTlsConfig::system()`.** iroh's `platform-verifier` feature
+/// would be the obvious answer, and on Windows it breaks every relay:
+/// the default relay hostnames are absolute — `aps1-1.relay.n0.iroh.link.`,
+/// trailing dot — and `rustls-platform-verifier` hands that name to
+/// CryptoAPI verbatim, which matches it against the certificate's
+/// dot-less SAN and reports `NotValidForName`. webpki folds the root
+/// label away and accepts it. So the roots come from the OS while the
+/// matching stays webpki's.
+///
+/// The embedded roots stay in the store underneath. Dropping them would
+/// mean a host with no CA bundle at all — a bare container — has nothing
+/// to verify with, and that is `bind()` failing, which for the active
+/// project is the server refusing to start.
+fn ca_tls_config() -> CaTlsConfig {
+    ca_tls_config_from(rustls_native_certs::load_native_certs())
+}
+
+/// The half of [`ca_tls_config`] that does not touch the machine, so a
+/// test can hand it a root of its own.
+fn ca_tls_config_from(found: rustls_native_certs::CertificateResult) -> CaTlsConfig {
+    for e in &found.errors {
+        tracing::warn!("could not read part of the system certificate store: {e}");
+    }
+    tracing::debug!(
+        count = found.certs.len(),
+        "loaded CA roots from the system store"
+    );
+    CaTlsConfig::embedded().with_extra_roots(found.certs)
+}
+
 fn generate_secret() -> SecretKey {
     SecretKey::generate()
 }
@@ -408,6 +465,10 @@ fn from_hex(s: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use rustls_pki_types::{ServerName, UnixTime};
+
     use super::*;
 
     #[test]
@@ -423,6 +484,70 @@ mod tests {
     fn malformed_tickets_are_rejected() {
         assert!("nonsense".parse::<Ticket>().is_err());
         assert!("nonsense.zzzz".parse::<Ticket>().is_err());
+    }
+
+    /// Whatever the machine's own store holds — a full corporate root
+    /// list, a broken entry, nothing at all — the config still has to
+    /// build a verifier. The one that doesn't is `bind()` returning
+    /// `InvalidCaRootConfig`, which for the active project is the server
+    /// refusing to start.
+    #[test]
+    fn a_trust_store_is_always_produced() {
+        assert!(
+            ca_tls_config()
+                .server_cert_verifier(iroh::tls::default_provider())
+                .is_ok()
+        );
+    }
+
+    /// The point of the whole thing: a certificate signed by a root the
+    /// Mozilla list has never heard of — a TLS-inspecting proxy's CA —
+    /// verifies once the machine's store carries it, and does not
+    /// before. Checked at the absolute hostname form iroh uses for every
+    /// default relay, which is what rules the platform verifier out.
+    #[test]
+    fn a_root_from_the_store_is_what_makes_its_certificates_verify() {
+        let mut ca_params = rcgen::CertificateParams::new(Vec::new()).unwrap();
+        ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        ca_params
+            .key_usages
+            .push(rcgen::KeyUsagePurpose::KeyCertSign);
+        let ca_key = rcgen::KeyPair::generate().unwrap();
+        let issuer = rcgen::Issuer::new(ca_params.clone(), &ca_key);
+        let ca = ca_params.self_signed(&ca_key).unwrap();
+
+        let leaf_key = rcgen::KeyPair::generate().unwrap();
+        let leaf = rcgen::CertificateParams::new(vec!["relay.example.com".to_string()])
+            .unwrap()
+            .signed_by(&leaf_key, &issuer)
+            .unwrap();
+
+        let mut found = rustls_native_certs::CertificateResult::default();
+        found.certs.push(ca.der().clone());
+
+        let verify = |config: CaTlsConfig| {
+            let verifier = config
+                .server_cert_verifier(iroh::tls::default_provider())
+                .unwrap();
+            // The trailing dot is iroh's, not a typo: `CryptoAPI` fails
+            // this name against the dot-less SAN, webpki accepts it.
+            let name = ServerName::try_from("relay.example.com.").unwrap();
+            let now =
+                UnixTime::since_unix_epoch(SystemTime::now().duration_since(UNIX_EPOCH).unwrap());
+            verifier
+                .verify_server_cert(leaf.der(), &[], &name, &[], now)
+                .is_ok()
+        };
+
+        assert!(
+            !verify(CaTlsConfig::embedded()),
+            "the embedded roots alone must not know this CA — otherwise \
+             the assertion below proves nothing"
+        );
+        assert!(
+            verify(ca_tls_config_from(found)),
+            "a root the machine trusts has to reach the verifier"
+        );
     }
 
     #[test]
