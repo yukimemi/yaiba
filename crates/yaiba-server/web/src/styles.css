@@ -560,6 +560,35 @@ body::after {
   color: var(--ash-dim);
 }
 
+/* The same name, in the `:dates` view, as a column instead of a chip.
+   Fixed width and left-aligned: the point of the column is that a roster
+   reads straight down the page, which is exactly what the chip trades
+   away for being visible without a mode change. Right-aligned like the
+   dates would put the ragged edge on the side the eye scans. No `@` — the
+   heading already says what these are, and the sigil is what the chip
+   needs to tell itself apart from a tag. */
+.row__owner-col {
+  flex: none;
+  width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ash);
+}
+
+.row--head .row__owner-col {
+  color: var(--ash-dim);
+}
+
+/* Same treatment an empty date cell gets: present, and plainly nothing. */
+.row__owner-col--empty {
+  color: var(--ash-dim);
+}
+
+.row--done .row__owner-col {
+  color: var(--ash-dim);
+}
+
 .row__tag {
   flex: none;
   color: var(--edge-dim);

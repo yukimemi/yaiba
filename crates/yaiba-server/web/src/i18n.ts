@@ -104,8 +104,13 @@ const JA: Record<string, string> = {
   "to open a new task": "で新しいタスク",
   "for keys": "でキー一覧",
   // 担当 rather than 担当者: the row shows the name already, so the
-  // tooltip only has to say what the `@` means.
+  // tooltip only has to say what the `@` means. The column heading is
+  // the same two characters — 担当者 would not fit the 8ch cell it sits
+  // over, and the header row is where a label has least room to spare.
   "assigned to {who}": "担当: {who}",
+  owner: "担当",
+  "who owns it": "このタスクの担当者",
+  "nobody has taken it — :assign ⟨name⟩": "担当なし — :assign ⟨名前⟩",
   "no tasks yet.": "まだタスクがありません。",
   "nothing matches this filter.": "この絞り込みに一致するものがありません。",
 
@@ -352,7 +357,8 @@ const JA: Record<string, string> = {
   "wait for row n": "n 行目を待つ",
   "when work really began": "実際に着手した日",
   "when it really finished — none clears": "実際に終えた日 — none で消去",
-  "plan vs actual columns — gd toggles": "計画と実績の列 — gd で切替",
+  "plan vs actual, and an owner column — gd toggles":
+    "計画と実績、担当の列 — gd で切替",
   "calendar on the planned start / end": "計画の開始 / 終了にカレンダー",
   "calendar on the actual start / end": "実績の着手 / 完了にカレンダー",
   "open the calendar over it": "そのセルの上にカレンダーを開く",

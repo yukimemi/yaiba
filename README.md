@@ -219,7 +219,12 @@ the list returns what you had typed.
 
 ## Who owns what
 
-One person per task, written on the row as `@name`:
+One person per task. In the working view it rides the row as `@name`,
+next to the tags; switch to the date columns with `gd` and it becomes an
+`owner` column instead — fixed width, so a roster reads straight down the
+page. The chip keeps "whose is this" answerable without a mode change;
+the column is what a progress meeting scans. Never both at once, which
+would be the same name twice on one row.
 
 ```
 :assign yuki      hand it over — the visual block, if one is selected

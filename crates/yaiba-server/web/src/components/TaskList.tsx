@@ -140,6 +140,11 @@ export function TaskList({
         <span className="row__box">{t("st")}</span>
         <span className="row__title">{t("task")}</span>
         <span className="row__meta">{t("due")}</span>
+        {columns === "dates" && (
+          <span className="row__owner-col" title={t("who owns it")}>
+            {t("owner")}
+          </span>
+        )}
         {columns === "dates" &&
           DATE_COLUMNS.map((col) => (
             <span
@@ -311,8 +316,14 @@ export function TaskList({
                       because it answers the question the tags cannot,
                       and it takes no colour of its own — the palette is
                       spent on things that mean trouble, and an owner is
-                      not one. */}
-                  {task.assignee && (
+                      not one.
+
+                      It gives way to the `owner` column below when the
+                      date columns are up. The chip is what keeps "whose
+                      is this" readable without a mode change; the column
+                      is what makes a roster scannable down the page. Both
+                      at once is the same name twice on one row. */}
+                  {columns !== "dates" && task.assignee && (
                     <span className="row__owner" title={t("assigned to {who}", {
                       who: task.assignee,
                     })}>
@@ -343,6 +354,25 @@ export function TaskList({
                       }`}
                     >
                       {shortLabel(task.due)}
+                    </span>
+                  )}
+                  {/* Fixed width, so a roster reads straight down the
+                      page — the one thing the chip cannot do. Plain
+                      text, not a button: there is no owner picker, and a
+                      cell that looks editable and isn't is worse than
+                      one that plainly isn't. `:assign` is the editor. */}
+                  {columns === "dates" && (
+                    <span
+                      className={`row__owner-col${
+                        task.assignee ? "" : " row__owner-col--empty"
+                      }`}
+                      title={
+                        task.assignee
+                          ? t("assigned to {who}", { who: task.assignee })
+                          : t("nobody has taken it — :assign ⟨name⟩")
+                      }
+                    >
+                      {task.assignee || "·"}
                     </span>
                   )}
                   {/* The plan and the record, side by side. A cell is a

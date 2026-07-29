@@ -108,7 +108,7 @@ const groups = (): Group[] => [
     keys: [
       [":astart ⟨d⟩", t("when work really began")],
       [":aend ⟨d⟩", t("when it really finished — none clears")],
-      [":dates", t("plan vs actual columns — gd toggles")],
+      [":dates", t("plan vs actual, and an owner column — gd toggles")],
       [":cols ⟨c⟩", "compact, dates"],
     ],
   },
