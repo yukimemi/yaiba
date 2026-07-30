@@ -298,12 +298,89 @@ export function ancestorsOf(id: TaskId, byId: Map<TaskId, Task>): TaskId[] {
 export interface ViewOptions {
   query: string;
   sort: SortKey;
-  /** Rows the user folded individually. */
+  /**
+   * Every folded summary — the only thing that hides a row.
+   *
+   * There used to be a second axis here, a bare `foldLevel` depth, and
+   * it was applied as a filter on every render: `level > foldLevel`
+   * dropped the row before the `collapsed` check below could speak. So
+   * after `zM` no `za` could open anything, because nothing was in
+   * `collapsed` to remove — the level gate was hiding those rows, and
+   * only `zr` could lift it, for every project at once. The depth now
+   * *expands* into this set when a fold-to-level command runs (see
+   * `foldToDepth`), which leaves one source of truth: the list, the
+   * `▸`/`▾` marker and `za` all read the same thing and cannot disagree.
+   */
   collapsed: Set<TaskId>;
-  /** Hide anything deeper than this. `null` shows every level. */
-  foldLevel: number | null;
   /** Show only this subtree, including the root itself. */
   focus: TaskId | null;
+}
+
+/**
+ * The summaries to fold so that nothing deeper than `depth` is on screen.
+ *
+ * A summary *at* `depth` is folded, because what it hides is its children
+ * at `depth + 1`. So `depth: 0` folds every summary and leaves the
+ * projects, which is what `zM` means.
+ */
+export function collapsedForDepth(
+  scheduled: Scheduled[],
+  depth: number,
+): Set<TaskId> {
+  const out = new Set<TaskId>();
+  for (const s of scheduled) if (s.summary && s.level >= depth) out.add(s.id);
+  return out;
+}
+
+/** The row `foldStep` is being asked about. */
+export interface FoldRow {
+  id: TaskId;
+  /** Has children, so it is something that can be folded at all. */
+  summary: boolean;
+  /** Its effective parent — where `h` steps out to. */
+  parent: TaskId | null;
+}
+
+/**
+ * Where `h` / `l` leave the fold state and the cursor.
+ *
+ * A pure function rather than two `case` arms in the key handler, so the
+ * decision can be asserted without a DOM — `check-folds.ts` calls this
+ * the same way it calls `collapsedForDepth`. The alternative is a rule
+ * that only a real keyboard can check, which is how #80 shipped.
+ *
+ * `null` means nothing happens, which is a real answer here rather than
+ * an error: `l` on a leaf and `h` at the top level both have nowhere to
+ * go, and doing nothing quietly is what a motion at the edge of the tree
+ * does everywhere else.
+ */
+export function foldStep(
+  direction: "open" | "close",
+  row: FoldRow,
+  collapsed: Set<TaskId>,
+): { collapsed: Set<TaskId>; cursor: TaskId } | null {
+  if (direction === "open") {
+    // Opening only ever opens. Descending into the subtree is `j`, and one
+    // key meaning both would make it impossible to open a fold without
+    // also leaving the row you opened.
+    if (!row.summary || !collapsed.has(row.id)) return null;
+    const next = new Set(collapsed);
+    next.delete(row.id);
+    return { collapsed: next, cursor: row.id };
+  }
+
+  // An open summary closes where you stand.
+  if (row.summary && !collapsed.has(row.id)) {
+    return { collapsed: new Set(collapsed).add(row.id), cursor: row.id };
+  }
+  // Anything else — a leaf, or a summary already closed — steps out and
+  // closes the parent. That is what makes `h` mean "back out of here"
+  // rather than dying on every row that happens not to be a fold.
+  if (!row.parent) return null;
+  return {
+    collapsed: new Set(collapsed).add(row.parent),
+    cursor: row.parent,
+  };
 }
 
 /**
@@ -322,7 +399,7 @@ export function visibleTasks(
   bySchedule: Map<TaskId, Scheduled>,
   options: ViewOptions,
 ): Task[] {
-  const { query, sort, collapsed, foldLevel, focus } = options;
+  const { query, sort, collapsed, focus } = options;
   const byId = new Map(tasks.map((t) => [t.id, t]));
 
   let pool = tasks;
@@ -345,11 +422,9 @@ export function visibleTasks(
   if (sort !== "manual") return flatSorted(pool, bySchedule, sort);
 
   const ordered = treeOrder(pool, focus ? null : null);
-  return ordered.filter((task) => {
-    const level = bySchedule.get(task.id)?.level ?? 0;
-    if (foldLevel !== null && level > foldLevel) return false;
-    return !ancestorsOf(task.id, byId).some((a) => collapsed.has(a));
-  });
+  return ordered.filter(
+    (task) => !ancestorsOf(task.id, byId).some((a) => collapsed.has(a)),
+  );
 }
 
 function flatSorted(

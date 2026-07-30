@@ -26,8 +26,10 @@ import { TaskList } from "./components/TaskList";
 import { addDays, toISO } from "./dates";
 import { DEFAULT_LAG } from "./types";
 import {
+  collapsedForDepth,
   dropOrder,
   effectiveParent,
+  foldStep,
   stepOrder,
   visibleTasks,
   type SortKey,
@@ -172,10 +174,26 @@ export function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   /** The language the weekday names are written in — nothing else. */
   const [lang, setLang] = useState<Lang>(initialLang);
-  /** Rows folded one at a time with za / zc. */
+  /**
+   * Every folded summary — the whole of the folding state.
+   *
+   * `zM` / `zm` / `:level` write into this too, by expanding a depth into
+   * the summaries that produce it. See `foldToDepth`.
+   */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  /** Hide anything deeper than this; null shows every level. */
-  const [foldLevel, setFoldLevel] = useState<number | null>(null);
+  /**
+   * The depth the last fold-to-level command asked for, remembered so
+   * `zm` and `zr` have something to step from. Nothing renders from it —
+   * that is `collapsed`'s job alone, which is the fix for the two-axis
+   * conflict described on `ViewOptions.collapsed` — so it is a ref rather
+   * than state, and a burst of `zr zr zr` reads its own last write
+   * instead of a render-old one.
+   *
+   * A per-row `za` deliberately leaves it alone: `zr` after hand-folding
+   * should still step from the last level you asked for rather than
+   * becoming a dead key, which is the trap this whole change is about.
+   */
+  const foldLevelRef = useRef<number | null>(null);
   /** Show only this subtree — :only / zf. */
   const [focus, setFocus] = useState<string | null>(null);
   /**
@@ -228,11 +246,10 @@ export function App() {
             query: filter,
             sort,
             collapsed,
-            foldLevel,
             focus,
           })
         : [],
-    [data, bySchedule, filter, sort, collapsed, foldLevel, focus],
+    [data, bySchedule, filter, sort, collapsed, focus],
   );
 
   /** The progress line is noise on an empty plan; show it once there is
@@ -243,6 +260,45 @@ export function App() {
   const maxLevel = useMemo(
     () =>
       (data?.schedule.tasks ?? []).reduce((m, s) => Math.max(m, s.level), 0),
+    [data],
+  );
+
+  /**
+   * The depth the HUD reports, or null when nothing is folded.
+   *
+   * Read off the rows actually drawn, not off `foldLevel` — after `zM`
+   * plus one `za` those two disagree, and the one worth showing is the
+   * one describing the screen. Gated on `collapsed` being non-empty so a
+   * filter that happens to match only shallow rows does not read as a
+   * fold.
+   */
+  const visibleDepth = useMemo(() => {
+    if (!collapsed.size) return null;
+    return visible.reduce(
+      (deepest, task) => Math.max(deepest, bySchedule.get(task.id)?.level ?? 0),
+      0,
+    );
+  }, [collapsed, visible, bySchedule]);
+
+  /**
+   * Fold to a depth: remember it, and expand it into `collapsed`.
+   *
+   * `null` is "no depth asked for", which unfolds everything — the state
+   * `zR` leaves behind. Everything else replaces `collapsed` outright
+   * rather than merging, because a fold-to-level is a statement about the
+   * whole tree; merging would leave rows open that the depth says to
+   * close and make the second `zm` press behave differently from the
+   * first.
+   */
+  const foldToDepth = useCallback(
+    (depth: number | null) => {
+      foldLevelRef.current = depth;
+      setCollapsed(
+        depth === null
+          ? new Set<string>()
+          : collapsedForDepth(data?.schedule.tasks ?? [], depth),
+      );
+    },
     [data],
   );
 
@@ -367,11 +423,12 @@ export function App() {
         putAnchor(null);
         setPicking(null);
         setFocus(null);
-        // Both halves of the folding state. `foldLevel` is a raw depth
-        // compared against each project's own tree, so carrying it over
-        // hides everything deeper in the new one — the same failure the
-        // filter reset above exists to prevent.
-        setFoldLevel(null);
+        // The folded set names rows that do not exist in the project being
+        // switched to, and the remembered depth was measured against a
+        // different tree — the same failure the filter reset above exists
+        // to prevent. Set directly rather than through `foldToDepth`,
+        // which would read the *outgoing* project's schedule.
+        foldLevelRef.current = null;
         setCollapsed(new Set());
         setFilter("");
         return load();
@@ -408,7 +465,9 @@ export function App() {
     putAnchor(null);
     setPicking(null);
     setFocus(null);
-    setFoldLevel(null);
+    // Same reasoning as `switchTo`: a folded set from another project
+    // names rows that are not here.
+    foldLevelRef.current = null;
     setCollapsed(new Set());
     setFilter("");
     void load().then(() => say(note, "ok"));
@@ -1111,7 +1170,10 @@ export function App() {
         return next;
       });
     }
-    if (ui.foldLevel !== undefined) setFoldLevel(ui.foldLevel);
+    // `:level n` / `:level` / `:only` / `:all` all arrive here, and all of
+    // them mean the same thing `zM` means — so they go through the same
+    // expansion rather than setting a depth nothing reads.
+    if (ui.foldLevel !== undefined) foldToDepth(ui.foldLevel);
     if (ui.zoom) setZoom(ui.zoom);
     if (ui.filter !== undefined) setFilter(ui.filter);
     if (ui.sort) setSort(ui.sort);
@@ -1724,24 +1786,25 @@ export function App() {
       case "[":
         setZoom(ZOOM_CYCLE[Math.max(ZOOM_CYCLE.indexOf(zoom) - 1, 0)]);
         break;
-      // ---- folding: the "level" axis
-      case "zm":
+      // ---- folding by depth, which is folding by row underneath
+      case "zm": {
         // Fold one level shallower. From "everything visible" that means
         // starting at the deepest level actually present, so the first
         // press always does something.
-        setFoldLevel((prev) => Math.max((prev ?? maxLevel) - 1, 0));
+        const prev = foldLevelRef.current;
+        foldToDepth(Math.max((prev ?? maxLevel) - 1, 0));
         break;
-      case "zr":
-        setFoldLevel((prev) =>
-          prev === null || prev + 1 >= maxLevel ? null : prev + 1,
-        );
+      }
+      case "zr": {
+        const prev = foldLevelRef.current;
+        foldToDepth(prev === null || prev + 1 >= maxLevel ? null : prev + 1);
         break;
+      }
       case "zM":
-        setFoldLevel(0);
+        foldToDepth(0);
         break;
       case "zR":
-        setFoldLevel(null);
-        setCollapsed(new Set());
+        foldToDepth(null);
         break;
       case "za":
       case "zo":
@@ -1758,12 +1821,41 @@ export function App() {
         });
         break;
       }
+      // One key each, like every other motion in this list. `h` and `l`
+      // were free — they exist in NORMALIZE only so the arrow keys reach
+      // the same cases, which means the arrows fold too, and that is the
+      // behaviour a tree UI trains your hands for. A count has no meaning
+      // on a fold, so it is ignored rather than applied.
+      //
+      // The decision itself lives in `foldStep`, a pure function, so it
+      // can be asserted without a browser — see `scripts/check-folds.ts`.
+      // These arms only apply what it returns.
+      case "h":
+      case "l": {
+        if (!current) break;
+        const step = foldStep(
+          cmd === "l" ? "open" : "close",
+          {
+            id: current.id,
+            summary: bySchedule.get(current.id)?.summary ?? false,
+            parent: cursorParent,
+          },
+          collapsed,
+        );
+        if (!step) break;
+        setCollapsed(step.collapsed);
+        if (step.cursor !== current.id) putCursor(step.cursor);
+        break;
+      }
       case "zf":
         // Zoom into this subtree and drop every fold, so the focused
-        // project opens fully rather than inheriting the outer view.
+        // project opens fully rather than inheriting the outer view. That
+        // has to clear `collapsed`, not just the remembered depth — the
+        // depth stopped hiding anything by itself when the two axes were
+        // merged, so clearing the depth alone left this comment lying.
         if (current) {
           setFocus(current.id);
-          setFoldLevel(null);
+          foldToDepth(null);
           say(t("focused “{title}” — zF to come back", { title: current.title }));
         }
         break;
@@ -2089,7 +2181,7 @@ export function App() {
         onCloseAsof={() => setShowAsof(false)}
         onStepAsof={stepReference}
         onSetAsof={setReferenceDate}
-        foldLevel={foldLevel}
+        foldLevel={visibleDepth}
         theme={theme}
         project={projects.active}
         projectCount={projects.projects.length}

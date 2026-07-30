@@ -25,6 +25,7 @@ const groups = (): Group[] => [
       ["gg / G", t("first / last")],
       ["^d / ^u", t("half page")],
       ["H / M / L", t("top / middle / bottom")],
+      ["h / l", t("fold / unfold — arrows too")],
       ["/ n N", t("search, next, previous")],
       ["tab", t("cycle split → list → gantt")],
     ],
@@ -78,6 +79,7 @@ const groups = (): Group[] => [
     title: t("BREAKDOWN"),
     keys: [
       [">> / <<", t("nest under the row above / move out")],
+      ["l / h", t("open this fold / close it, or step out and close")],
       ["zm / zr", t("fold one level shallower / deeper")],
       ["zM / zR", t("fold to projects only / unfold all")],
       ["za", t("toggle this row · zo open · zc close")],
