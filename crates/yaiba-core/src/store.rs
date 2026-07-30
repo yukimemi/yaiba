@@ -622,7 +622,12 @@ impl Store {
         if !snapshot.tasks.iter().any(|t| t.id == to) {
             return Err(Error::NotFound(to));
         }
-        if graph::would_cycle(&snapshot.deps, from, to) {
+        // Asked of the tree as well as the edges: an edge naming a summary
+        // stands for one to every leaf beneath it, and whether *that*
+        // closes a loop is the only question the scheduler will care about.
+        // Refusing here is what keeps the server from accepting an edge the
+        // scheduler then has to survive.
+        if graph::would_cycle(&snapshot.tasks, &snapshot.deps, from, to) {
             return Err(Error::Cycle { from, to });
         }
         self.commit(vec![

@@ -208,6 +208,13 @@ Dependencies and nesting are separate axes on purpose: a parent
 *contains* its children, a dependency *orders* two tasks. Only leaves
 are scheduled from dependencies; summaries follow.
 
+You can still link a summary, and it means what it looks like: an edge
+*onto* one holds back everything inside it, and an edge *out of* one waits
+for the whole bracket to close — the last child, not the first. Under the
+hood the edge is rewritten to run between the leaves, since those are the
+rows that carry dates. The one pairing that is refused is a summary and
+something inside it, which would ask a task to finish before itself.
+
 An edge carries how long after its predecessor the successor may start,
 and `:dep ⟨row⟩ +⟨days⟩` is where you say it:
 
