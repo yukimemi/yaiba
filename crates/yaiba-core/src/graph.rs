@@ -86,38 +86,145 @@ fn minus_days(date: NaiveDate, days: i64) -> NaiveDate {
         })
 }
 
-/// Adjacency in both directions, restricted to edges whose endpoints
-/// both exist. Dangling edges are normal in a CRDT — a peer can send an
-/// edge whose task tombstone hasn't arrived yet — so they are dropped
-/// rather than treated as corruption.
-fn adjacency(
-    tasks: &[Task],
-    deps: &[Dep],
-) -> (HashMap<TaskId, Vec<TaskId>>, HashMap<TaskId, Vec<TaskId>>) {
+/// The leaves each task stands for when an edge names it.
+///
+/// A leaf stands for itself; a summary stands for every leaf beneath it.
+/// This is what lets a dependency touch a summary at all — see [`expand`].
+///
+/// Bounded like `levels` is: a parent chain that loops is possible after a
+/// merge, and an unbounded walk would hang the scheduler rather than
+/// degrade.
+fn leaves_beneath(tasks: &[Task]) -> HashMap<TaskId, Vec<TaskId>> {
+    let children = children_of(tasks);
+    let mut out: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+    for task in tasks {
+        let mut leaves = Vec::new();
+        let mut stack = vec![task.id];
+        let mut seen: HashSet<TaskId> = HashSet::new();
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            match children.get(&id).filter(|k| !k.is_empty()) {
+                Some(kids) => stack.extend(kids.iter().copied()),
+                // No children: a leaf, and the thing that actually carries
+                // dates.
+                None => leaves.push(id),
+            }
+        }
+        // A summary whose whole subtree is a parent cycle resolves to no
+        // leaves at all. Standing for itself keeps its edges in the graph
+        // instead of silently dropping them — the same "degrade, don't
+        // vanish" bargain the rest of this file makes.
+        if leaves.is_empty() {
+            leaves.push(task.id);
+        }
+        leaves.sort_unstable();
+        out.insert(task.id, leaves);
+    }
+    out
+}
+
+/// Rewrite every edge to run between leaves.
+///
+/// Both scheduling passes work on leaves — a summary's dates are the
+/// roll-up of its children, computed *after* both passes, so a summary has
+/// no `ef` for a predecessor lookup to find and is skipped as a successor
+/// entirely. That is why an edge touching one used to be silently ignored
+/// in both directions: `A -> S` reached a task the forward pass skips, and
+/// `S -> B` looked up a finish that did not exist yet.
+///
+/// Expanding here keeps the two axes independent. Scheduling summaries
+/// directly would be circular — a summary's end is a function of its
+/// children, and its children would become a function of its predecessors
+/// — and it would also hand a summary dates of its own, which is the one
+/// thing the roll-up exists to prevent.
+///
+/// What the rewrite means:
+///
+/// - `A -> S` becomes `A -> leaf` for every leaf of `S`, so all of them
+///   wait.
+/// - `S -> B` becomes `leaf -> B` for every leaf of `S`, and the forward
+///   pass takes the `max`, so `B` waits for the whole bracket to close.
+/// - `S -> T` is the cross product, which is the same statement about both
+///   brackets.
+///
+/// Each rewritten edge carries the original's lag, so `A -> S +0` means
+/// every leaf of `S` may start the day `A` finishes.
+fn expand(tasks: &[Task], deps: &[Dep]) -> Vec<Dep> {
     let ids: HashSet<TaskId> = tasks.iter().map(|t| t.id).collect();
-    let mut preds: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
-    let mut succs: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+    let leaves = leaves_beneath(tasks);
+    let mut out = Vec::new();
     for dep in deps {
+        // Dangling edges are normal in a CRDT — a peer can send one whose
+        // task tombstone has not arrived yet — so they are dropped rather
+        // than treated as corruption.
         if dep.from == dep.to || !ids.contains(&dep.from) || !ids.contains(&dep.to) {
             continue;
         }
+        let empty = Vec::new();
+        let from_leaves = leaves.get(&dep.from).unwrap_or(&empty);
+        let to_leaves = leaves.get(&dep.to).unwrap_or(&empty);
+        for from in from_leaves {
+            for to in to_leaves {
+                // An edge between a summary and something inside it
+                // expands to include a self-loop. `Store::add_dep` refuses
+                // that pairing outright — `would_cycle` expands too — but
+                // one already in the store, or arriving from a peer, still
+                // has to not become a cycle here.
+                if from == to {
+                    continue;
+                }
+                out.push(Dep {
+                    from: *from,
+                    to: *to,
+                    lag_days: dep.lag_days,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Adjacency in both directions over already-expanded edges.
+fn adjacency(deps: &[Dep]) -> (HashMap<TaskId, Vec<TaskId>>, HashMap<TaskId, Vec<TaskId>>) {
+    let mut preds: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+    let mut succs: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+    for dep in deps {
         preds.entry(dep.to).or_default().push(dep.from);
         succs.entry(dep.from).or_default().push(dep.to);
     }
     (preds, succs)
 }
 
-/// Each edge's lag, keyed by its endpoints.
+/// Each edge's lag, keyed by its endpoints — the longest, where two edges
+/// share a pair.
 ///
 /// Kept beside `adjacency` rather than folded into it: `succs` is what
 /// `topo_order` walks and what `would_cycle` rebuilds, and neither has any
 /// use for a lag. Threading it through both would make every caller carry
-/// a number it does not read. Duplicate edges cannot exist — the CRDT keys
-/// them by `(from, to)` — so the last write into this map is the only one.
+/// a number it does not read.
+///
+/// **Duplicates are possible here**, which they are not among the stored
+/// edges: the CRDT keys those by `(from, to)`, but `expand` can rewrite two
+/// different ones onto the same leaf pair — a direct `A -> leaf` alongside
+/// an `A -> S` that leaf sits inside. Collecting into a map would then let
+/// whichever came last in the slice win, dropping the other silently and
+/// depending on `deps` order to decide which.
+///
+/// `max` because a lag is a floor and both edges are still constraints:
+/// "wait five days" and "you may start the same day" together mean wait
+/// five. It is the same rule the forward pass already applies across
+/// distinct predecessors, applied one level down.
 fn lags(deps: &[Dep]) -> HashMap<(TaskId, TaskId), i64> {
-    deps.iter()
-        .map(|d| ((d.from, d.to), clamp_lag(d.lag_days)))
-        .collect()
+    let mut out: HashMap<(TaskId, TaskId), i64> = HashMap::new();
+    for dep in deps {
+        let lag = clamp_lag(dep.lag_days);
+        out.entry((dep.from, dep.to))
+            .and_modify(|longest| *longest = (*longest).max(lag))
+            .or_insert(lag);
+    }
+    out
 }
 
 /// Kahn's algorithm. Any node left over sits on a cycle; those are
@@ -164,20 +271,43 @@ fn topo_order(tasks: &[Task], succs: &HashMap<TaskId, Vec<TaskId>>) -> Vec<TaskI
     order
 }
 
-/// Returns true when adding `from -> to` would close a cycle, i.e. when
-/// `to` already reaches `from`.
-pub fn would_cycle(deps: &[Dep], from: TaskId, to: TaskId) -> bool {
+/// Returns true when adding `from -> to` would close a cycle.
+///
+/// Asked of the *expanded* graph, because that is the one the scheduler
+/// runs on. Without expansion the server would accept edges the scheduler
+/// then has to survive — `A -> S` plus `child_of_S -> A` is no cycle
+/// between the names as written and a plain one once both are rewritten to
+/// leaves — and the 409 exists precisely to keep that from happening.
+///
+/// Two pairings it now refuses that it used to allow, both correctly: an
+/// edge between a summary and something inside it (`S -> child_of_S`
+/// expands to include `child_of_S -> child_of_S`), and any edge whose two
+/// leaf sets overlap. Both say "this must finish before itself".
+pub fn would_cycle(tasks: &[Task], deps: &[Dep], from: TaskId, to: TaskId) -> bool {
     if from == to {
         return true;
     }
+    let leaves = leaves_beneath(tasks);
+    let empty = Vec::new();
+    let from_leaves = leaves.get(&from).unwrap_or(&empty);
+    let to_leaves = leaves.get(&to).unwrap_or(&empty);
+    // Nothing to schedule between: an ancestor/descendant pairing, or two
+    // names standing for the same single leaf.
+    if from_leaves.iter().any(|f| to_leaves.contains(f)) {
+        return true;
+    }
+
     let mut succs: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
-    for dep in deps {
+    for dep in expand(tasks, deps) {
         succs.entry(dep.from).or_default().push(dep.to);
     }
-    let mut stack = vec![to];
+    // Reachability is asked leaf-to-leaf: does anything the new edge would
+    // land on already reach anything it would leave from?
+    let mut stack: Vec<TaskId> = to_leaves.clone();
+    let targets: HashSet<TaskId> = from_leaves.iter().copied().collect();
     let mut seen = HashSet::new();
     while let Some(node) = stack.pop() {
-        if node == from {
+        if targets.contains(&node) {
             return true;
         }
         if !seen.insert(node) {
@@ -281,8 +411,13 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
         };
     }
 
-    let (preds, succs) = adjacency(tasks, deps);
-    let lag = lags(deps);
+    // Every edge rewritten to run between leaves, so both passes and the
+    // slack that follows operate on a graph of things that carry dates.
+    // The roll-up below is untouched by this and stays the only place a
+    // summary gets any.
+    let edges = expand(tasks, deps);
+    let (preds, succs) = adjacency(&edges);
+    let lag = lags(&edges);
     let order = topo_order(tasks, &succs);
     let by_id: HashMap<TaskId, &Task> = tasks.iter().map(|t| (t.id, t)).collect();
     let children = children_of(tasks);
@@ -743,13 +878,17 @@ mod tests {
 
     #[test]
     fn would_cycle_detects_indirect_loops() {
+        let tasks = vec![task(1, 1, None), task(2, 1, None), task(3, 1, None)];
         let deps = vec![dep(1, 2), dep(2, 3)];
-        assert!(would_cycle(&deps, id(3), id(1)), "3 -> 1 closes the loop");
         assert!(
-            !would_cycle(&deps, id(1), id(3)),
+            would_cycle(&tasks, &deps, id(3), id(1)),
+            "3 -> 1 closes the loop"
+        );
+        assert!(
+            !would_cycle(&tasks, &deps, id(1), id(3)),
             "1 -> 3 is just a shortcut edge"
         );
-        assert!(would_cycle(&deps, id(1), id(1)), "self-edge");
+        assert!(would_cycle(&tasks, &deps, id(1), id(1)), "self-edge");
     }
 
     /// `child(n, parent, duration)` — a leaf inside `parent`.
@@ -841,6 +980,179 @@ mod tests {
         assert_eq!(find(&s, 2).end, day(2));
         assert_eq!(find(&s, 3).start, day(3));
         assert_eq!(find(&s, 1).end, day(4), "the summary covers both");
+    }
+
+    /// `Parent 1 { 2, 3 }` plus a standalone `4`, all one day, nothing
+    /// pinned but `2`.
+    fn summary_fixture() -> Vec<Task> {
+        let parent = task(1, 1, None);
+        let mut a = child(2, 1, 1);
+        a.start = Some(day(1));
+        let b = child(3, 1, 1);
+        let other = task(4, 1, None);
+        vec![parent, a, b, other]
+    }
+
+    #[test]
+    fn a_dependency_onto_a_summary_pushes_every_child() {
+        // #86: the edge drew, survived the cycle check and moved nothing.
+        // `4 -> 1` has to hold back everything inside 1, since 1 has no
+        // dates of its own for the constraint to land on.
+        let mut tasks = summary_fixture();
+        tasks[1].start = None; // let the children float
+        let s = schedule(&tasks, &[dep(4, 1)], day(1));
+
+        assert_eq!(find(&s, 4).end, day(1));
+        assert_eq!(find(&s, 2).start, day(2), "child waits for 4");
+        assert_eq!(find(&s, 3).start, day(2), "and so does its sibling");
+        assert_eq!(find(&s, 1).start, day(2), "so the bracket moves with them");
+    }
+
+    #[test]
+    fn a_dependency_out_of_a_summary_waits_for_its_latest_child() {
+        // `1 -> 4`. The bracket closes when the *last* child does, so 4
+        // waits for that and not for whichever child happens to be first.
+        let mut tasks = summary_fixture();
+        tasks[2].duration_days = 5; // 3 is now the long one
+        let s = schedule(&tasks, &[dep(1, 4)], day(1));
+
+        assert_eq!(find(&s, 2).end, day(1));
+        assert_eq!(find(&s, 3).end, day(5));
+        assert_eq!(find(&s, 1).end, day(5), "the bracket");
+        assert_eq!(find(&s, 4).start, day(6), "the day after the whole thing");
+    }
+
+    #[test]
+    fn a_dependency_between_two_summaries_orders_the_brackets() {
+        // Both endpoints are summaries, so the edge is the cross product of
+        // the two leaf sets — which says exactly what it looks like it says.
+        let mut tasks = summary_fixture();
+        tasks[2].duration_days = 3;
+        let second = task(5, 1, None);
+        let x = child(6, 5, 2);
+        let y = child(7, 5, 1);
+        tasks.extend([second, x, y]);
+
+        let s = schedule(&tasks, &[dep(1, 5)], day(1));
+        assert_eq!(find(&s, 1).end, day(3), "first bracket closes on day 3");
+        assert_eq!(find(&s, 6).start, day(4));
+        assert_eq!(find(&s, 7).start, day(4));
+        assert_eq!(find(&s, 5).start, day(4), "second bracket opens after it");
+    }
+
+    #[test]
+    fn slack_is_consumed_across_an_edge_touching_a_summary() {
+        // The backward pass sees the expanded graph too, so the branch
+        // through the summary is measured rather than reported as free.
+        //
+        //   4 ──▶ Parent 1 { 2 (3d), 3 (1d) }
+        // 3 is two days shorter than its sibling, so it has that much slack;
+        // 2 is on the critical path. Before the fix neither branch knew the
+        // edge existed and 4 itself came out with slack it had not earned.
+        let mut tasks = summary_fixture();
+        tasks[1].start = None;
+        tasks[1].duration_days = 3;
+        let s = schedule(&tasks, &[dep(4, 1)], day(1));
+
+        assert_eq!(find(&s, 2).slack_days, 0);
+        assert!(find(&s, 2).critical);
+        assert_eq!(find(&s, 3).slack_days, 2);
+        assert_eq!(find(&s, 4).slack_days, 0, "the edge is on the long path");
+        assert!(find(&s, 4).critical);
+    }
+
+    #[test]
+    fn a_zero_lag_edge_onto_a_summary_lets_the_children_start_that_day() {
+        // The lag rides the expansion: one statement about the edge, applied
+        // to every leaf it now stands for.
+        let mut tasks = summary_fixture();
+        tasks[1].start = None;
+        let s = schedule(&tasks, &[dep_lag(4, 1, 0)], day(1));
+
+        assert_eq!(find(&s, 4).end, day(1));
+        assert_eq!(find(&s, 2).start, day(1));
+        assert_eq!(find(&s, 3).start, day(1));
+    }
+
+    #[test]
+    fn a_summary_and_something_inside_it_cannot_be_linked() {
+        // Expansion turns this into "this leaf must finish before itself",
+        // so `would_cycle` refuses it. It used to be accepted and then
+        // silently ignored, which is the worse of the two.
+        let tasks = summary_fixture();
+        assert!(
+            would_cycle(&tasks, &[], id(1), id(2)),
+            "the summary cannot precede its own child"
+        );
+        assert!(
+            would_cycle(&tasks, &[], id(2), id(1)),
+            "nor the child precede the summary"
+        );
+        // A sibling outside the subtree is still perfectly legal.
+        assert!(!would_cycle(&tasks, &[], id(4), id(1)));
+    }
+
+    #[test]
+    fn would_cycle_expands_before_answering() {
+        // The case the issue names: neither edge closes a loop between the
+        // names as written, but together they do once both are rewritten to
+        // leaves. Accepting the second would hand the scheduler a cycle the
+        // 409 exists to keep out.
+        let tasks = summary_fixture();
+        let deps = vec![dep(4, 1)]; // 4 -> every leaf of 1
+        assert!(
+            would_cycle(&tasks, &deps, id(2), id(4)),
+            "2 already waits for 4, so 2 -> 4 is a loop"
+        );
+    }
+
+    #[test]
+    fn two_edges_landing_on_the_same_leaf_keep_the_longer_lag() {
+        // Expansion can put two edges on one leaf pair: a direct one, and
+        // one inherited from an ancestor summary. Both are constraints, so
+        // the leaf waits for the longer — and it must not depend on which
+        // order the stored edges happen to arrive in.
+        //
+        //   4 ─────5────▶ 2        (direct, five days)
+        //   4 ─0─▶ Parent 1 { 2, 3 }   (same-day, via the summary)
+        let mut tasks = summary_fixture();
+        tasks[1].start = None;
+
+        let direct = dep_lag(4, 2, 5);
+        let via_summary = dep_lag(4, 1, 0);
+
+        for (label, deps) in [
+            ("direct first", vec![direct, via_summary]),
+            ("summary first", vec![via_summary, direct]),
+        ] {
+            let s = schedule(&tasks, &deps, day(1));
+            assert_eq!(find(&s, 4).end, day(1));
+            assert_eq!(
+                find(&s, 2).start,
+                day(6),
+                "{label}: five days after 4, not the same day"
+            );
+            // 3 only has the summary edge, so it is free to start at once.
+            assert_eq!(find(&s, 3).start, day(1), "{label}: sibling unaffected");
+        }
+    }
+
+    #[test]
+    fn an_edge_touching_a_summary_marks_its_children_blocked() {
+        // `blocked` reads predecessor status, and after expansion the rows
+        // that actually wait are the children — the roll-up then marks the
+        // summary too, which is where the flag was coming from before.
+        let mut tasks = summary_fixture();
+        tasks[1].start = None;
+        let s = schedule(&tasks, &[dep(4, 1)], day(1));
+        assert!(find(&s, 2).blocked);
+        assert!(find(&s, 3).blocked);
+        assert!(find(&s, 1).blocked, "and so the bracket reads blocked");
+
+        tasks[3].status = Status::Done; // 4 is finished
+        let s = schedule(&tasks, &[dep(4, 1)], day(1));
+        assert!(!find(&s, 2).blocked);
+        assert!(!find(&s, 1).blocked);
     }
 
     #[test]

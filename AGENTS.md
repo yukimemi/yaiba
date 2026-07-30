@@ -652,11 +652,31 @@ locked-down machine is told to use — does not work at all.
 - **Cycles are refused server-side.** `Store::add_dep` calls
   `graph::would_cycle` and returns 409; it catches indirect loops, not
   just the two-node case. Client-side previews are a convenience and
-  must agree with it, never replace it.
-- **A summary is not scheduled.** A task with children takes its span
-  from their union and its progress from a duration-weighted roll-up;
-  only leaves are scheduled from dependencies. Giving a summary its own
-  dates produces a second answer competing with the roll-up.
+  must agree with it, never replace it — including the expansion below,
+  which is the part a preview is most likely to get wrong.
+- **A summary is not scheduled, and every edge is expanded to leaves.**
+  A task with children takes its span from their union and its progress
+  from a duration-weighted roll-up; only leaves are ever scheduled.
+  Giving a summary its own dates produces a second answer competing with
+  the roll-up, so instead `graph::expand` rewrites each edge to run
+  between leaves before either pass sees it: `A -> S` becomes `A -> leaf`
+  for every leaf of `S`, `S -> B` becomes `leaf -> B` (the forward pass
+  takes the `max`, so `B` waits for the whole bracket), and `S -> T` is
+  the cross product. Both passes, the slack that follows and
+  `would_cycle` all run on the expanded graph; the roll-up is the only
+  thing that does not.
+  - **Ask the expanded graph, not the written one,** for anything about
+    dates or reachability. Before this existed, an edge touching a
+    summary drew, survived the cycle check and moved nothing in either
+    direction — `A -> S` named a task the forward pass skips, and
+    `S -> B` looked up a finish the roll-up had not computed yet.
+  - **Expansion makes some pairings cycles that were not.** An edge
+    between a summary and anything inside it becomes "this leaf must
+    finish before itself", so it is refused now — correctly, where it
+    used to be accepted and then silently ignored.
+  - **A leaf stands for itself.** `leaves_beneath` is bounded against a
+    parent cycle, and a subtree resolving to no leaves falls back to the
+    task itself so its edges stay in the graph rather than vanishing.
 - **A malformed graph is a state to survive, not an error to refuse.**
   Two peers can concurrently close a dependency loop or re-parent into
   a cycle, so the renderer degrades rather than throwing.
