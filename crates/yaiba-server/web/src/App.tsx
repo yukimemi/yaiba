@@ -2405,6 +2405,12 @@ export function App() {
         tasks={data.tasks}
         visibleCount={visible.length}
         criticalCount={data.schedule.critical_path.length}
+        overdueCount={
+          data.tasks.filter(
+            (task) =>
+              task.status !== "done" && bySchedule.get(task.id)?.overdue,
+          ).length
+        }
         nodeId={data.node_id}
         filter={filter}
         projectEnd={data.schedule.end}

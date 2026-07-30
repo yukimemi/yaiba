@@ -25,6 +25,8 @@ interface Props {
   tasks: Task[];
   visibleCount: number;
   criticalCount: number;
+  /** Open tasks whose computed finish is past their due date. */
+  overdueCount: number;
   nodeId: string;
   filter: string;
   projectEnd: string;
@@ -78,6 +80,7 @@ export function Hud({
   tasks,
   visibleCount,
   criticalCount,
+  overdueCount,
   nodeId,
   filter,
   projectEnd,
@@ -267,6 +270,11 @@ export function Hud({
       <span className="hud__stat">
         {t("crit")} <b>{criticalCount}</b>
       </span>
+      {overdueCount > 0 && (
+        <span className="hud__stat hud__stat--overdue">
+          {t("overdue")} <b>{overdueCount}</b>
+        </span>
+      )}
       <span className="hud__stat">
         {t("ends")} <b>{projectEnd}</b>
       </span>
