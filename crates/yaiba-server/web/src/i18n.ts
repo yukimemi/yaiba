@@ -345,6 +345,11 @@ const JA: Record<string, string> = {
   "jump to one — or back to now": "日付へ跳ぶ — 現在にも戻れます",
   "nest under the row above / move out": "上の行の下へ入れる / 外へ出す",
   "fold one level shallower / deeper": "1階層 浅く / 深く畳む",
+  // 出て rather than 戻って: the cursor moves to the parent, which is a
+  // direction in the tree, not a step back through history.
+  "open this fold / close it, or step out and close":
+    "この行を開く / 閉じる（葉なら親へ出て閉じる）",
+  "fold / unfold — arrows too": "畳む / 開く — 矢印キーも同じ",
   "fold to projects only / unfold all": "プロジェクトだけに / すべて展開",
   "toggle this row · zo open · zc close": "この行を開閉 · zo 開く · zc 閉じる",
   "focus this subtree / show everything": "この部分木に絞る / すべて表示",

@@ -16,7 +16,7 @@
  * whose name says what depending on it in CI would be worth.
  */
 
-import { collapsedForDepth, visibleTasks } from "../src/filter.ts";
+import { collapsedForDepth, foldStep, visibleTasks } from "../src/filter.ts";
 import type { Scheduled, Task } from "../src/types.ts";
 
 interface Row {
@@ -154,6 +154,51 @@ check(
     : "no",
   "yes",
 );
+
+// ---- what `h` and `l` decide (#82) ---------------------------------
+//
+// Same argument as everything above: this is a pure state transition, so
+// leaving it to a keyboard nobody had that round would be leaving the one
+// rule in this file that only a human can check.
+
+const rowOf = (id: string) => {
+  const r = ROWS.find((x) => x.id === id)!;
+  return { id: r.id, summary: r.summary, parent: r.parent };
+};
+
+/** `<collapsed after> | <cursor after>`, or `-` when nothing happens. */
+function step(direction: "open" | "close", id: string, collapsed: Set<string>): string {
+  const out = foldStep(direction, rowOf(id), collapsed);
+  if (!out) return "-";
+  return `${[...out.collapsed].sort().join(",")} | ${out.cursor}`;
+}
+
+// `l` opens a closed summary, and does nothing else. Never a descent.
+check("l opens a closed summary", step("open", "A", zM), "A1,B,B1 | A");
+check("l on an open summary does nothing", step("open", "A", new Set()), "-");
+check("l on a leaf does nothing", step("open", "A1a", new Set()), "-");
+
+// `h` closes where you stand when there is something to close.
+check("h closes an open summary", step("close", "A", new Set()), "A | A");
+
+// The behaviour #82 asked to be deliberate: a leaf steps out to the
+// parent and closes it, so `h` is usable as "back out of here".
+check("h on a leaf closes the parent and moves there", step("close", "A1a", new Set()), "A1 | A1");
+// And a summary that is already closed does the same, rather than nothing.
+check(
+  "h on a closed summary steps out too",
+  step("close", "A1", new Set(["A1"])),
+  "A,A1 | A",
+);
+// A project has no parent to back out to.
+check("h at the top level does nothing", step("close", "A", new Set(["A"])), "-");
+
+// The step is a value, not a mutation — the handler sets state from it,
+// so a returned set that aliased the old one would make React skip the
+// render and the key would look dead.
+const before = new Set(["A1"]);
+foldStep("close", rowOf("A1a"), before);
+check("foldStep does not mutate what it is given", [...before].join(","), "A1");
 
 if (failures) {
   console.error(`\nfolds: ${failures} check(s) failed`);

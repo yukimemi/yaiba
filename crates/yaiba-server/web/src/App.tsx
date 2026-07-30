@@ -28,6 +28,7 @@ import {
   collapsedForDepth,
   dropOrder,
   effectiveParent,
+  foldStep,
   stepOrder,
   visibleTasks,
   type SortKey,
@@ -1806,6 +1807,32 @@ export function App() {
           else if (wantClose || cmd === "za") next.add(current.id);
           return next;
         });
+        break;
+      }
+      // One key each, like every other motion in this list. `h` and `l`
+      // were free — they exist in NORMALIZE only so the arrow keys reach
+      // the same cases, which means the arrows fold too, and that is the
+      // behaviour a tree UI trains your hands for. A count has no meaning
+      // on a fold, so it is ignored rather than applied.
+      //
+      // The decision itself lives in `foldStep`, a pure function, so it
+      // can be asserted without a browser — see `scripts/check-folds.ts`.
+      // These arms only apply what it returns.
+      case "h":
+      case "l": {
+        if (!current) break;
+        const step = foldStep(
+          cmd === "l" ? "open" : "close",
+          {
+            id: current.id,
+            summary: bySchedule.get(current.id)?.summary ?? false,
+            parent: cursorParent,
+          },
+          collapsed,
+        );
+        if (!step) break;
+        setCollapsed(step.collapsed);
+        if (step.cursor !== current.id) putCursor(step.cursor);
         break;
       }
       case "zf":
