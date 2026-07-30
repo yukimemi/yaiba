@@ -182,6 +182,20 @@ require handing over the keybindings too:
 | click a date cell | pick that date off a calendar (`gd` shows the columns) |
 | `◀` `▶` beside the date | move the reference date a day |
 | click the date | jump to one, or back to now |
+| drag the divider | give the list more of the width, or less |
+
+The divider between the list and the timeline is draggable — the line you
+see is the thing you grab, with a few pixels either side so it is
+catchable. Double-click puts it back to the default. The width is
+remembered like the theme is, so it survives a reload, and `:split 40`
+sets it by number for anyone who would rather not aim. Grabbing it also
+leaves it holding the keyboard, so `←` and `→` — or `h` and `l` — move it
+2% at a time, and `Home` puts it back. That the mouse is what hands it the
+keyboard is not an oversight: `tab` is spoken for by the layout cycle, so
+there is no keying your way over to the divider without touching it first.
+Neither side can be dragged below 15%: a pane squeezed to nothing reads as
+a bug, and there is no grip left to pull it back by. `tab` is how you
+actually hide one.
 
 Dragging a bar pins its start: a task placed by its dependencies gets an
 explicit date, which is what makes the gesture survive the next

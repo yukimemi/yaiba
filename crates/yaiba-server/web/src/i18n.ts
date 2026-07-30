@@ -174,6 +174,7 @@ const JA: Record<string, string> = {
   "office mode": "オフィスモード",
   "neon mode": "ネオンモード",
   "dates — click a cell to pick one": "日付列 — セルをクリックで選べます",
+  "split at {n}%": "分割 {n}%",
   "compact columns": "コンパクト表示",
   "filter: {q}": "絞込: {q}",
   "filter cleared": "絞込を解除しました",
@@ -244,6 +245,7 @@ const JA: Record<string, string> = {
   "usage: :zoom {list}": "使い方: :zoom {list}",
   "usage: :cols {list}  (bare :cols toggles)":
     "使い方: :cols {list}（引数なしで切替）",
+  "usage: :split [percent]": "使い方: :split [パーセント]",
   "usage: :sort {list}": "使い方: :sort {list}",
   "usage: :new <title>": "使い方: :new <タイトル>",
   "usage: :dur <days ≥ 1>": "使い方: :dur <1以上の日数>",
@@ -367,6 +369,19 @@ const JA: Record<string, string> = {
   "set it without the panel — bare clears":
     "パネルを使わず指定 — 引数なしで外す",
   "fold a summary": "サマリを畳む",
+  // 境界 rather than 仕切り: it is the line between the two panes, and
+  // that is the word the README uses for it too.
+  "drag the divider": "境界をドラッグ",
+  "resize the split · dbl-click resets":
+    "分割幅を変える · ダブルクリックで既定",
+  // フォーカス, not 選択: the grip takes focus like a control, and the
+  // keys only reach it once it has.
+  "divider, focused": "境界にフォーカス中",
+  "← → or h l move it 2% · Home resets":
+    "← → または h l で 2% ずつ · Home で既定",
+  "the list's percent of the width": "一覧の幅の割合（%）",
+  "drag to resize · double-click to reset":
+    "ドラッグで幅を変更 · ダブルクリックで既定に戻す",
   "edit the title": "タイトルを編集",
   reorder: "並べ替え",
   "move the start date": "開始日を動かす",
