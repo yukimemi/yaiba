@@ -7,7 +7,7 @@ import {
   dateLocked,
   dateValue,
 } from "../dateColumns";
-import { shortLabel } from "../dates";
+import { diffDays, shortLabel } from "../dates";
 import type { SortKey } from "../filter";
 import { t } from "../i18n";
 import type { Scheduled, Task } from "../types";
@@ -374,8 +374,21 @@ export function TaskList({
                       className={`row__meta row__meta--due${
                         sched?.overdue ? " row__meta--overdue" : ""
                       }`}
+                      title={
+                        sched?.overdue
+                          ? t("projected to finish {n}d past its due date", {
+                              n: diffDays(task.due, sched.end),
+                            })
+                          : undefined
+                      }
                     >
                       {shortLabel(task.due)}
+                      {/* How late, not just *that* it is late: the amber
+                          alone says "trouble" but not how much, and the
+                          number is what a triage reads first. Measured
+                          due → computed finish, the same comparison the
+                          `overdue` flag itself is computed from. */}
+                      {sched?.overdue && ` +${diffDays(task.due, sched.end)}d`}
                     </span>
                   )}
                   {/* Fixed width, so a roster reads straight down the

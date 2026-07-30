@@ -224,6 +224,14 @@ body::after {
   font-weight: 500;
 }
 
+/* Amber, like every other overdue signal on screen, and only rendered
+   when the count is non-zero — a permanent `overdue 0` would be noise
+   next to the stats that always have something to say. */
+.hud__stat--overdue,
+.hud__stat--overdue b {
+  color: var(--rust);
+}
+
 /* The reference date is always present, because everything on screen is
    measured from it. At now it is grey chrome you can ignore; viewing the
    past is a mode, and an easy one to forget you are in, so *that* state
@@ -1402,6 +1410,14 @@ button.row__date:focus-visible {
   border-color: var(--rust);
 }
 
+/* The full signal — tint, glow, an amber fill — is only for work still
+   open. A done bar that ran late keeps the amber border as a record,
+   but lighting it up would cry alarm over something already finished. */
+.gantt__bar--overdue:not(.gantt__bar--done) {
+  background: rgba(251, 191, 36, 0.14);
+  box-shadow: 0 0 calc(12px * var(--glow)) rgba(251, 191, 36, 0.28);
+}
+
 .gantt__fill {
   position: absolute;
   inset: 0 auto 0 0;
@@ -1414,6 +1430,10 @@ button.row__date:focus-visible {
 
 .gantt__bar--done .gantt__fill {
   background: rgba(52, 211, 153, 0.3);
+}
+
+.gantt__bar--overdue:not(.gantt__bar--done) .gantt__fill {
+  background: rgba(251, 191, 36, 0.34);
 }
 
 .gantt__label {
@@ -1430,15 +1450,18 @@ button.row__date:focus-visible {
   color: var(--steel);
 }
 
-/* The progress line. Amber so it reads against both the cyan bars and
-   the magenta critical path, and thick enough that the zigzag is the
-   first thing the eye lands on. */
+/* The progress line. Achromatic on purpose: it is a report of deviation,
+   not a status, and the palette's hues are all spoken for — cyan is
+   structure, magenta the critical path, and amber now belongs to overdue
+   alone, which a zigzag through the same rows would drown out. Steel so
+   it still reads against both the cyan bars and the magenta critical
+   path. */
 .gantt__progress-line {
   fill: none;
-  stroke: var(--rust);
+  stroke: var(--steel);
   stroke-width: 1.6;
   stroke-linejoin: round;
-  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.55));
+  filter: drop-shadow(0 0 calc(4px * var(--glow)) rgba(203, 213, 225, 0.4));
 }
 
 .gantt__links {

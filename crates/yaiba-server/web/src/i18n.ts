@@ -64,6 +64,7 @@ const JA: Record<string, string> = {
   only: "限定",
   level: "階層",
   filter: "絞込",
+  overdue: "遅延",
   now: "現在",
   "◐ neon": "◐ ネオン",
   "◑ office": "◑ オフィス",
@@ -101,6 +102,7 @@ const JA: Record<string, string> = {
   due: "期限",
   p: "優",
   "complete / reopen": "完了 / 再開",
+  "projected to finish {n}d past its due date": "期日より {n} 日遅れで終わる見込み",
   "to open a new task": "で新しいタスク",
   "for keys": "でキー一覧",
   // 担当 rather than 担当者: the row shows the name already, so the
