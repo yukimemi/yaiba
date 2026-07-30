@@ -345,6 +345,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/deps", post(add_dep))
         .route("/api/deps/{from}/{to}", axum::routing::delete(remove_dep))
         .route("/api/peers", get(get_peers).post(join_peer))
+        .route("/api/ui", get(get_ui).put(put_ui))
         .route("/api/projects", get(get_projects).post(switch_project))
         .route("/api/projects/new", post(create_project))
         .route(
@@ -685,6 +686,42 @@ async fn join_peer(
         ticket: Some(sync.ticket().to_string()),
         peers: sync.peer_ids().iter().map(|id| id.to_string()).collect(),
     }))
+}
+
+/// Where the active project's UI state lives in the store.
+///
+/// `meta` rather than the CRDT log, on purpose: folds and filters are how
+/// *this* replica likes to look at the plan, not part of the plan, so they
+/// must not sync to peers. And because `meta` sits in the project's own
+/// database, the state is per-project and survives a rename (which keeps
+/// the database) for free.
+const META_UI: &str = "ui";
+
+async fn get_ui(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+    let project = state.active();
+    let store = lock(&project);
+    let saved = store.meta(META_UI)?;
+    // A blob that no longer parses (hand-edited, written by a newer
+    // version) reads as "nothing saved" — the UI state is a convenience,
+    // and losing it must never break the app.
+    let ui = saved
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    Ok(Json(ui))
+}
+
+async fn put_ui(
+    State(state): State<AppState>,
+    Json(ui): Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let text = serde_json::to_string(&ui)
+        .map_err(|e| ApiError::message(StatusCode::BAD_REQUEST, e.to_string()))?;
+    let project = state.active();
+    let store = lock(&project);
+    store.set_meta(META_UI, &text)?;
+    // No `notify` bump: `meta` is not part of the CRDT log, so there is
+    // nothing for the sync layer to push.
+    Ok(Json(ui))
 }
 
 /// Read the store and fold in a freshly computed schedule.
@@ -1162,5 +1199,49 @@ mod handler_tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    /// The UI state starts empty, survives a round-trip, and belongs to
+    /// the project it was saved under — a switch serves the other
+    /// project's blob, not this one's.
+    #[tokio::test]
+    async fn ui_state_is_per_project() {
+        let app = server(&["work", "personal"]);
+        let (status, body) = send(app.clone(), "GET", "/api/ui", None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body, "{}");
+
+        let (status, body) = send(
+            app.clone(),
+            "PUT",
+            "/api/ui",
+            Some(r#"{"collapsed":["a"],"filter":"tag:dev"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let (status, body) = send(
+            app.clone(),
+            "POST",
+            "/api/projects",
+            Some(r#"{"name":"personal"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, body) = send(app.clone(), "GET", "/api/ui", None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body, "{}", "{body}");
+
+        let (status, body) = send(
+            app.clone(),
+            "POST",
+            "/api/projects",
+            Some(r#"{"name":"work"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, body) = send(app, "GET", "/api/ui", None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(r#""filter":"tag:dev""#), "{body}");
     }
 }

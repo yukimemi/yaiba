@@ -40,6 +40,11 @@ import { modeHint, type Mode } from "./mode";
 import { t } from "./i18n";
 import { applyLang, initialLang, type Lang } from "./lang";
 import { applyTheme, initialTheme, type Theme } from "./theme";
+import {
+  initialViewState,
+  saveViewState,
+  type ProjectUiState,
+} from "./uiState";
 import { applyOps, inversePatch, type Op, type Step } from "./ops";
 import type { AppData, Dep, Status, Task, TaskPatch } from "./types";
 
@@ -154,10 +159,16 @@ export function App() {
    */
   const [projectError, setProjectError] = useState<string | null>(null);
 
-  const [view, setView] = useState<View>("split");
-  const [zoom, setZoom] = useState<Zoom>("day");
+  /**
+   * The global half of the persisted UI state (see uiState.ts), read once
+   * at mount so a reload reopens with the view, zoom, columns and sort it
+   * was closed with. Saved by the effect further down on every change.
+   */
+  const [savedView] = useState(initialViewState);
+  const [view, setView] = useState<View>(savedView.view);
+  const [zoom, setZoom] = useState<Zoom>(savedView.zoom);
   /** Which columns the list carries — `:dates` / `gd` swaps them. */
-  const [columns, setColumns] = useState<Columns>("compact");
+  const [columns, setColumns] = useState<Columns>(savedView.columns);
   /**
    * The date cell the calendar is open over.
    *
@@ -185,7 +196,7 @@ export function App() {
     anchor: Anchor;
   } | null>(null);
   const [filter, setFilter] = useState("");
-  const [sort, setSort] = useState<SortKey>("manual");
+  const [sort, setSort] = useState<SortKey>(savedView.sort);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   /** The language the weekday names are written in — nothing else. */
   const [lang, setLang] = useState<Lang>(initialLang);
@@ -209,6 +220,13 @@ export function App() {
    * becoming a dead key, which is the trap this whole change is about.
    */
   const foldLevelRef = useRef<number | null>(null);
+  /**
+   * Set once the active project's saved UI state has been applied (or
+   * failed to load). Saves are gated on it: writing the mount-time
+   * defaults over the saved blob before the GET answered would turn every
+   * reload into a reset — the bug the whole mechanism exists to fix.
+   */
+  const uiLoadedRef = useRef(false);
   /** Show only this subtree — :only / zf. */
   const [focus, setFocus] = useState<string | null>(null);
   /**
@@ -385,9 +403,73 @@ export function App() {
     }
   }, []);
 
+  /**
+   * Apply the active project's saved UI state, field by field, so a blob
+   * from another version only loses the fields it doesn't have.
+   */
+  const applyProjectUi = useCallback((ui: ProjectUiState) => {
+    if (ui.filter !== undefined) setFilter(ui.filter);
+    if (ui.collapsed) setCollapsed(new Set(ui.collapsed));
+    if (ui.focus !== undefined) setFocus(ui.focus);
+    if (ui.foldLevel !== undefined) foldLevelRef.current = ui.foldLevel;
+  }, []);
+
+  /**
+   * Fetch and apply the active project's saved UI state, then open the
+   * gate for saves. Called at mount and after every project switch —
+   * anywhere the state on screen was just reset to the defaults.
+   */
+  const loadProjectUi = useCallback(async () => {
+    try {
+      applyProjectUi(await api.getUi());
+    } catch {
+      // A dropped connection or an older server keeps the defaults — the
+      // state is a convenience, never a requirement for the app to work.
+    }
+    uiLoadedRef.current = true;
+  }, [applyProjectUi]);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadProjectUi();
+  }, [load, loadProjectUi]);
+
+  // The global half of the persisted UI state — written on every change,
+  // read once at mount (see `savedView`).
+  useEffect(() => {
+    saveViewState({ view, zoom, columns, sort });
+  }, [view, zoom, columns, sort]);
+
+  /**
+   * The per-project half, debounced: a burst of `zm`/`zr` is one write,
+   * not one per key. Gated both at scheduling and inside the timer — a
+   * write armed just before a project switch must not land this project's
+   * state in the next one's database.
+   */
+  useEffect(() => {
+    if (!uiLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      if (!uiLoadedRef.current) return;
+      void api
+        .putUi({
+          collapsed: [...collapsed],
+          focus,
+          filter,
+          foldLevel: foldLevelRef.current,
+        })
+        .catch(() => undefined);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [collapsed, focus, filter]);
+
+  /**
+   * Drop a focus whose root is gone — a peer's delete since the state was
+   * saved. Showing the subtree of a task that no longer exists means
+   * showing nothing, which reads as the app having lost the plan.
+   */
+  useEffect(() => {
+    if (focus && data && !data.tasks.some((t) => t.id === focus)) setFocus(null);
+  }, [focus, data]);
 
   // Peers merge in the background, so the local view has to re-read.
   // Pausing while typing keeps a refresh from yanking the row you're
@@ -449,9 +531,12 @@ export function App() {
     // your filter and folds: an <enter> straight out of the palette is a
     // no-op, not a reset.
     if (name === projects.active) return;
+    // Close the save gate before the server moves: a write racing the
+    // switch would land this project's state in the next one's database.
+    uiLoadedRef.current = false;
     void api
       .switchProject(name)
-      .then((info) => {
+      .then(async (info) => {
         setProjects(info);
         putCursor(null);
         putAnchor(null);
@@ -465,9 +550,12 @@ export function App() {
         foldLevelRef.current = null;
         setCollapsed(new Set());
         setFilter("");
-        return load();
+        await load();
+        // The incoming project's own saved state replaces those defaults,
+        // and reopens the save gate once it is applied.
+        await loadProjectUi();
+        say(t("project · {name}", { name }), "ok");
       })
-      .then(() => say(t("project · {name}", { name }), "ok"))
       .catch((e: Error) => failProject(e));
   };
 
@@ -504,7 +592,10 @@ export function App() {
     foldLevelRef.current = null;
     setCollapsed(new Set());
     setFilter("");
-    void load().then(() => say(note, "ok"));
+    uiLoadedRef.current = false;
+    void load()
+      .then(() => loadProjectUi())
+      .then(() => say(note, "ok"));
   };
 
   const createProject = (name: string) => {
