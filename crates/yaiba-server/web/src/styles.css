@@ -1436,6 +1436,21 @@ button.row__date:focus-visible {
   background: rgba(251, 191, 36, 0.34);
 }
 
+/* Late *and* on the critical path: both signals stay up. The border was
+   already amber for this combo before overdue grew a tint and a glow,
+   so the border keeps carrying overdue and the body stays magenta —
+   letting either rule win outright would hide one of the two things the
+   bar has to say. */
+.gantt__bar--critical.gantt__bar--overdue:not(.gantt__bar--done) {
+  background: rgba(244, 114, 182, 0.14);
+  box-shadow: 0 0 calc(12px * var(--glow)) rgba(244, 114, 182, 0.28);
+}
+
+.gantt__bar--critical.gantt__bar--overdue:not(.gantt__bar--done)
+  .gantt__fill {
+  background: rgba(244, 114, 182, 0.34);
+}
+
 .gantt__label {
   position: absolute;
   top: 3px;

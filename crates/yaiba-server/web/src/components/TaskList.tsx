@@ -234,6 +234,13 @@ export function TaskList({
         <div className="rows">
           {tasks.map((task, index) => {
             const sched = bySchedule.get(task.id);
+            // Days past the due date, measured due → computed finish — the
+            // same comparison the `overdue` flag itself is computed from.
+            // How late, not just *that* it is late: the amber alone says
+            // "trouble" but not how much, and the number is what a triage
+            // reads first.
+            const lateDays =
+              sched?.overdue && task.due ? diffDays(task.due, sched.end) : 0;
             const isCursor = index === cursor && draftIndex < 0;
             const classes = [
               "row",
@@ -375,20 +382,15 @@ export function TaskList({
                         sched?.overdue ? " row__meta--overdue" : ""
                       }`}
                       title={
-                        sched?.overdue
+                        lateDays > 0
                           ? t("projected to finish {n}d past its due date", {
-                              n: diffDays(task.due, sched.end),
+                              n: lateDays,
                             })
                           : undefined
                       }
                     >
                       {shortLabel(task.due)}
-                      {/* How late, not just *that* it is late: the amber
-                          alone says "trouble" but not how much, and the
-                          number is what a triage reads first. Measured
-                          due → computed finish, the same comparison the
-                          `overdue` flag itself is computed from. */}
-                      {sched?.overdue && ` +${diffDays(task.due, sched.end)}d`}
+                      {lateDays > 0 && ` +${lateDays}d`}
                     </span>
                   )}
                   {/* Fixed width, so a roster reads straight down the
