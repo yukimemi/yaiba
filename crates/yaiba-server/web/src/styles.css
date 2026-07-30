@@ -384,6 +384,38 @@ body::after {
   flex: 1;
 }
 
+/* The divider, made grabbable.
+
+   It straddles the list pane's own `border-right` rather than replacing
+   it: 7px wide with 6px of negative margin, so it costs the layout
+   nothing and the line you see is still the border. Same trade the
+   dependency arrows make with an 11px transparent stroke over a 1px
+   path — a 1px target is not something a user can be asked to hit.
+
+   `z-index` because both panes scroll: without it the grip sits under
+   whatever the list happens to have painted at its right edge. */
+.panes__grip {
+  flex: none;
+  width: 7px;
+  margin: 0 -3px 0 -4px;
+  z-index: 5;
+  cursor: col-resize;
+  background: transparent;
+  /* Or a drag on a touchscreen scrolls the pane instead of moving the
+     divider. */
+  touch-action: none;
+}
+
+/* Only on the way in, and while it is being used. A divider that is
+   always lit reads as a third pane; one that never is cannot be found. */
+.panes__grip:hover,
+.panes__grip:focus-visible,
+.panes__grip--dragging {
+  background: var(--edge);
+  outline: none;
+  box-shadow: 0 0 calc(8px * var(--glow)) rgba(34, 211, 238, 0.5);
+}
+
 /* ---- task rows --------------------------------------------------- */
 
 /* No padding at the top or the sides: row N here must line up with row
@@ -520,11 +552,32 @@ body::after {
   color: var(--edge);
 }
 
+/* The title is the flexible column, so every pixel the others want comes
+   out of it — and a floor is what stops that from taking all of them.
+
+   `min-width` has to be *some* override: a flex item defaults to
+   `auto`, which refuses to shrink below its content and so kills the
+   ellipsis. It was `0`, which allows the ellipsis but also allows
+   nothing at all, and with `gd`'s columns up that is exactly what
+   happened — narrow the split to its 15% floor and the title measured
+   0px wide while `owner` kept 86 and each date column kept 43. A task
+   list showing everything about four rows except which rows they are.
+
+   12ch, the owner column's width, because the two are the same kind of
+   answer to the same question: enough to tell one row from another.
+   `ch` and not `em`, so it is a count of the monospace cells the title
+   is drawn in — which means a Japanese title gets six characters rather
+   than twelve, each being two cells wide. Checked, and six is still a
+   title you recognise: スケジューラ… .
+
+   Below the floor the pane scrolls, which is the right thing to give up
+   — the metadata is what you went looking for, the title is how you
+   know where you are, and the title reads first in the row anyway. */
 .row__title {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 0;
+  min-width: 12ch;
 }
 
 .row--done .row__title {

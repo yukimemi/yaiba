@@ -66,6 +66,8 @@ const groups = (): Group[] => [
       ["click +", t("new task below, at this level")],
       ["click [ ]", t("complete / reopen")],
       ["click ▾", t("fold a summary")],
+      [t("drag the divider"), t("resize the split · dbl-click resets")],
+      [t("divider, focused"), t("← → or h l move it 2% · Home resets")],
       ["dbl-click", t("edit the title")],
       ["click owner", t("pick who it belongs to — in :dates")],
       ["drag row", t("reorder")],
@@ -106,6 +108,7 @@ const groups = (): Group[] => [
       [":f ⟨q⟩", "tag:dev, @yuki / owner:yuki, unassigned, open, crit"],
       [":sort ⟨k⟩", "manual, due, prio, start, title, owner"],
       [":zoom ⟨z⟩", "day, week, month"],
+      [":split ⟨n⟩", t("the list's percent of the width")],
     ],
   },
   {

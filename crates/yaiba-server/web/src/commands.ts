@@ -45,6 +45,8 @@ export interface UiPatch {
   view?: View;
   /** `"toggle"` flips between the two — what bare `:dates` and `gd` do. */
   columns?: Columns | "toggle";
+  /** The list's percent of the split view — `:split 40` and the grip. */
+  listWidth?: number;
   /** Show only this subtree; null clears the focus. */
   focus?: string | null;
   /** Hide anything deeper than this; null shows every level. */
@@ -334,8 +336,19 @@ export function runCommand(
       return { ui: { help: true } };
     case "list":
     case "gantt":
-    case "split":
       return { ui: { view: head as View } };
+    // `:split` is the view; `:split 40` is the view *and* where it
+    // divides. One word for one thing you are asking for — "show me both,
+    // like this" — rather than a second command that only makes sense
+    // after the first.
+    case "split": {
+      if (!arg) return { ui: { view: "split" } };
+      const percent = Number(arg.replace(/%$/, ""));
+      if (!Number.isFinite(percent)) {
+        return { error: t("usage: :split [percent]") };
+      }
+      return { ui: { view: "split", listWidth: percent } };
+    }
     case "view": {
       if (!VIEWS.includes(arg as View)) {
         return { error: t("usage: :view {list}", { list: VIEWS.join("|") }) };

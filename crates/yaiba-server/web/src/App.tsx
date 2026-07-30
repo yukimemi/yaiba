@@ -23,6 +23,7 @@ import { Help } from "./components/Help";
 import { ProjectPalette } from "./components/ProjectPalette";
 import { Hud } from "./components/Hud";
 import { OwnerPicker } from "./components/OwnerPicker";
+import { SplitGrip } from "./components/SplitGrip";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
 import { addDays, toISO } from "./dates";
@@ -39,6 +40,7 @@ import {
 import { modeHint, type Mode } from "./mode";
 import { t } from "./i18n";
 import { applyLang, initialLang, type Lang } from "./lang";
+import { applySplit, clampSplit, initialSplit } from "./split";
 import { applyTheme, initialTheme, type Theme } from "./theme";
 import { applyOps, inversePatch, type Op, type Step } from "./ops";
 import type { AppData, Dep, Status, Task, TaskPatch } from "./types";
@@ -158,6 +160,14 @@ export function App() {
   const [zoom, setZoom] = useState<Zoom>("day");
   /** Which columns the list carries — `:dates` / `gd` swaps them. */
   const [columns, setColumns] = useState<Columns>("compact");
+  /**
+   * The list's share of the split, as a percent.
+   *
+   * Held here only so `:split n` and the grip agree on a number and it
+   * survives a reload; the *width* is a CSS variable that `applySplit`
+   * writes, which is what lets a drag move the divider without a render.
+   */
+  const [listWidth, setListWidth] = useState(initialSplit);
   /**
    * The date cell the calendar is open over.
    *
@@ -1166,6 +1176,15 @@ export function App() {
 
   const applyUi = useCallback((ui: UiPatch) => {
     if (ui.view) setView(ui.view);
+    // `:split 40` is both: the view, from `ui.view` above, and the width.
+    // `applySplit` clamps, so the message reports what was actually set
+    // rather than what was typed.
+    if (ui.listWidth !== undefined) {
+      const next = clampSplit(ui.listWidth);
+      applySplit(next);
+      setListWidth(next);
+      say(t("split at {n}%", { n: next }));
+    }
     if (ui.focus !== undefined) setFocus(ui.focus);
     if (ui.asof !== undefined) setReferenceDate(ui.asof);
     if (ui.theme) {
@@ -2368,6 +2387,12 @@ export function App() {
             onEditTitle={onEditTitle}
             onDropRow={onDropRow}
           />
+        )}
+        {/* Only in split: with one pane there is nothing to divide, and a
+            grip against the window edge would have no room to be dragged
+            back from. */}
+        {view === "split" && (
+          <SplitGrip percent={listWidth} onCommit={setListWidth} />
         )}
         {view !== "list" && (
           <Gantt
