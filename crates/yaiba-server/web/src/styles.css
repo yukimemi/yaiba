@@ -513,8 +513,12 @@ body::after {
   color: var(--edge);
 }
 
+/* 1ch, like the fold beside it, because the heading row draws a space
+   here where a real row draws `▸` — and a cell sized by its content is a
+   cell that disagrees with the row above it. */
 .row__caret {
   flex: none;
+  width: 1ch;
   color: transparent;
 }
 
@@ -523,8 +527,12 @@ body::after {
   text-shadow: 0 0 calc(8px * var(--glow)) var(--edge);
 }
 
+/* 3ch: the width of `[ ]`, which the `st` heading over it does not have.
+   Same rule as the caret — the heading and the row have to agree, and
+   the box is the wider of the two. */
 .row__box {
   flex: none;
+  width: 3ch;
   color: var(--ash);
 }
 
@@ -552,16 +560,44 @@ body::after {
   color: var(--edge);
 }
 
-/* The title is the flexible column, so every pixel the others want comes
-   out of it — and a floor is what stops that from taking all of them.
+/* The one flexible cell in the row, and everything that varies in length
+   lives inside it: the title, the owner chip, the tags, the percent, the
+   child count, `◆`, the due date. It is what makes the cells after it
+   columns — they start at the same offset on every row because the whole
+   variable run is one box wide, whatever it happens to contain.
 
-   `min-width` has to be *some* override: a flex item defaults to
-   `auto`, which refuses to shrink below its content and so kills the
-   ellipsis. It was `0`, which allows the ellipsis but also allows
-   nothing at all, and with `gd`'s columns up that is exactly what
-   happened — narrow the split to its 15% floor and the title measured
-   0px wide while `owner` kept 86 and each date column kept 43. A task
-   list showing everything about four rows except which rows they are.
+   `min-width: 0` for the same reason the title needs it below: a flex
+   item defaults to refusing to shrink below its content, and here that
+   would push the columns off the row again the moment a row grew a
+   third tag.
+
+   `overflow: hidden` is the clip that makes the promise keepable. When
+   this box is smaller than the run inside it, the tail of the run is
+   what disappears — deliberately, since it is a gloss on the row, and
+   the columns are what a reader was scanning down. */
+.row__lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* `flex: 1` inside the wrapper means what it meant on the row: the title
+   takes the slack, so the annotations ride at the far end of it. The
+   wrapper spans exactly the space the title used to claim, which is why
+   nothing moves at a normal width — the only change is where the give
+   runs out.
+
+   And a floor on how much it can give, because the alternative is
+   giving all of it. `min-width` has to be *some* override: the flex
+   default of `auto` refuses to shrink below the content and so kills
+   the ellipsis. It was `0`, which allows the ellipsis but also allows
+   nothing at all, and with `gd`'s columns up that is what happened —
+   narrow the split to its 15% floor and the title measured 0px wide
+   while `owner` kept 86 and each date column kept 43. A task list
+   showing everything about four rows except which rows they are.
 
    12ch, the owner column's width, because the two are the same kind of
    answer to the same question: enough to tell one row from another.
