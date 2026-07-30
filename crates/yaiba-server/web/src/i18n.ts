@@ -110,7 +110,10 @@ const JA: Record<string, string> = {
   "assigned to {who}": "担当: {who}",
   owner: "担当",
   "who owns it": "このタスクの担当者",
-  "nobody has taken it — :assign ⟨name⟩": "担当なし — :assign ⟨名前⟩",
+  // The cell is a button now, so the tooltip no longer has to name the
+  // command that was the only way in — clicking it *is* the way in.
+  "nobody has taken it yet": "担当が決まっていません",
+  "new task below, at this level — o": "同じ階層に下へ追加 — o",
   "no tasks yet.": "まだタスクがありません。",
   "nothing matches this filter.": "この絞り込みに一致するものがありません。",
 
@@ -134,6 +137,15 @@ const JA: Record<string, string> = {
   "next month — ]": "次の月 — ]",
   today: "今日",
   clear: "消去",
+
+  // ---- the owner panel -------------------------------------------
+  // 1語 rather than 空白なし: the rule is what a name *is*, not what it
+  // may not contain, and the affirmative form is shorter on a line that
+  // also has to carry two key hints.
+  "filter, or a name that is new": "絞り込み、または新しい名前",
+  "add @{name}": "@{name} を追加",
+  "one word · ⏎ commit · ⌫ clear · esc close":
+    "1語 · ⏎ 確定 · ⌫ 担当を外す · esc 閉じる",
 
   // ---- the status line, per mode ---------------------------------
   "j/k move · o new · x done · D link · ? help":
@@ -312,6 +324,7 @@ const JA: Record<string, string> = {
   "DATE PICKER": "日付ピッカー",
   PEERS: "ピア",
   PROJECTS: "プロジェクト",
+  OWNER: "担当",
   // The colon is kept: these four groups are what you type on the `:`
   // line, and the heading says so before the first row does.
   ": COMMANDS": ": コマンド",
@@ -343,6 +356,16 @@ const JA: Record<string, string> = {
   "date columns ⇄ compact": "日付列 ⇄ コンパクト",
   "office mode ⇄ neon mode": "オフィス ⇄ ネオン",
   "put the cursor on a row": "その行にカーソルを置く",
+  "new task below, at this level": "同じ階層に下へ追加",
+  // 担当欄 rather than just 担当: this row names the *thing you click*,
+  // and the panel's own heading two rows down is the plain 担当.
+  "pick who it belongs to — in :dates": "担当欄をクリックで選ぶ — :dates 時",
+  "open the owner panel": "担当パネルを開く",
+  "the same panel, from the column": "同じパネルを列から開く",
+  "filter, or write a name that is new": "絞り込み、または新しい名前を入力",
+  "walk the names in use": "使われている名前を移動",
+  "set it without the panel — bare clears":
+    "パネルを使わず指定 — 引数なしで外す",
   "fold a summary": "サマリを畳む",
   "edit the title": "タイトルを編集",
   reorder: "並べ替え",

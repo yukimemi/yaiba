@@ -42,6 +42,14 @@ interface Props {
   picking: { id: string; field: DateField } | null;
   /** Click a date cell to open the calendar over it. */
   onOpenDate: (id: string, field: DateField, anchor: Anchor) => void;
+  /** The row whose owner panel is open, lit for the same reason. */
+  pickingOwner: string | null;
+  /** Click the owner cell to pick who it belongs to. */
+  onOpenOwner: (id: string, anchor: Anchor) => void;
+  /** Click the `+` on the cursor row for a sibling below it — what `o` does. */
+  onNewBelow: (id: string) => void;
+  /** Click the empty pane's prompt for the very first task. */
+  onNewFirst: () => void;
   /** Rows folded individually, so the marker can show open vs closed. */
   collapsed: Set<string>;
   paneRef: React.RefObject<HTMLDivElement | null>;
@@ -83,6 +91,10 @@ export function TaskList({
   columns,
   picking,
   onOpenDate,
+  pickingOwner,
+  onOpenOwner,
+  onNewBelow,
+  onNewFirst,
   collapsed,
   paneRef,
   onScroll,
@@ -158,6 +170,9 @@ export function TaskList({
             </span>
           ))}
         <span className="row__prio">{t("p")}</span>
+        {/* The `+` slot, so the headings sit over the columns they name —
+            this row is the same flex skeleton as a real one. */}
+        <span className="row__new" aria-hidden="true" />
       </div>
     </div>
   );
@@ -206,7 +221,14 @@ export function TaskList({
         <p className="empty">
           {emptyHint}
           <br />
-          <b>o</b> {t("to open a new task")} · <b>?</b> {t("for keys")}
+          {/* Clickable, because this is the one screen where the keyboard
+              is not the *second* way in — with no rows there is nothing to
+              hover a `+` on, so without this an empty project is a dead
+              end for anyone who does not already know `o`. */}
+          <button type="button" className="empty__new" onClick={onNewFirst}>
+            <b>o</b> {t("to open a new task")}
+          </button>{" "}
+          · <b>?</b> {t("for keys")}
         </p>
       ) : (
         <div className="rows">
@@ -357,23 +379,50 @@ export function TaskList({
                     </span>
                   )}
                   {/* Fixed width, so a roster reads straight down the
-                      page — the one thing the chip cannot do. Plain
-                      text, not a button: there is no owner picker, and a
-                      cell that looks editable and isn't is worse than
-                      one that plainly isn't. `:assign` is the editor. */}
+                      page — the one thing the chip cannot do. A button,
+                      like the editable date cells beside it: nothing here
+                      is derived, so there is no value for a recompute to
+                      erase, and the panel it opens is the mouse's only
+                      way to this field. */}
                   {columns === "dates" && (
-                    <span
-                      className={`row__owner-col${
-                        task.assignee ? "" : " row__owner-col--empty"
-                      }`}
+                    <button
+                      type="button"
+                      // How `co` finds this cell to anchor the panel on,
+                      // matching `data-date-cell`.
+                      data-owner-cell={task.id}
+                      className={[
+                        "row__owner-col",
+                        !task.assignee && "row__owner-col--empty",
+                        pickingOwner === task.id && "row__owner-col--picking",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
                       title={
                         task.assignee
                           ? t("assigned to {who}", { who: task.assignee })
-                          : t("nobody has taken it — :assign ⟨name⟩")
+                          : t("nobody has taken it yet")
                       }
+                      onMouseDown={(e) => {
+                        // The row's own handler would move the cursor as
+                        // well; do it here so it lands before the panel
+                        // rather than behind it. And keep the focus this
+                        // mousedown would otherwise take: the panel
+                        // focuses its input as it mounts, the browser's
+                        // default lands *after* that, and the box would
+                        // open unable to hear a key.
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onPick(task.id);
+                        const box = e.currentTarget.getBoundingClientRect();
+                        onOpenOwner(task.id, {
+                          left: box.left,
+                          top: box.top,
+                          bottom: box.bottom,
+                        });
+                      }}
                     >
                       {task.assignee || "·"}
-                    </span>
+                    </button>
                   )}
                   {/* The plan and the record, side by side. A cell is a
                       button because it opens something; the ones the
@@ -441,6 +490,39 @@ export function TaskList({
                       );
                     })}
                   <span className="row__prio">{PRIO[task.priority] ?? ""}</span>
+                  {/* Visible on the cursor row only, the way the project
+                      palette keeps its row actions to one row: on every row
+                      this is a column of plus signs and the eye stops
+                      reading the tasks. It means exactly what `o` means — a
+                      sibling below this one, at this one's level — so the
+                      indent it will land at is the indent you are looking
+                      at.
+
+                      The slot is held open on *every* row, though, the same
+                      way `row__fold` draws a space for a row that cannot
+                      fold. Rendering it only on the cursor row took 2ch and
+                      a gap out of that row's width, so every column to the
+                      left of here sat 22px further left than on its
+                      neighbours — and the whole right-hand side of the list
+                      twitched as `j` moved the cursor down it. In the
+                      `:dates` view, where these are columns of a table,
+                      that is the defect that matters. */}
+                  {isCursor ? (
+                    <button
+                      type="button"
+                      className="row__new"
+                      title={t("new task below, at this level — o")}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onNewBelow(task.id);
+                      }}
+                    >
+                      +
+                    </button>
+                  ) : (
+                    <span className="row__new" aria-hidden="true" />
+                  )}
                 </div>
               </Fragment>
             );

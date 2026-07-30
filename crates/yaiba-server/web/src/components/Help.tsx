@@ -63,9 +63,11 @@ const groups = (): Group[] => [
     title: t("MOUSE"),
     keys: [
       ["click", t("put the cursor on a row")],
+      ["click +", t("new task below, at this level")],
       ["click [ ]", t("complete / reopen")],
       ["click ▾", t("fold a summary")],
       ["dbl-click", t("edit the title")],
+      ["click owner", t("pick who it belongs to — in :dates")],
       ["drag row", t("reorder")],
       ["drag bar", t("move the start date")],
       ["drag ⟩ edge", t("change the duration")],
@@ -126,6 +128,17 @@ const groups = (): Group[] => [
       ["t", t("jump to the reference date")],
       ["x", t("clear it — not the planned end")],
       ["⏎ / esc", t("commit / close")],
+    ],
+  },
+  {
+    title: t("OWNER"),
+    keys: [
+      ["co", t("open the owner panel")],
+      ["click owner", t("the same panel, from the column")],
+      ["type", t("filter, or write a name that is new")],
+      ["↑ / ↓", t("walk the names in use")],
+      ["⏎ / esc", t("commit / close")],
+      [":assign ⟨n⟩", t("set it without the panel — bare clears")],
     ],
   },
   {
