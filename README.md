@@ -326,6 +326,21 @@ gd              date columns <-> compact
 | `start` `end` | the plan · dim means the scheduler placed it, not you |
 | `began` `ended` | the record, quieter, behind a rule |
 
+A task you have not pinned starts **today** — or at the reference date,
+when `:asof` has moved it — and then as late as its predecessors force.
+The floor is a default, not a clamp: `:start` on a past date is a
+statement and is kept. It applies to a task with predecessors too, so a
+chain whose earlier links finished last month does not lay the rest of
+itself out behind you. What actually happened belongs in `began` /
+`ended`; the plan is for work still ahead.
+
+> Upgrading to 0.12 moves rows, once. Before it, an unpinned task sat at
+> the *oldest* date anywhere in the plan, so on a project with history
+> every one of them will jump forward on first load. Nothing is written
+> and no `start` appears — they were never pinned and still are not; the
+> scheduler has simply stopped answering "when can this be done" with
+> "whenever the project began".
+
 Click a cell and a calendar opens over it — `hjkl` or the arrows walk
 the grid, `[` `]` page months, `t` jumps to the reference date, `x`
 clears, `⏎` commits. The keyboard opens the same panel on the cursor
