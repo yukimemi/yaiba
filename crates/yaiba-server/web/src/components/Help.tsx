@@ -102,6 +102,7 @@ const groups = (): Group[] => [
       [":pr ⟨n⟩", t("progress percent")],
       [":tag +a -b", t("add / remove tags")],
       [":assign ⟨n⟩", t("hand it to somebody — bare clears")],
+      [":notes ⟨t⟩", t("attach a note — bare clears · hover the ✎")],
       [":dep ⟨n⟩", t("wait for row n")],
       [":dep ⟨n⟩ +0", t("…and may start the same day")],
       [":undep ⟨n⟩", t("cut that dependency")],

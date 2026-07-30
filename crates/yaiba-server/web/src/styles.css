@@ -752,6 +752,13 @@ button.row__new:focus-visible {
   color: var(--edge-dim);
 }
 
+/* Muted, like the meta run it sits in — see the comment at the marker's
+   call site. */
+.row__note {
+  flex: none;
+  color: var(--ash-dim);
+}
+
 .row__meta {
   flex: none;
   color: var(--ash-dim);

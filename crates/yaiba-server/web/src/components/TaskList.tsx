@@ -387,6 +387,17 @@ export function TaskList({
                     </span>
                   )}
 
+                  {/* A note has no column and no panel, so this marker is
+                      the only sign the row carries one — and hovering it
+                      the only way to read one. Muted like the meta run it
+                      sits in: a note is a gloss, not a signal, and the
+                      palette is spent on things that mean trouble. */}
+                  {task.notes && (
+                    <span className="row__note" title={task.notes}>
+                      ✎
+                    </span>
+                  )}
+
                   {/* Who, then what: the owner sits ahead of the tags
                       because it answers the question the tags cannot,
                       and it takes no colour of its own — the palette is

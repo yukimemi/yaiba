@@ -411,6 +411,8 @@ const JA: Record<string, string> = {
   "progress percent": "進捗（%）",
   "add / remove tags": "タグを追加 / 削除",
   "hand it to somebody — bare clears": "担当を決める（引数なしで外す）",
+  "attach a note — bare clears · hover the ✎":
+    "ノートを付ける（引数なしで消去）· ✎ にホバーで表示",
   "wait for row n": "n 行目を待つ",
   // 同日 carries it: the point is that the two share a calendar
   // square, not that the number is zero.
