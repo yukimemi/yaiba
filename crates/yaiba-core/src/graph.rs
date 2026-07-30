@@ -211,6 +211,14 @@ fn levels(tasks: &[Task]) -> HashMap<TaskId, i64> {
 /// loop once merged, or re-parent tasks into a cycle, so a broken graph
 /// is a state the UI has to survive rather than an error it can refuse.
 pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
+    // The left edge of the drawn window: as far back as anyone ever
+    // pinned, and never later than now.
+    //
+    // This is a question about the *chart*, and emphatically not the
+    // answer to "when can this be done" — see the forward pass, which
+    // anchors on `today` instead. The two were one value once, and every
+    // new task in a long-running project came out months behind the work
+    // actually in flight.
     let project_start = tasks
         .iter()
         .filter_map(|t| t.start)
@@ -245,7 +253,25 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
         if is_summary(id) {
             continue;
         }
-        let mut start = task.start.unwrap_or(project_start);
+        // A task with nothing pinning it starts *now*, not at the oldest
+        // date the project ever touched. `project_start` used to stand
+        // here and it reaches back to the earliest pin anywhere in the
+        // plan, so on any project with history every new task was born
+        // weeks or months behind — above every row actually in flight,
+        // since the list sorts by start.
+        //
+        // The floor applies to a task with predecessors too, and that is
+        // the point rather than a side effect: `max` below keeps the
+        // predecessor's constraint, and the plan for work that has not
+        // happened cannot honestly begin before today. History belongs in
+        // `actual_start` / `actual_end`, which is what those fields are
+        // for. An explicit `start` still wins and may sit in the past —
+        // pinning is a statement, and this is only a default.
+        //
+        // `today` is the reference date, so `:asof` moves this with the
+        // rest of the view instead of leaving one number at wall-clock
+        // now while everything else is computed against a past day.
+        let mut start = task.start.unwrap_or(today);
         for p in preds.get(id).into_iter().flatten() {
             // A dependency on a summary contributes nothing: only leaves
             // carry dates at this point.
@@ -666,5 +692,68 @@ mod tests {
     fn empty_project_is_a_single_day_at_today() {
         let s = schedule(&[], &[], day(4));
         assert_eq!((s.start, s.end), (day(4), day(4)));
+    }
+
+    #[test]
+    fn a_new_task_lands_on_today_not_on_the_projects_oldest_date() {
+        // The case from #85. One task pinned back at day 1, one added
+        // today with nothing pinning it. The new one used to fall to the
+        // oldest pin in the plan and sort above everything in flight.
+        let tasks = vec![task(1, 2, Some(day(1))), task(2, 1, None)];
+        let s = schedule(&tasks, &[], day(20));
+
+        assert_eq!(find(&s, 2).start, day(20), "born at now, not at day 1");
+        assert_eq!(find(&s, 2).end, day(20));
+        // And the *window* still reaches back to the old pin — that is a
+        // different question, and the one `project_start` answers.
+        assert_eq!(s.start, day(1));
+    }
+
+    #[test]
+    fn an_unpinned_successor_is_not_dragged_into_the_past_by_a_finished_chain() {
+        // The sub-question #85 raised: the floor applies to a task with
+        // predecessors too. Its predecessor ended long ago, so "the day
+        // after" is in the past — and a plan for work that has not
+        // happened cannot honestly start there.
+        let tasks = vec![task(1, 2, Some(day(1))), task(2, 1, None)];
+        let s = schedule(&tasks, &[dep(1, 2)], day(20));
+
+        assert_eq!(find(&s, 1).end, day(2));
+        assert_eq!(find(&s, 2).start, day(20), "floored at now, not day 3");
+    }
+
+    #[test]
+    fn a_pinned_start_may_still_sit_in_the_past() {
+        // The floor is a *default*, not a clamp. An explicit date is a
+        // statement, and recording that something began on the 5th has to
+        // survive being read on the 20th.
+        let tasks = vec![task(1, 2, Some(day(5)))];
+        let s = schedule(&tasks, &[], day(20));
+
+        assert_eq!((find(&s, 1).start, find(&s, 1).end), (day(5), day(6)));
+    }
+
+    #[test]
+    fn the_anchor_follows_the_reference_date() {
+        // `today` here is the `:asof` date when one is set, so a past
+        // view places unpinned work at the day being viewed rather than
+        // leaving one number at wall-clock now while everything else is
+        // computed against another.
+        let tasks = vec![task(1, 1, None)];
+        assert_eq!(find(&schedule(&tasks, &[], day(9)), 1).start, day(9));
+        assert_eq!(find(&schedule(&tasks, &[], day(3)), 1).start, day(3));
+    }
+
+    #[test]
+    fn a_chain_of_unpinned_tasks_starts_today_and_runs_forward() {
+        // Nothing pinned anywhere: the whole chain hangs off the anchor,
+        // which is what a project typed from scratch looks like.
+        let tasks = vec![task(1, 2, None), task(2, 1, None), task(3, 1, None)];
+        let s = schedule(&tasks, &[dep(1, 2), dep(2, 3)], day(10));
+
+        assert_eq!((find(&s, 1).start, find(&s, 1).end), (day(10), day(11)));
+        assert_eq!(find(&s, 2).start, day(12));
+        assert_eq!(find(&s, 3).start, day(13));
+        assert_eq!(s.start, day(10), "no pins, so the window opens at now");
     }
 }
