@@ -1451,6 +1451,15 @@ button.row__date:focus-visible {
   background: rgba(244, 114, 182, 0.34);
 }
 
+/* The triple combo re-asserts the summary's solid critical bar — a
+   summary's dates are its children's, so the tint-and-glow treatment
+   above would only blur the one bar that is drawn as a marker rather
+   than a span. The border still goes amber for overdue. */
+.gantt__bar--summary.gantt__bar--critical.gantt__bar--overdue {
+  background: var(--blood);
+  box-shadow: none;
+}
+
 .gantt__label {
   position: absolute;
   top: 3px;
