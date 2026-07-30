@@ -647,6 +647,29 @@ locked-down machine is told to use — does not work at all.
   which broke this rule for one of the three; deciding it by existence is
   what let reachability and a good message stop competing.
 
+### Where UI state is remembered
+
+Two scopes, matching what the project switch already treats as portable.
+Settings that name no task — **view, zoom, columns, sort** — are global,
+in localStorage under `yaiba:view` (`uiState.ts`), the same pattern as
+`yaiba:theme` / `yaiba:lang`. State that names task ids — **folds, focus,
+filter, fold level** — is per-project, in the project database's `meta`
+table behind `GET`/`PUT /api/ui`, so a rename keeps it (same database) and
+it never syncs to a peer (`meta` is not part of the CRDT log; `put_ui`
+deliberately does not bump `notify`).
+
+- **Saves are gated on `uiLoadedRef`, checked twice.** Writing the
+  mount-time defaults before `GET /api/ui` answered would turn every
+  reload into the reset this exists to fix, and a debounced write armed
+  just before a switch would land the outgoing project's state in the
+  incoming one's database — so the gate is closed in `switchTo` *before*
+  the server moves, and re-checked inside the timer callback too.
+- **A restored focus is validated against the task list.** A peer may
+  have deleted its root since the state was saved; showing the subtree of
+  a task that no longer exists renders an empty list, which reads as the
+  app having lost the plan. Folds need no such check — an id in
+  `collapsed` that is gone is simply never matched.
+
 ### Invariants worth knowing before changing the graph
 
 - **Cycles are refused server-side.** `Store::add_dep` calls

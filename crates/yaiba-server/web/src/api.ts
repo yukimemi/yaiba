@@ -1,4 +1,5 @@
 import type { AppData, Dep, NewTask, Task, TaskPatch } from "./types";
+import type { ProjectUiState } from "./uiState";
 
 /**
  * Thrown for any non-2xx response. The server puts a human-readable
@@ -97,6 +98,24 @@ async function projectsRequest(
   return (await res.json()) as ProjectsInfo;
 }
 
+async function uiRequest(init?: RequestInit): Promise<ProjectUiState> {
+  const res = await fetch("/api/ui", {
+    ...init,
+    headers: init?.body ? { "content-type": "application/json" } : undefined,
+  });
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(message, res.status);
+  }
+  return (await res.json()) as ProjectUiState;
+}
+
 export const api = {
   /** Pass a date to see the plan as it stood then. */
   getState: (asof?: string | null) =>
@@ -150,4 +169,8 @@ export const api = {
       { method: "DELETE" },
       `/api/projects/${encodeURIComponent(name)}`,
     ),
+  /** The active project's remembered folds / focus / filter (`{}` when none). */
+  getUi: () => uiRequest(),
+  putUi: (ui: ProjectUiState) =>
+    uiRequest({ method: "PUT", body: JSON.stringify(ui) }),
 };
