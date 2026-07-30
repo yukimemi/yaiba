@@ -77,3 +77,13 @@ jobs:
         # invisible until somebody runs the UI in `ja` and reads every
         # screen.
         run: node scripts/check-i18n.mjs
+
+      - name: Check the folding rules
+        working-directory: crates/yaiba-server/web
+        # The fold state is pure client-side view logic, so `ci.yml` never
+        # sees it and the type-check above passes a filter that hides the
+        # wrong rows just as happily as one that hides the right ones. #80
+        # shipped exactly that way: after `zM` no `za` could open
+        # anything, and nothing was ever going to fail a check. `bun`, not
+        # `node`, because this imports the app's TypeScript to execute it.
+        run: bun scripts/check-folds.ts

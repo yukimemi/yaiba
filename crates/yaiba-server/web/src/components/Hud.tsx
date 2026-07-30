@@ -45,7 +45,16 @@ interface Props {
   onStepAsof: (days: number) => void;
   /** Jump straight to a date, or back to now with null. */
   onSetAsof: (date: string | null) => void;
-  /** Null when every level is shown. */
+  /**
+   * The deepest level currently on screen, or null when nothing is
+   * folded.
+   *
+   * Derived from what is drawn rather than from the depth `zm` / `zM`
+   * were last asked for: those are the same number until a per-row `za`
+   * opens one subtree, and then the remembered depth would be claiming a
+   * view the list is no longer showing. A readout that lies is worse than
+   * no readout.
+   */
   foldLevel: number | null;
   focusTitle: string | null;
   theme: Theme;

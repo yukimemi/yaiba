@@ -298,12 +298,38 @@ export function ancestorsOf(id: TaskId, byId: Map<TaskId, Task>): TaskId[] {
 export interface ViewOptions {
   query: string;
   sort: SortKey;
-  /** Rows the user folded individually. */
+  /**
+   * Every folded summary — the only thing that hides a row.
+   *
+   * There used to be a second axis here, a bare `foldLevel` depth, and
+   * it was applied as a filter on every render: `level > foldLevel`
+   * dropped the row before the `collapsed` check below could speak. So
+   * after `zM` no `za` could open anything, because nothing was in
+   * `collapsed` to remove — the level gate was hiding those rows, and
+   * only `zr` could lift it, for every project at once. The depth now
+   * *expands* into this set when a fold-to-level command runs (see
+   * `foldToDepth`), which leaves one source of truth: the list, the
+   * `▸`/`▾` marker and `za` all read the same thing and cannot disagree.
+   */
   collapsed: Set<TaskId>;
-  /** Hide anything deeper than this. `null` shows every level. */
-  foldLevel: number | null;
   /** Show only this subtree, including the root itself. */
   focus: TaskId | null;
+}
+
+/**
+ * The summaries to fold so that nothing deeper than `depth` is on screen.
+ *
+ * A summary *at* `depth` is folded, because what it hides is its children
+ * at `depth + 1`. So `depth: 0` folds every summary and leaves the
+ * projects, which is what `zM` means.
+ */
+export function collapsedForDepth(
+  scheduled: Scheduled[],
+  depth: number,
+): Set<TaskId> {
+  const out = new Set<TaskId>();
+  for (const s of scheduled) if (s.summary && s.level >= depth) out.add(s.id);
+  return out;
 }
 
 /**
@@ -322,7 +348,7 @@ export function visibleTasks(
   bySchedule: Map<TaskId, Scheduled>,
   options: ViewOptions,
 ): Task[] {
-  const { query, sort, collapsed, foldLevel, focus } = options;
+  const { query, sort, collapsed, focus } = options;
   const byId = new Map(tasks.map((t) => [t.id, t]));
 
   let pool = tasks;
@@ -345,11 +371,9 @@ export function visibleTasks(
   if (sort !== "manual") return flatSorted(pool, bySchedule, sort);
 
   const ordered = treeOrder(pool, focus ? null : null);
-  return ordered.filter((task) => {
-    const level = bySchedule.get(task.id)?.level ?? 0;
-    if (foldLevel !== null && level > foldLevel) return false;
-    return !ancestorsOf(task.id, byId).some((a) => collapsed.has(a));
-  });
+  return ordered.filter(
+    (task) => !ancestorsOf(task.id, byId).some((a) => collapsed.has(a)),
+  );
 }
 
 function flatSorted(
