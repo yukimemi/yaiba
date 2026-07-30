@@ -145,13 +145,21 @@ export function TaskList({
         </span>
       </div>
       {/* Same flex skeleton as a real row, so these labels sit over the
-          columns they name. */}
+          columns they name — which means the indent and fold cells too,
+          empty though they are here. Without them the headings sat one
+          `gap` to the left of the columns as soon as the row overflowed,
+          because a heading row two cells short is not the same skeleton
+          however much this comment says it is. */}
       <div className="row row--head">
         <span className="row__num">#</span>
+        <span className="row__indent" />
+        <span className="row__fold"> </span>
         <span className="row__caret"> </span>
         <span className="row__box">{t("st")}</span>
-        <span className="row__title">{t("task")}</span>
-        <span className="row__meta">{t("due")}</span>
+        <span className="row__lead">
+          <span className="row__title">{t("task")}</span>
+          <span className="row__meta">{t("due")}</span>
+        </span>
         {columns === "dates" && (
           <span className="row__owner-col" title={t("who owns it")}>
             {t("owner")}
@@ -189,24 +197,31 @@ export function TaskList({
       <span className="row__fold"> </span>
       <span className="row__caret">▸</span>
       <span className="row__box">[ ]</span>
-      <input
-        className="row__edit"
-        value={draftValue}
-        autoFocus
-        spellCheck={false}
-        placeholder="new task"
-        onChange={(e) => onDraftChange(e.target.value)}
-        onKeyDown={onDraftKey}
-        // Losing focus mid-entry would strand the row invisible; commit
-        // whatever was typed.
-        onBlur={() =>
-          onDraftKey({
-            key: "Escape",
-            preventDefault: () => {},
-            stopPropagation: () => {},
-          } as React.KeyboardEvent<HTMLInputElement>)
-        }
-      />
+      {/* In the same box a saved row puts its title in, though this row
+          draws no columns after it for anything to misalign with. The
+          skeleton is the claim this file has already been caught not
+          keeping once: a row that says it matches the others has to
+          match them before something downstream depends on it. */}
+      <span className="row__lead">
+        <input
+          className="row__edit"
+          value={draftValue}
+          autoFocus
+          spellCheck={false}
+          placeholder="new task"
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={onDraftKey}
+          // Losing focus mid-entry would strand the row invisible; commit
+          // whatever was typed.
+          onBlur={() =>
+            onDraftKey({
+              key: "Escape",
+              preventDefault: () => {},
+              stopPropagation: () => {},
+            } as React.KeyboardEvent<HTMLInputElement>)
+          }
+        />
+      </span>
     </div>
   );
 
@@ -308,6 +323,37 @@ export function TaskList({
                     {BOX[task.status]}
                   </span>
 
+                  {/* The title and everything that trails it live in one
+                      box, so the columns after it start at the same place
+                      on every row.
+
+                      They did not, and the reason is that this run has no
+                      fixed length: a chip, any number of tags, a percent,
+                      a child count, `◆`, a due date. While the title has
+                      slack it absorbs the difference and the columns look
+                      like columns; once it runs out, each row's columns
+                      sit wherever that row's annotations left them. At a
+                      411px pane with `gd` up, `p` measured 435, 486, 559
+                      and 508 on four rows — and no per-cell placeholder
+                      can fix it, because tags are unbounded.
+
+                      So the variability is contained instead of
+                      counted. Overflow inside here clips the annotations,
+                      which is the right thing to lose: they are a gloss
+                      on the row, and the columns are what you were
+                      reading down.
+
+                      One divergence is left, and on purpose: `row__indent`
+                      sits outside this box, because the checkbox indents
+                      with the row and moving the indent in here would
+                      un-indent it. So once this box has collapsed
+                      entirely, a nested row's columns still sit 1ch per
+                      level right of a root row's. Bounded and legible,
+                      where the annotation run was unbounded — fixing it
+                      means deciding whether depth or alignment gives way
+                      first, which is a design question and not this
+                      one. */}
+                  <span className="row__lead">
                   {editing?.id === task.id ? (
                     <input
                       className="row__edit"
@@ -378,6 +424,7 @@ export function TaskList({
                       {shortLabel(task.due)}
                     </span>
                   )}
+                  </span>
                   {/* Fixed width, so a roster reads straight down the
                       page — the one thing the chip cannot do. A button,
                       like the editable date cells beside it: nothing here
