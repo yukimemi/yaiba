@@ -816,7 +816,10 @@ async fn add_dep(
     let project = state.active();
     let response = {
         let mut store = lock(&project);
-        store.add_dep(dep.from, dep.to)?;
+        // `lag_days` defaults to 1 when the body omits it, so a client
+        // that predates the field posts `{from, to}` and gets the edge it
+        // has always got.
+        store.add_dep(dep.from, dep.to, dep.lag_days)?;
         respond(&store)
     };
     project.notify.notify_one();

@@ -17,13 +17,15 @@ use uuid::Uuid;
 
 use crate::crdt::{
     Entry, FIELD_ACTUAL_END, FIELD_ACTUAL_START, FIELD_ASSIGNEE, FIELD_CREATED, FIELD_DELETED,
-    FIELD_DUE, FIELD_DURATION, FIELD_EXISTS, FIELD_NOTES, FIELD_PARENT, FIELD_POSITION,
+    FIELD_DUE, FIELD_DURATION, FIELD_EXISTS, FIELD_LAG, FIELD_NOTES, FIELD_PARENT, FIELD_POSITION,
     FIELD_PRIORITY, FIELD_PROGRESS, FIELD_START, FIELD_STATUS, FIELD_TITLE, TAG_PREFIX,
     VersionVector, dep_key, log_key, parse_dep_key, parse_log_key, parse_task_key, task_key,
 };
 use crate::graph;
 use crate::hlc::{Clock, Hlc, NodeId};
-use crate::model::{Dep, NewTask, Snapshot, Status, Task, TaskId, TaskPatch};
+use crate::model::{
+    Dep, NewTask, Snapshot, Status, Task, TaskId, TaskPatch, clamp_lag, default_lag,
+};
 use crate::{Error, Result};
 
 /// Gap left between adjacent `position` values so an insert between two
@@ -601,7 +603,15 @@ impl Store {
         self.commit(writes)
     }
 
-    pub fn add_dep(&mut self, from: TaskId, to: TaskId) -> Result<()> {
+    /// Add an edge, or re-state the lag of one that already exists.
+    ///
+    /// Re-adding is deliberately not an error: `dep:<from>><to>` is a
+    /// last-writer-wins row like any other, so writing it again is how a
+    /// lag gets *changed*. That saves `:dep 3 +0` from having to unlink
+    /// first, and it costs nothing — a cycle is the only thing an edge is
+    /// refused for, and re-adding one cannot introduce a cycle that was
+    /// not already there.
+    pub fn add_dep(&mut self, from: TaskId, to: TaskId, lag_days: i64) -> Result<()> {
         if from == to {
             return Err(Error::SelfDep);
         }
@@ -615,7 +625,21 @@ impl Store {
         if graph::would_cycle(&snapshot.deps, from, to) {
             return Err(Error::Cycle { from, to });
         }
-        self.commit(vec![(dep_key(from, to), FIELD_EXISTS.into(), json!(true))])
+        self.commit(vec![
+            (dep_key(from, to), FIELD_EXISTS.into(), json!(true)),
+            // Clamped at both ends rather than refused. Negative would
+            // pull the successor *before* its predecessor's finish in the
+            // forward pass, quietly inverting the edge. Absurdly large
+            // would panic the date arithmetic and take the whole project's
+            // readability with it — the scheduler runs on every read. The
+            // store is the wrong place to argue about either, so it
+            // saturates and `:dep` says no out loud.
+            (
+                dep_key(from, to),
+                FIELD_LAG.into(),
+                json!(clamp_lag(lag_days)),
+            ),
+        ])
     }
 
     pub fn remove_dep(&mut self, from: TaskId, to: TaskId) -> Result<()> {
@@ -998,10 +1022,22 @@ fn materialize(entries: &[Entry]) -> Snapshot {
                 .get(FIELD_EXISTS)
                 .and_then(|e| e.value.as_bool())
                 .unwrap_or(false);
+            // Absent reads as the historical spacing, which is what makes
+            // every edge written before this field existed — and every
+            // edge a replica that has never heard of it writes — schedule
+            // exactly as it always did.
+            // Clamped on the way out as well as in: a peer running any
+            // version can put any number in this row, and the scheduler
+            // has to survive reading it.
+            let lag_days = clamp_lag(field_i64(fields, FIELD_LAG).unwrap_or_else(default_lag));
             // An edge pointing at a tombstoned task is dropped from the
             // materialised view but its entry is kept, so undeleting the
             // task brings the edge back.
-            (exists && live.contains(&from) && live.contains(&to)).then_some(Dep { from, to })
+            (exists && live.contains(&from) && live.contains(&to)).then_some(Dep {
+                from,
+                to,
+                lag_days,
+            })
         })
         .collect();
     deps.sort_by_key(|d| (d.from, d.to));
@@ -1259,12 +1295,90 @@ mod tests {
         let b = store.create_task(new_task("b")).unwrap().id;
         let c = store.create_task(new_task("c")).unwrap().id;
 
-        store.add_dep(a, b).unwrap();
-        store.add_dep(b, c).unwrap();
+        store.add_dep(a, b, default_lag()).unwrap();
+        store.add_dep(b, c, default_lag()).unwrap();
 
-        assert!(matches!(store.add_dep(c, a), Err(Error::Cycle { .. })));
-        assert!(matches!(store.add_dep(a, a), Err(Error::SelfDep)));
+        assert!(matches!(
+            store.add_dep(c, a, default_lag()),
+            Err(Error::Cycle { .. })
+        ));
+        assert!(matches!(
+            store.add_dep(a, a, default_lag()),
+            Err(Error::SelfDep)
+        ));
         assert_eq!(store.snapshot().unwrap().deps.len(), 2);
+    }
+
+    #[test]
+    fn a_dependency_carries_its_lag_and_can_have_it_changed() {
+        let mut store = Store::open_in_memory().unwrap();
+        let a = store.create_task(new_task("a")).unwrap().id;
+        let b = store.create_task(new_task("b")).unwrap().id;
+
+        store.add_dep(a, b, 0).unwrap();
+        let deps = store.snapshot().unwrap().deps;
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].lag_days, 0);
+
+        // Re-adding is how a lag is changed — no unlink first. The row is
+        // LWW like any other, so the second write simply wins.
+        store.add_dep(a, b, 3).unwrap();
+        let deps = store.snapshot().unwrap().deps;
+        assert_eq!(deps.len(), 1, "still one edge, not two");
+        assert_eq!(deps[0].lag_days, 3);
+
+        // Saturated, not honoured: a negative lag would invert the edge.
+        store.add_dep(a, b, -2).unwrap();
+        assert_eq!(store.snapshot().unwrap().deps[0].lag_days, 0);
+    }
+
+    #[test]
+    fn an_edge_written_without_a_lag_reads_as_the_historical_spacing() {
+        // What a replica that has never heard of the field produces: the
+        // `exists` row alone. It has to keep scheduling the way it always
+        // did rather than collapsing to a same-day hand-off, which is why
+        // the default is 1 and not 0.
+        let mut store = Store::open_in_memory().unwrap();
+        let a = store.create_task(new_task("a")).unwrap().id;
+        let b = store.create_task(new_task("b")).unwrap().id;
+
+        store
+            .commit(vec![(dep_key(a, b), FIELD_EXISTS.into(), json!(true))])
+            .unwrap();
+
+        let deps = store.snapshot().unwrap().deps;
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].lag_days, default_lag());
+        assert_eq!(deps[0].lag_days, 1);
+    }
+
+    #[test]
+    fn a_lag_survives_a_sync_and_an_old_peers_edge_stays_at_one() {
+        let mut a = Store::open_in_memory().unwrap();
+        let mut b = Store::open_in_memory().unwrap();
+        let x = a.create_task(new_task("x")).unwrap().id;
+        let y = a.create_task(new_task("y")).unwrap().id;
+        let z = a.create_task(new_task("z")).unwrap().id;
+        a.add_dep(x, y, 0).unwrap();
+        // The shape an older replica writes: `exists` and nothing else.
+        a.commit(vec![(dep_key(y, z), FIELD_EXISTS.into(), json!(true))])
+            .unwrap();
+
+        sync(&mut a, &mut b);
+
+        let sa = a.snapshot().unwrap();
+        let sb = b.snapshot().unwrap();
+        assert_eq!(sa.deps, sb.deps, "both replicas agree on the lag too");
+
+        let lag_of = |s: &Snapshot, from: TaskId, to: TaskId| {
+            s.deps
+                .iter()
+                .find(|d| d.from == from && d.to == to)
+                .unwrap()
+                .lag_days
+        };
+        assert_eq!(lag_of(&sb, x, y), 0, "the explicit lag crossed the wire");
+        assert_eq!(lag_of(&sb, y, z), 1, "the fieldless edge reads as before");
     }
 
     #[test]
@@ -1272,7 +1386,7 @@ mod tests {
         let mut store = Store::open_in_memory().unwrap();
         let a = store.create_task(new_task("a")).unwrap().id;
         let b = store.create_task(new_task("b")).unwrap().id;
-        store.add_dep(a, b).unwrap();
+        store.add_dep(a, b, default_lag()).unwrap();
 
         store.delete_task(a).unwrap();
         let snapshot = store.snapshot().unwrap();
@@ -1286,7 +1400,7 @@ mod tests {
         let mut store = Store::open_in_memory().unwrap();
         let a = store.create_task(new_task("a")).unwrap();
         let b = store.create_task(new_task("b")).unwrap().id;
-        store.add_dep(a.id, b).unwrap();
+        store.add_dep(a.id, b, default_lag()).unwrap();
         store.delete_task(a.id).unwrap();
 
         store.put_task(&a).unwrap();
@@ -1756,7 +1870,7 @@ mod tests {
         let y = b.create_task(new_task("y")).unwrap().id;
         sync(&mut a, &mut b);
 
-        a.add_dep(x, y).unwrap();
+        a.add_dep(x, y, default_lag()).unwrap();
         sync(&mut a, &mut b);
         sync(&mut b, &mut a);
         sync(&mut a, &mut b);

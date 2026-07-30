@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use chrono::{Duration, NaiveDate};
 use serde::Serialize;
 
-use crate::model::{Dep, Status, Task, TaskId};
+use crate::model::{Dep, Status, Task, TaskId, clamp_lag, default_lag};
 
 /// One task's computed placement on the timeline.
 #[derive(Debug, Clone, Serialize)]
@@ -52,6 +52,40 @@ fn duration_of(task: &Task) -> i64 {
     task.duration_days.max(1)
 }
 
+/// `date + days`, saturating at the ends of the calendar.
+///
+/// `NaiveDate + Duration` and `Duration::days` both **panic** out of
+/// range, and this function runs on every read of the state — so a single
+/// absurd number anywhere in the graph would stop the project being
+/// readable at all, which is the one failure this file is written to
+/// avoid (see the note on degrading rather than throwing).
+///
+/// Lags are clamped before they get here, but `duration_days` is not
+/// bounded anywhere and never has been, so this guards both. Saturating
+/// rather than ignoring: a bar pinned at the end of the calendar is
+/// obviously wrong on screen, where a silently dropped constraint looks
+/// like the scheduler forgot an edge.
+fn plus_days(date: NaiveDate, days: i64) -> NaiveDate {
+    Duration::try_days(days)
+        .and_then(|d| date.checked_add_signed(d))
+        .unwrap_or(if days < 0 {
+            NaiveDate::MIN
+        } else {
+            NaiveDate::MAX
+        })
+}
+
+/// `date - days`, saturating. See [`plus_days`].
+fn minus_days(date: NaiveDate, days: i64) -> NaiveDate {
+    Duration::try_days(days)
+        .and_then(|d| date.checked_sub_signed(d))
+        .unwrap_or(if days < 0 {
+            NaiveDate::MAX
+        } else {
+            NaiveDate::MIN
+        })
+}
+
 /// Adjacency in both directions, restricted to edges whose endpoints
 /// both exist. Dangling edges are normal in a CRDT — a peer can send an
 /// edge whose task tombstone hasn't arrived yet — so they are dropped
@@ -71,6 +105,19 @@ fn adjacency(
         succs.entry(dep.from).or_default().push(dep.to);
     }
     (preds, succs)
+}
+
+/// Each edge's lag, keyed by its endpoints.
+///
+/// Kept beside `adjacency` rather than folded into it: `succs` is what
+/// `topo_order` walks and what `would_cycle` rebuilds, and neither has any
+/// use for a lag. Threading it through both would make every caller carry
+/// a number it does not read. Duplicate edges cannot exist — the CRDT keys
+/// them by `(from, to)` — so the last write into this map is the only one.
+fn lags(deps: &[Dep]) -> HashMap<(TaskId, TaskId), i64> {
+    deps.iter()
+        .map(|d| ((d.from, d.to), clamp_lag(d.lag_days)))
+        .collect()
 }
 
 /// Kahn's algorithm. Any node left over sits on a cycle; those are
@@ -227,6 +274,7 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
     }
 
     let (preds, succs) = adjacency(tasks, deps);
+    let lag = lags(deps);
     let order = topo_order(tasks, &succs);
     let by_id: HashMap<TaskId, &Task> = tasks.iter().map(|t| (t.id, t)).collect();
     let children = children_of(tasks);
@@ -250,10 +298,15 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
             // A dependency on a summary contributes nothing: only leaves
             // carry dates at this point.
             if let Some(pred_end) = ef.get(p) {
-                start = start.max(*pred_end + Duration::days(1));
+                // The edge's own spacing, not a constant. `1` — the value
+                // this was hard-coded to — still means "the next day", and
+                // `0` lets the two share a date, which is the whole point
+                // of the field.
+                let days = lag.get(&(*p, *id)).copied().unwrap_or_else(default_lag);
+                start = start.max(plus_days(*pred_end, days));
             }
         }
-        let end = start + Duration::days(duration_of(task) - 1);
+        let end = plus_days(start, duration_of(task) - 1);
         es.insert(*id, start);
         ef.insert(*id, end);
     }
@@ -270,10 +323,15 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
         let mut finish = leaf_end;
         for s in succs.get(id).into_iter().flatten() {
             if let Some(succ_start) = ls.get(s) {
-                finish = finish.min(*succ_start - Duration::days(1));
+                // The same lag the forward pass used, mirrored. Left at a
+                // constant here it would compute slack against a spacing
+                // the forward pass no longer honours, and the critical
+                // path would disagree with the dates on screen.
+                let days = lag.get(&(*id, *s)).copied().unwrap_or_else(default_lag);
+                finish = finish.min(minus_days(*succ_start, days));
             }
         }
-        ls.insert(*id, finish - Duration::days(duration_of(task) - 1));
+        ls.insert(*id, minus_days(finish, duration_of(task) - 1));
     }
 
     let mut slack: HashMap<TaskId, i64> = ls
@@ -298,6 +356,15 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
     // summary for the sum of its subtree, so a two-week child moves the
     // parent more than a one-day sibling.
     let mut weight: HashMap<TaskId, i64> = tasks.iter().map(|t| (t.id, duration_of(t))).collect();
+    // Predecessor *status*, not dates — and deliberately still so now that
+    // an edge can have a zero lag. A same-day successor is blocked until
+    // its predecessor is done, because that is what the edge says: A
+    // finishes before B starts, whether or not they share a calendar
+    // square. It reads oddly on a bar drawn alongside its predecessor, and
+    // the alternative reads worse: making `blocked` a function of dates
+    // would have it mean "not today" instead of "not yet", and a task
+    // waiting on unfinished work would stop saying so the moment the
+    // scheduler happened to place it late enough.
     let mut blocked: HashMap<TaskId, bool> = tasks
         .iter()
         .map(|task| {
@@ -432,10 +499,17 @@ mod tests {
         schedule.tasks.iter().find(|s| s.id == id(n)).unwrap()
     }
 
+    /// An edge with the historical one-day spacing.
     fn dep(from: u128, to: u128) -> Dep {
+        Dep::new(id(from), id(to))
+    }
+
+    /// An edge with an explicit lag — `0` lets the two share a date.
+    fn dep_lag(from: u128, to: u128, lag_days: i64) -> Dep {
         Dep {
             from: id(from),
             to: id(to),
+            lag_days,
         }
     }
 
@@ -476,6 +550,131 @@ mod tests {
         let tasks = vec![task(1, 1, Some(day(1))), task(2, 1, Some(day(10)))];
         let s = schedule(&tasks, &[dep(1, 2)], day(1));
         assert_eq!(find(&s, 2).start, day(10));
+    }
+
+    #[test]
+    fn a_zero_lag_edge_lets_two_tasks_share_a_date() {
+        // The case from #81: B waits for A, and both are half-day jobs
+        // that get done in one sitting. Before the lag existed the second
+        // one was always pushed to tomorrow, with no way to say otherwise.
+        let tasks = vec![task(1, 1, Some(day(1))), task(2, 1, None)];
+        let s = schedule(&tasks, &[dep_lag(1, 2, 0)], day(1));
+
+        assert_eq!(find(&s, 1).end, day(1));
+        assert_eq!(find(&s, 2).start, day(1), "same calendar day, not the next");
+        // Still an edge, so still a chain: nothing has slack.
+        assert_eq!(find(&s, 2).slack_days, 0);
+    }
+
+    #[test]
+    fn a_pinned_start_equal_to_the_predecessors_finish_is_kept_at_zero_lag() {
+        // The symptom a user actually reports: they pin the date and it
+        // moves anyway. With the default spacing the pin is still raised,
+        // because the edge asks for the next day and the pin is a floor.
+        let tasks = vec![task(1, 1, Some(day(1))), task(2, 1, Some(day(1)))];
+
+        let pushed = schedule(&tasks, &[dep(1, 2)], day(1));
+        assert_eq!(find(&pushed, 2).start, day(2), "default spacing still wins");
+
+        let kept = schedule(&tasks, &[dep_lag(1, 2, 0)], day(1));
+        assert_eq!(find(&kept, 2).start, day(1), "zero lag honours the pin");
+    }
+
+    #[test]
+    fn a_lag_longer_than_a_day_pushes_the_successor_out() {
+        // Not just 0 vs 1: the field is a number, and a wait — parts
+        // arriving, paint drying — is the other thing it expresses.
+        let tasks = vec![task(1, 2, Some(day(1))), task(2, 1, None)];
+        let s = schedule(&tasks, &[dep_lag(1, 2, 5)], day(1));
+
+        assert_eq!(find(&s, 1).end, day(2));
+        assert_eq!(find(&s, 2).start, day(7), "five days after the finish");
+        assert_eq!(s.end, day(7));
+    }
+
+    #[test]
+    fn slack_is_measured_against_each_edges_own_lag() {
+        // The backward pass mirrors the forward one. Left at a constant it
+        // would compute slack against a spacing the dates no longer use,
+        // and the critical path would disagree with the bars on screen.
+        //
+        // The two branches are deliberately *unequal*, and the inequality
+        // comes only from a lag rather than from any duration:
+        //
+        //   1 ──▶ 2 ──▶ 4     default spacing twice — the long way
+        //   1 ─0─▶ 3 ─0─▶ 4   two same-day hand-offs — two days shorter
+        //
+        // Every task is one day, so if the backward pass read a constant
+        // instead of each edge's lag it would measure both branches the
+        // same and report no slack on 3. The non-zero assertion below is
+        // what makes this test about lags at all.
+        let tasks = vec![
+            task(1, 1, Some(day(1))),
+            task(2, 1, None),
+            task(3, 1, None),
+            task(4, 1, None),
+        ];
+        let deps = vec![dep(1, 2), dep(2, 4), dep_lag(1, 3, 0), dep_lag(3, 4, 0)];
+        let s = schedule(&tasks, &deps, day(1));
+
+        // The long way: 1 ends day 1, 2 the day after, 4 the day after that.
+        assert_eq!(find(&s, 2).start, day(2));
+        assert_eq!(find(&s, 4).start, day(3));
+        // The short way: both hand-offs are same-day, so 3 sits on day 1.
+        assert_eq!((find(&s, 3).start, find(&s, 3).end), (day(1), day(1)));
+
+        // 2 is on the critical path; 3 could slip two days without moving
+        // the project end, which is exactly the gap the lags opened.
+        assert_eq!(find(&s, 2).slack_days, 0);
+        assert!(find(&s, 2).critical);
+        assert_eq!(find(&s, 3).slack_days, 2);
+        assert!(!find(&s, 3).critical);
+    }
+
+    #[test]
+    fn an_absurd_lag_saturates_instead_of_panicking() {
+        // `NaiveDate + Duration` panics out of range, and `schedule` runs on
+        // every read of the state — so one `:dep 3 +9999999999` would stop
+        // the project being readable at all. `:dep` refuses such a number
+        // and the store clamps it, but a peer on any version can write one,
+        // so the arithmetic saturates as the last line of defence.
+        let tasks = vec![task(1, 1, Some(day(1))), task(2, 1, None)];
+        let s = schedule(&tasks, &[dep_lag(1, 2, i64::MAX)], day(1));
+        assert!(find(&s, 2).start > day(1), "placed far out, not panicking");
+
+        // Same for a duration, which has never been bounded anywhere.
+        let mut huge = task(3, i64::MAX, Some(day(1)));
+        huge.duration_days = i64::MAX;
+        let s = schedule(&[huge], &[], day(1));
+        assert!(find(&s, 3).end >= find(&s, 3).start);
+    }
+
+    #[test]
+    fn a_negative_lag_cannot_pull_a_successor_before_its_predecessor() {
+        // Clamped rather than honoured. A negative lag is an overlap, which
+        // "A finishes before B starts" cannot carry — it would need a
+        // different kind of edge, not a smaller number.
+        let tasks = vec![task(1, 3, Some(day(1))), task(2, 1, None)];
+        let s = schedule(&tasks, &[dep_lag(1, 2, -5)], day(1));
+
+        assert_eq!(find(&s, 1).end, day(3));
+        assert_eq!(find(&s, 2).start, day(3), "no earlier than the finish");
+    }
+
+    #[test]
+    fn a_zero_lag_successor_is_still_blocked_until_its_predecessor_is_done() {
+        // Decided deliberately: `blocked` reads predecessor *status*, not
+        // dates. Sharing a calendar square does not mean B may start.
+        let mut tasks = vec![task(1, 1, Some(day(1))), task(2, 1, None)];
+        let deps = vec![dep_lag(1, 2, 0)];
+
+        let s = schedule(&tasks, &deps, day(1));
+        assert_eq!(find(&s, 2).start, find(&s, 1).start, "same day");
+        assert!(find(&s, 2).blocked, "still waiting on unfinished work");
+
+        tasks[0].status = Status::Done;
+        let s = schedule(&tasks, &deps, day(1));
+        assert!(!find(&s, 2).blocked);
     }
 
     #[test]

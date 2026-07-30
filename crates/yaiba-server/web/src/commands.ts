@@ -4,7 +4,14 @@ import type { Lang } from "./lang";
 import type { Theme } from "./theme";
 import { SORT_KEYS, type SortKey } from "./filter";
 import { inversePatch, type Op } from "./ops";
-import type { AppData, Scheduled, Task, TaskPatch } from "./types";
+import {
+  DEFAULT_LAG,
+  MAX_LAG_DAYS,
+  type AppData,
+  type Scheduled,
+  type Task,
+  type TaskPatch,
+} from "./types";
 
 export type View = "list" | "gantt" | "split";
 export type Zoom = "day" | "week" | "month";
@@ -598,17 +605,65 @@ export function runCommand(
     case "dep":
     case "link": {
       if (!current) return needTask();
-      const target = rowAt(ctx, arg);
+      // `:dep 3` and `:dep 3 +0` — the row, then how long after it this
+      // one may start. Written with a sign because that is how every
+      // other offset here reads (`:due +3d`), and because a bare second
+      // number beside a row number invites being read as another row.
+      const [row, lagArg, ...extra] = arg.split(/\s+/).filter(Boolean);
+      if (extra.length) return { error: t("usage: :dep ⟨row⟩ [+days]") };
+      const target = rowAt(ctx, row ?? "");
       if (typeof target === "string") return { error: target };
       if (target.id === current.id) return { error: t("a task can't block itself") };
+
+      let lag_days = DEFAULT_LAG;
+      if (lagArg !== undefined) {
+        // A negative lag gets its own message: it is a thing people will
+        // try, and "bad syntax" would not say why it cannot work.
+        if (/^-\d+d?$/.test(lagArg)) {
+          return {
+            error: t("a dependency cannot overlap — the earliest is +0"),
+          };
+        }
+        // `+0`, `0` and `+2d` all read the same; `:dur` already takes a
+        // trailing `d`, so fingers arrive with it.
+        if (!/^\+?\d+d?$/.test(lagArg)) {
+          return { error: t("usage: :dep ⟨row⟩ [+days]") };
+        }
+        lag_days = Number(lagArg.replace(/^\+/, "").replace(/d$/, ""));
+        // Bounded, and refused rather than silently clamped so the number
+        // you typed is the number you get. The store saturates too, but
+        // that is a backstop against a peer rather than a place to teach
+        // anybody anything: past this, `pred_end + lag` runs off the end
+        // of the calendar and the date arithmetic panics — and the
+        // scheduler runs on every read, so it would take the project's
+        // readability with it.
+        if (lag_days > MAX_LAG_DAYS) {
+          return { error: t("a lag of more than {n} days is not a plan", { n: MAX_LAG_DAYS }) };
+        }
+      }
+
       // `:dep 3` reads as "this one depends on row 3", so row 3 is the
       // predecessor.
-      const dep = { from: target.id, to: current.id };
+      const dep = { from: target.id, to: current.id, lag_days };
+      // Re-running `:dep` on an edge that exists is how its lag changes,
+      // so undo has to put back the lag that was there rather than the
+      // default — which would read as an unrelated edit.
+      const before = data.deps.find(
+        (d) => d.from === dep.from && d.to === dep.to,
+      );
       return {
         ops: [{ kind: "addDep", dep }],
-        undoOps: [{ kind: "removeDep", dep }],
+        undoOps: [
+          before ? { kind: "addDep", dep: before } : { kind: "removeDep", dep },
+        ],
         label: t("link"),
-        message: t("depends on “{title}”", { title: target.title }),
+        message:
+          lag_days === DEFAULT_LAG
+            ? t("depends on “{title}”", { title: target.title })
+            : t("depends on “{title}” · +{n}d", {
+                title: target.title,
+                n: lag_days,
+              }),
       };
     }
     case "undep":
@@ -616,10 +671,12 @@ export function runCommand(
       if (!current) return needTask();
       const target = rowAt(ctx, arg);
       if (typeof target === "string") return { error: target };
-      const dep = { from: target.id, to: current.id };
-      if (!data.deps.some((d) => d.from === dep.from && d.to === dep.to)) {
-        return { error: t("no such dependency") };
-      }
+      // The edge as it stands, so undo restores its lag rather than
+      // silently re-linking at the default.
+      const dep = data.deps.find(
+        (d) => d.from === target.id && d.to === current.id,
+      );
+      if (!dep) return { error: t("no such dependency") };
       return {
         ops: [{ kind: "removeDep", dep }],
         undoOps: [{ kind: "addDep", dep }],

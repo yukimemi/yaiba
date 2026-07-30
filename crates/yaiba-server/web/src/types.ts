@@ -42,7 +42,35 @@ export interface Task {
 export interface Dep {
   from: TaskId;
   to: TaskId;
+  /**
+   * Calendar days from `from`'s finish to the earliest `to` may start.
+   *
+   * `1` is "the next day" and is what every edge meant before the field
+   * existed, so it is what the server fills in for a body that omits it.
+   * `0` lets two linked tasks share a date. Never negative — the store
+   * clamps and `:dep` refuses.
+   *
+   * Required rather than optional on purpose: every place that builds an
+   * edge should have to say what spacing it means, and the one gesture
+   * with no way to ask — the gantt's drag-to-link — should be visibly
+   * choosing the default rather than quietly omitting it.
+   */
+  lag_days: number;
 }
+
+/** What an edge means when nothing has been said about its spacing. */
+export const DEFAULT_LAG = 1;
+
+/**
+ * The largest lag an edge may carry: a hundred years.
+ *
+ * Mirrors `MAX_LAG_DAYS` in `yaiba-core`, and is a bound rather than an
+ * opinion — past it the scheduler's `pred_end + lag` runs off the end of
+ * the calendar, and its date arithmetic panics. `:dep` refuses above this
+ * so the number you typed is the number you get; the store clamps as a
+ * backstop against a peer that does not.
+ */
+export const MAX_LAG_DAYS = 36_500;
 
 /** Server-computed placement for one task. */
 export interface Scheduled {

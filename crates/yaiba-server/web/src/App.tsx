@@ -24,6 +24,7 @@ import { Hud } from "./components/Hud";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
 import { addDays, toISO } from "./dates";
+import { DEFAULT_LAG } from "./types";
 import {
   dropOrder,
   effectiveParent,
@@ -1132,10 +1133,19 @@ export function App() {
       }
       // The anchor is the task that waits; the row you land on is what
       // it waits for.
-      const dep = { from: row.id, to: linkAnchor };
-      const exists = data.deps.some(
-        (d) => d.from === dep.from && d.to === dep.to,
+      const existing = data.deps.find(
+        (d) => d.from === row.id && d.to === linkAnchor,
       );
+      // Removing carries the edge as it stands, so undo re-links at the
+      // lag it had rather than at the default. Adding has no way to ask
+      // for a lag — `:dep 3 +0` is where that lives — so it says the
+      // default out loud.
+      const dep = existing ?? {
+        from: row.id,
+        to: linkAnchor,
+        lag_days: DEFAULT_LAG,
+      };
+      const exists = existing !== undefined;
       if (remove && !exists) {
         say(t("no dependency between those two"), "error");
         return;
@@ -1282,7 +1292,9 @@ export function App() {
 
   const onLinkBars = useCallback(
     (from: string, to: string) => {
-      const dep = { from, to };
+      // A drag has nowhere to type a number, so it means the default —
+      // stated rather than omitted, per the note on `Dep.lag_days`.
+      const dep = { from, to, lag_days: DEFAULT_LAG };
       if (data?.deps.some((d) => d.from === from && d.to === to)) {
         say(t("already linked"), "error");
         return;

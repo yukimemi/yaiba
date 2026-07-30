@@ -41,6 +41,15 @@ pub const FIELD_POSITION: &str = "position";
 pub const FIELD_CREATED: &str = "created";
 pub const FIELD_DELETED: &str = "deleted";
 pub const FIELD_EXISTS: &str = "exists";
+/// Days between a dependency's two ends, on the `dep:` key beside
+/// `exists`.
+///
+/// A second field on an existing key is purely additive, which is what
+/// makes the lag safe to add to a live protocol: a replica that has never
+/// heard of it keeps reading `exists` and scheduling every edge a day
+/// apart, a replica that has reads the absent field as `1` and agrees
+/// with it, and neither has to know which kind the other is.
+pub const FIELD_LAG: &str = "lag";
 /// Prefix for the per-tag boolean entries.
 pub const TAG_PREFIX: &str = "tag:";
 
