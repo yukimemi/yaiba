@@ -690,3 +690,83 @@ bug listed here passed CI.
   `el.dispatchEvent(pointerdown); el.dispatchEvent(mousedown)` in one
   statement. "Could not reproduce with the mouse" is not evidence
   against a batching claim; dispatch the pair yourself before deciding.
+- **A locked screen looks exactly like an app that ignores you.** With
+  the machine locked — or the window minimised, or the tab in the
+  background — an injector that goes through the OS has nowhere to
+  deliver to. Screenshots keep arriving over CDP and look flawless,
+  because that path does not care. So the two readings to tell apart are
+  `document.visibilityState === "hidden"` with a keydown listener
+  recording nothing, against a real bug in the app.
+  `document.hasFocus()` does not separate them — it reported `true`
+  throughout. Arm the listener before believing any negative result:
+
+  ```js
+  window.__keys = [];
+  window.addEventListener("keydown", e => window.__keys.push(e.key), true);
+  ```
+
+  **Scope that conclusion to how your keys are delivered.** Empty
+  `__keys` means the harness rather than the app *when the injector goes
+  through the OS*, which is what a screenshot-and-click driver does. A
+  CDP or Playwright dispatch aimed at a page reaches it whether or not it
+  is visible, so there an empty `__keys` really is worth investigating —
+  check the injector, and that you targeted the frame you think you did,
+  before blaming either side. Dispatching a synthetic `KeyboardEvent` at
+  `window` from inside the page bypasses the question entirely and is the
+  cheapest way to exercise the key handler when the screen is not
+  available.
+
+  A page that was hidden *before it ever rendered* has a second tell:
+  `#root` is still empty, because the first render was skipped along with
+  everything else. Useful when you see it, but not part of the signature
+  — a page that rendered and was then hidden keeps its DOM, so a
+  populated `#root` rules nothing out.
+
+  This is the trap that produced a wrong bug report on #75: a keystroke
+  that was never delivered got read as the app losing a visual selection,
+  and the note that went in here first claimed bursts of keys outrun
+  React. They do not — `App.tsx` mirrors the mode, cursor and anchor into
+  refs that every handler reads and writes synchronously, so a burst
+  cannot see a stale render. What actually collapsed the selection was
+  the `:` command path reading the *memoised* selection instead, which is
+  the bug fixed in #75.
+
+### Traps in the worktree loop itself
+
+**`renri remove` can half-succeed.** A `cargo run` launched from a
+worktree leaves `target/debug/yaiba.exe` running after the parent is
+stopped — process-tree kills do not always reach it — and Windows then
+refuses to delete the directory. `renri remove` forgets the workspace in
+jj and *then* fails with `os error 5`, so the worktree is gone from
+`jj workspace list` while its files are still on disk, and `renri prune`
+reports nothing to prune. Kill the server first:
+
+```powershell
+Get-Process | Where-Object { $_.Path -like "*wt*<name>*" } | Stop-Process -Force
+```
+
+Drop the `| Stop-Process -Force` to see what it would kill first — the
+pattern matches on the executable's path, so a second worktree with a
+similar name is worth a look before the pipe.
+
+**`jj commit -m` overwrites a description you already wrote.**
+`jj describe -m "…"` sets the description of the working-copy commit;
+`jj commit -m "…"` sets it **again** and then starts a new commit. Doing
+the second after the first means the message you wrote is gone and the
+changes you meant to separate are one commit — silently, since both
+commands succeed. It happened on #75: a carefully written feature commit
+came out labelled as the small fix that followed it, and was only caught
+by reading `jj log` after the push.
+
+Use `jj describe` then `jj new` (two steps, and `jj log` in between shows
+what you are about to get), or `jj commit` alone with no prior
+`describe`. Related: `jj git push` does **not** advance a bookmark onto a
+new commit — `jj bookmark set <name> -r <rev>` first, or the push reports
+"Nothing changed" while your work sits unpushed.
+
+Everything in this subsection is general jj / renri behaviour rather than
+anything about yaiba, so its durable home is the `pj-base` template that
+owns the worktree section above; it is written here because that is where
+it was learned, and should move upstream when those templates are next
+touched. The browser-input note under *Verifying UI changes by hand*
+stays put — it is about this app's own harness and keybindings.
