@@ -176,6 +176,9 @@ const JA: Record<string, string> = {
   "moved to the top level": "最上位へ移動しました",
   "moved under “{title}”": "「{title}」の下へ移動しました",
   "depends on “{title}”": "「{title}」を待ちます",
+  // 待ちます + 間隔。+0 は「同日に着手できる」なので 日後 ではなく
+  // そのまま記号で出す — 数字が0のときに「0日後」は日本語として妙。
+  "depends on “{title}” · +{n}d": "「{title}」を待ちます · +{n}日",
   "unlinked from “{title}”": "「{title}」との依存を切りました",
   "already linked": "すでに依存があります",
   "no dependency between those two": "その2つに依存関係はありません",
@@ -235,6 +238,12 @@ const JA: Record<string, string> = {
   "usage: :prio 0|1|2|3": "使い方: :prio 0|1|2|3",
   "usage: :progress 0..100": "使い方: :progress 0..100",
   "usage: :tag +dev -ui": "使い方: :tag +dev -ui",
+  "usage: :dep ⟨row⟩ [+days]": "使い方: :dep ⟨行番号⟩ [+日数]",
+  "a lag of more than {n} days is not a plan": "{n} 日を超える間隔は計画とは呼べません",
+  // 重ねられない rather than 負の値は不可: the rule is about what an edge
+  // can mean, not about which numbers are typeable.
+  "a dependency cannot overlap — the earliest is +0":
+    "依存は重ねられません — 最短は +0（同日）",
   "usage: :assign ⟨name⟩  (bare clears)":
     "使い方: :assign ⟨名前⟩（引数なしで担当を外す）",
   // The suggestion carries the fix, so the sentence only has to say
@@ -358,6 +367,9 @@ const JA: Record<string, string> = {
   "add / remove tags": "タグを追加 / 削除",
   "hand it to somebody — bare clears": "担当を決める（引数なしで外す）",
   "wait for row n": "n 行目を待つ",
+  // 同日 carries it: the point is that the two share a calendar
+  // square, not that the number is zero.
+  "…and may start the same day": "…同日に着手可（既定は翌日）",
   "when work really began": "実際に着手した日",
   "when it really finished — none clears": "実際に終えた日 — none で消去",
   "plan vs actual, and an owner column — gd toggles":

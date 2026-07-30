@@ -208,6 +208,33 @@ Dependencies and nesting are separate axes on purpose: a parent
 *contains* its children, a dependency *orders* two tasks. Only leaves
 are scheduled from dependencies; summaries follow.
 
+An edge carries how long after its predecessor the successor may start,
+and `:dep ⟨row⟩ +⟨days⟩` is where you say it:
+
+```text
+:dep 3        row 3 finishes, this one starts the next day — the default
+:dep 3 +0     row 3 finishes, this one may start the same day
+:dep 3 +5     five days after, for parts arriving or paint drying
+```
+
+`+0` is the one worth knowing about. Two half-day jobs done in one
+sitting are a real shape, and until an edge could say so the second one
+was always pushed to tomorrow — pinning its date did not help either,
+since a pinned start is a floor and the edge raised it. Re-running `:dep`
+on an edge that already exists is how its spacing changes; there is no
+need to unlink first.
+
+The default stays at one day, so no existing plan moves. A negative lag
+is refused rather than clamped quietly: it would mean the two *overlap*,
+which "A finishes before B starts" cannot carry — that would want a
+different kind of edge, not a smaller number.
+
+`blocked` still means "a predecessor is not done", not "not today". A
+same-day successor is drawn alongside its predecessor and is still
+blocked, because the edge is about order rather than dates — a task
+waiting on unfinished work should not stop saying so just because the
+scheduler placed it conveniently.
+
 Commands take dates the way you'd say them: `:due tom`, `:due mon`,
 `:due +3d`, `:due 8/14`. Filters compose: `:f tag:dev open crit`.
 

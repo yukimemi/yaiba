@@ -196,6 +196,56 @@ where
 pub struct Dep {
     pub from: TaskId,
     pub to: TaskId,
+    /// Calendar days from `from`'s finish to the earliest `to` may start.
+    ///
+    /// `1` is "the next day", which is what every edge meant before this
+    /// field existed — so it is the default, an absent value reads as it,
+    /// and no existing plan moves. `0` lets two linked tasks share a
+    /// date, which real plans do: B waits for A, and both are half-day
+    /// jobs done in one sitting.
+    ///
+    /// Never negative. A negative lag would be an *overlap*, and the
+    /// "A finishes before B starts" reading of this edge cannot carry
+    /// that — it would need a second kind of edge, not a smaller number.
+    #[serde(default = "default_lag")]
+    pub lag_days: i64,
+}
+
+/// What an edge with nothing said about it means: the next day.
+pub fn default_lag() -> i64 {
+    1
+}
+
+/// The largest lag an edge may carry: a hundred years.
+///
+/// Not a modelling opinion — a bound. `NaiveDate + Duration` *panics* out
+/// of range, and the scheduler runs on every read of the state, so a
+/// single `:dep 3 +9999999999999` would take the project with it. A
+/// hundred years is far past anything a plan means and nowhere near the
+/// calendar's edge, so clamping here costs nothing anybody wanted.
+///
+/// Clamped on the way in (`Store::add_dep`) *and* on the way out
+/// (materialise, and `graph::lags`), because a peer running any version
+/// can put a number in the CRDT and the scheduler has to survive reading
+/// it. The arithmetic itself is checked as well; see `plus_days`.
+pub const MAX_LAG_DAYS: i64 = 36_500;
+
+/// A lag the store and the scheduler will both accept.
+pub fn clamp_lag(days: i64) -> i64 {
+    days.clamp(0, MAX_LAG_DAYS)
+}
+
+impl Dep {
+    /// An edge with the historical spacing, for callers that have no
+    /// opinion — the gantt's link gesture, and every test fixture that
+    /// predates the field.
+    pub fn new(from: TaskId, to: TaskId) -> Self {
+        Self {
+            from,
+            to,
+            lag_days: default_lag(),
+        }
+    }
 }
 
 /// The materialised dataset — live tasks (tombstones excluded) and edges.
