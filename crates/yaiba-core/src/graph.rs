@@ -636,6 +636,7 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Local, TimeZone, Utc};
     use uuid::Uuid;
 
     fn id(n: u128) -> TaskId {
@@ -653,12 +654,18 @@ mod tests {
     /// As [`task`], but typed on a chosen day — which is where it starts
     /// when nothing pins it.
     ///
-    /// Midday rather than midnight: `created_day` reads the *local*
-    /// calendar day, and a UTC midnight is the previous day for everyone
-    /// west of it, so these tests would otherwise pass or fail by the
-    /// machine's timezone.
+    /// *Local* noon, converted to UTC, so `created_day` reads back the
+    /// day that was asked for on every machine. Neither shortcut works:
+    /// a UTC midnight is the previous day for everyone west of it, and a
+    /// UTC noon is the next day in +13/+14. Building the instant in the
+    /// same frame the assertion is written in is the only version with
+    /// no offset left to go wrong.
     fn born(n: u128, duration: i64, start: Option<NaiveDate>, created: NaiveDate) -> Task {
-        let now = created.and_hms_opt(12, 0, 0).unwrap().and_utc();
+        let now = Local
+            .from_local_datetime(&created.and_hms_opt(12, 0, 0).unwrap())
+            .single()
+            .expect("local noon is unambiguous")
+            .with_timezone(&Utc);
         Task {
             id: id(n),
             parent: None,
