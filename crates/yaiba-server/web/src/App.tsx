@@ -17,7 +17,7 @@ import {
   type Completion,
 } from "./completion";
 import { DATE_COLUMNS, dateLocked, dateValue } from "./dateColumns";
-import { Gantt } from "./components/Gantt";
+import { DAY_W, Gantt } from "./components/Gantt";
 import { DatePicker, type Anchor } from "./components/DatePicker";
 import { Help } from "./components/Help";
 import { ProjectPalette } from "./components/ProjectPalette";
@@ -26,7 +26,7 @@ import { OwnerPicker } from "./components/OwnerPicker";
 import { SplitGrip } from "./components/SplitGrip";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
-import { addDays, toISO } from "./dates";
+import { addDays, diffDays, toISO } from "./dates";
 import { DEFAULT_LAG } from "./types";
 import {
   collapsedForDepth,
@@ -269,6 +269,20 @@ export function App() {
   const asofRef = useRef<string | null>(null);
   const listPane = useRef<HTMLDivElement>(null);
   const ganttPane = useRef<HTMLDivElement>(null);
+  /**
+   * What the timeline is currently drawn against, for `T`.
+   *
+   * A ref rather than the values themselves: the window is computed near
+   * the bottom of the render, *after* the early return for a state that
+   * hasn't loaded yet, so a handler closing over it directly would throw
+   * on any key pressed during the first paint. Mirroring is also what
+   * every other cross-cutting value here does — see `cursorRef`.
+   */
+  const timeline = useRef<{
+    rangeStart: string;
+    today: string;
+    dayW: number;
+  } | null>(null);
   const syncingScroll = useRef(false);
   const undoStack = useRef<Step[]>([]);
   const redoStack = useRef<Step[]>([]);
@@ -757,6 +771,33 @@ export function App() {
     },
     [],
   );
+
+  /**
+   * Bring the reference line into view without moving the cursor.
+   *
+   * The timeline's left edge is the earliest thing anyone planned, so on
+   * a project with any history it opens months behind the work in
+   * flight. The only other thing that scrolls it horizontally is the
+   * cursor-follow in `Gantt`, which answers "where is *this row*" — a
+   * fair question, and not this one. Nothing here changes the cursor, so
+   * the follow effect has no reason to fire and undo it; the next `j`
+   * will scroll away again, which is the app's usual bargain.
+   *
+   * A third of the way in rather than flush left: the line is worth
+   * reading against what came before it, not just what comes after.
+   */
+  const scrollToReference = useCallback(() => {
+    const pane = ganttPane.current;
+    const drawn = timeline.current;
+    if (!pane || !drawn) {
+      say(t("no timeline in this view — <tab>"), "error");
+      return;
+    }
+    const line = diffDays(drawn.rangeStart, drawn.today) * drawn.dayW;
+    // The browser clamps a scrollLeft past the end, so only the near
+    // edge needs guarding.
+    pane.scrollTo({ left: Math.max(line - pane.clientWidth / 3, 0) });
+  }, []);
 
   /**
    * Refuse writes while the view is pinned to another date.
@@ -2019,6 +2060,9 @@ export function App() {
       case "[":
         setZoom(ZOOM_CYCLE[Math.max(ZOOM_CYCLE.indexOf(zoom) - 1, 0)]);
         break;
+      case "T":
+        scrollToReference();
+        break;
       // ---- folding by depth, which is folding by row underneath
       case "zm": {
         // Fold one level shallower. From "everything visible" that means
@@ -2384,6 +2428,7 @@ export function App() {
     spanned.reduce((a, b) => (a > b ? a : b)),
     zoom === "day" ? 7 : 30,
   );
+  timeline.current = { rangeStart, today: data.today, dayW: DAY_W[zoom] };
 
   // Both can go missing under an open picker — a peer's delete, or a
   // filter that no longer matches — and then there is no cell to float

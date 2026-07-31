@@ -8,7 +8,15 @@ import type { Dep, Scheduled, Task } from "../types";
 /** Must match `--row-h` in styles.css. */
 export const ROW_H = 26;
 
-const DAY_W: Record<Zoom, number> = { day: 26, week: 9, month: 3.2 };
+/**
+ * Pixels per day at each zoom.
+ *
+ * Exported because `App` scrolls the pane to the reference date without
+ * going through this component: the geometry is one multiplication, and
+ * a second copy of the number would drift the day the zoom levels are
+ * retuned.
+ */
+export const DAY_W: Record<Zoom, number> = { day: 26, week: 9, month: 3.2 };
 
 interface Props {
   tasks: Task[];

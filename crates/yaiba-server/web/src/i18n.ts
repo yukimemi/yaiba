@@ -171,6 +171,7 @@ const JA: Record<string, string> = {
   "reloaded": "再読み込みしました",
   "viewing the past — :asof today to make changes":
     "過去を表示しています — 編集するには :asof today",
+  "no timeline in this view — <tab>": "この表示にタイムラインはありません — <tab>",
   "reference date: today": "基準日: 今日",
   "as of {d}": "{d} 時点",
   "office mode": "オフィスモード",
@@ -356,6 +357,7 @@ const JA: Record<string, string> = {
   "add a dependency": "依存を張る",
   "remove a dependency": "依存を切る",
   "gantt zoom out / in": "ガントを縮小 / 拡大",
+  "scroll the timeline to the reference date": "タイムラインを基準日へ",
   "visual line select": "行単位で選択",
   "date columns ⇄ compact": "日付列 ⇄ コンパクト",
   "office mode ⇄ neon mode": "オフィス ⇄ ネオン",

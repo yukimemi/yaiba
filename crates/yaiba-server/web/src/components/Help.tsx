@@ -54,6 +54,7 @@ const groups = (): Group[] => [
       ["D", t("add a dependency")],
       ["X", t("remove a dependency")],
       ["[ / ]", t("gantt zoom out / in")],
+      ["T", t("scroll the timeline to the reference date")],
       ["v", t("visual line select")],
       ["gd", t("date columns ⇄ compact")],
       ["gt", t("office mode ⇄ neon mode")],
