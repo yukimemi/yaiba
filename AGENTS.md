@@ -701,6 +701,34 @@ deliberately does not bump `notify`).
 
 ### Invariants worth knowing before changing the graph
 
+- **The reference date moves the line, not the plan.** `today` reaches
+  exactly one thing inside `schedule()`: the drawn window's left edge.
+  No task's dates depend on it, and that is what makes `:asof` a report
+  rather than a re-plan — scrub to Friday and the bars stay where they
+  are, so the ones the line has passed are visibly late. Anything new
+  that wants to read `today` in the scheduler is almost certainly the
+  bug this rule exists to prevent; ask whether it belongs in the *view*
+  instead.
+- **An unpinned task starts on the day it was typed** (`created_day()`,
+  local — `created_at` is UTC and the trap is documented on both it and
+  `Store::snapshot_at`). This anchor has now been wrong twice, and both
+  wrong answers moved on their own: `project_start` (#85) sank every new
+  task to the oldest pin in the plan, and `today` (#88) slid unstarted
+  work forward a day every day, so an untouched plan finished later each
+  morning and `:asof` silently re-planned. `created_at` is the only date
+  a task carries that cannot move by itself. The cost is deliberate: an
+  old unpinned task sits in the past rather than at today's edge, which
+  is what being late looks like. #88's argument — "a plan for work that
+  has not happened cannot honestly begin before today" — is the reading
+  that hid the drift, and is not the one to restore.
+- **The drawn window is asked of the schedule, not of the pins.**
+  `project_start` is the minimum of the *computed* starts, capped at the
+  reference date so the line stays in frame. It read the pins while an
+  unpinned task could never start before `today`; anchored on the
+  creation day one routinely does, and a bar left of the window is drawn
+  at a negative offset inside a pane whose `scrollLeft` stops at 0 —
+  stored, and on screen for nobody. `App.tsx` widens the same window for
+  the actual rails, which have always been able to predate the plan.
 - **Cycles are refused server-side.** `Store::add_dep` calls
   `graph::would_cycle` and returns 409; it catches indirect loops, not
   just the two-node case. Client-side previews are a convenience and

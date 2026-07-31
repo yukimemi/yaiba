@@ -5,7 +5,7 @@
 //! keeps ids roughly time-ordered so a fresh task still sorts sensibly
 //! before its `position` is set.
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Local, NaiveDate, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
@@ -102,6 +102,22 @@ pub struct Task {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub done_at: Option<DateTime<Utc>>,
+}
+
+impl Task {
+    /// The local calendar day this task was typed on.
+    ///
+    /// Where an unpinned task starts: it is the only date a task carries
+    /// that cannot move on its own, which is what makes it usable as a
+    /// default. See the forward pass in `graph::schedule`.
+    ///
+    /// Local, not UTC. `created_at` is stamped in UTC and every date the
+    /// user reads is a local calendar day, so comparing the two raw puts
+    /// a task created in the evening west of UTC on the following day —
+    /// the same trap `Store::snapshot_at` documents for `:asof`.
+    pub fn created_day(&self) -> NaiveDate {
+        self.created_at.with_timezone(&Local).date_naive()
+    }
 }
 
 /// Payload for `POST /api/tasks`.
