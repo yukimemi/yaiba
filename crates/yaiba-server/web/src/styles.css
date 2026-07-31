@@ -1606,10 +1606,13 @@ button.row__date:focus-visible {
 }
 
 /* In office mode `--steel` is near-black, and a near-black zigzag at
-   1.6px out-shouts the bars it reports on. `--ash` keeps it legible on
-   white without making it the loudest thing on the chart. */
+   1.6px out-shouts the bars it reports on. Not `--ash`, though: that is
+   the actuals rail's own grey, and sharing it put the report and the
+   record in the same voice. `--ash-dim` keeps the dark theme's
+   hierarchy — today line strongest, progress line lightest — with the
+   line still legible on white. */
 :root[data-theme="light"] .gantt__progress-line {
-  stroke: var(--ash);
+  stroke: var(--ash-dim);
 }
 
 .gantt__links {
