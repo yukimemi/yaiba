@@ -37,7 +37,17 @@ import {
   visibleTasks,
   type SortKey,
 } from "./filter";
-import { cellColumns, cellStep, type CellField } from "./cells";
+import {
+  cellColumns,
+  actualsWriteFirst,
+  cellRead,
+  cellSpan,
+  cellStep,
+  cellWriteLine,
+  pastePlan,
+  type CellBlock,
+  type CellField,
+} from "./cells";
 import { modeHint, type Mode } from "./mode";
 import { t } from "./i18n";
 import { applyLang, initialLang, type Lang } from "./lang";
@@ -194,6 +204,28 @@ export function App() {
    * because it goes through `cursorRef`.
    */
   const cellRef = useRef<CellField>("title");
+  /**
+   * The column `v` was pressed in — the other corner of the selection.
+   *
+   * `anchorId` holds the row corner; this holds the column one, and the
+   * two together are the rectangle. Mirrored into a ref for the reason
+   * `anchorRef` is: `v l j y` is four keys typed as fast as any burst,
+   * and a yank that read a render-old corner would take the wrong block
+   * — the exact bug #75 was.
+   */
+  const [anchorCell, setAnchorCell] = useState<CellField | null>(null);
+  const anchorCellRef = useRef<CellField | null>(null);
+  /**
+   * `V` rather than `v` — the selection spans every column, whatever the
+   * cell cursor does.
+   *
+   * A separate flag rather than "the anchor is the first column and the
+   * cursor the last", because that state is reachable by walking and
+   * would then silently become a line select: `V` is a promise that the
+   * whole row is taken, and `h` must not quietly break it.
+   */
+  const [visualLine, setVisualLine] = useState(false);
+  const visualLineRef = useRef(false);
   const cellCols = useMemo(() => cellColumns(columns), [columns]);
   /**
    * The cell cursor clamped to a column that is actually drawn.
@@ -215,6 +247,15 @@ export function App() {
   const putCell = useCallback((next: CellField) => {
     cellRef.current = next;
     setCellRaw(next);
+  }, []);
+  /** The column corner of the selection — `putAnchor` for cells. */
+  const putAnchorCell = useCallback((next: CellField | null) => {
+    anchorCellRef.current = next;
+    setAnchorCell(next);
+  }, []);
+  const putVisualLine = useCallback((next: boolean) => {
+    visualLineRef.current = next;
+    setVisualLine(next);
   }, []);
   /**
    * The list's share of the split, as a percent.
@@ -332,6 +373,24 @@ export function App() {
   const undoStack = useRef<Step[]>([]);
   const redoStack = useRef<Step[]>([]);
   const register = useRef<Task[]>([]);
+  /**
+   * The other register: a rectangle of cell values.
+   *
+   * Kept apart from the row register because the two paste into
+   * different worlds — rows create tasks, cells overwrite fields on
+   * tasks that already exist — and a `p` that guessed which you meant
+   * from the cursor would guess wrong on the row you were about to
+   * duplicate.
+   */
+  const cellRegister = useRef<CellBlock | null>(null);
+  /**
+   * Which of the two `p` puts down: whichever was filled last.
+   *
+   * One paste key and two registers has to resolve somehow, and "the
+   * thing you just yanked" is the only rule nobody has to remember.
+   * `yy` / `Y` set this to rows, `y` sets it to cells.
+   */
+  const lastYank = useRef<"rows" | "cells">("rows");
   const history = useRef<string[]>([]);
   const historyAt = useRef(0);
 
@@ -458,6 +517,18 @@ export function App() {
     () => new Set(selecting ? selection.map((t) => t.id) : []),
     [selecting, selection],
   );
+  /**
+   * The columns the selection covers, for the list to draw.
+   *
+   * The render's own copy of what the key handler computes off the refs.
+   * Null outside visual, and the full width under `V` — a selection that
+   * drew narrower than it acts would be lying about what `y` will take.
+   */
+  const selectedCols = useMemo<CellField[] | null>(() => {
+    if (!selecting) return null;
+    if (visualLine) return cellCols;
+    return cellSpan(anchorCell ?? cell, cell, cellCols);
+  }, [selecting, visualLine, anchorCell, cell, cellCols]);
 
   // ---- data -------------------------------------------------------
 
@@ -734,6 +805,15 @@ export function App() {
     pendingRef.current = next;
     setPending(next);
   }, []);
+
+  /** Drop the whole selection — both corners and the line flag. */
+  const leaveVisual = useCallback(() => {
+    if (modeRef.current !== "visual") return;
+    enterMode("normal");
+    putAnchor(null);
+    putAnchorCell(null);
+    putVisualLine(false);
+  }, [enterMode, putAnchor, putAnchorCell, putVisualLine]);
 
   /** Move the reference date, then reload against it. */
   const setReferenceDate = useCallback(
@@ -1294,6 +1374,163 @@ export function App() {
       say(t("pasted {n}", { n: filed.length }), "ok");
     },
     [createTask, data, liveOnly],
+  );
+
+  /**
+   * Put a yanked rectangle down with its top-left corner on `at`.
+   *
+   * Offset, not by column identity: the block keeps its shape and the
+   * cursor says where it lands, which is what makes `start end` yanked
+   * and dropped on `began` — comparing plan against record — the thing
+   * the columns were for. `pastePlan` works out the pairing and what
+   * does not fit; nothing here decides it.
+   *
+   * **Every cell goes through the command line it would have been typed
+   * on**, the bargain `commitDate` and `commitOwner` already make. So a
+   * summary's plan cell refuses itself, an actual span that would run
+   * backwards refuses itself, and `:end` still writes a duration rather
+   * than a date. None of those rules is restated here, which is the
+   * point — a second copy is the one that goes stale.
+   *
+   * **`end` is written last**, in its own pass against fresh data. It
+   * measures a duration back from the row's start, so a block carrying
+   * both would otherwise compute the span against the start it is in the
+   * middle of replacing — the trap #87 wrote down and the reason this is
+   * two awaits rather than one loop.
+   */
+  const pasteCells = useCallback(
+    async (row: Task | null, at: CellField) => {
+      if (!liveOnly()) return;
+      const block = cellRegister.current;
+      if (!block?.rows.length) {
+        say(t("nothing yanked"), "error");
+        return;
+      }
+      if (!row || !data) {
+        say(t("no task under the cursor"), "error");
+        return;
+      }
+
+      const plan = pastePlan(block, at, cellColumns(columns));
+      const top = visible.findIndex((task) => task.id === row.id);
+      const targets = visible.slice(top, top + block.rows.length);
+      const filedBefore = undoStack.current.length;
+
+      /** Rows that ran off the bottom, columns that could not land. */
+      const shortRows = block.rows.length - targets.length;
+      const refused = plan.filter((pair) => pair.refused);
+
+      let live = data;
+      let wrote = 0;
+      let failed = 0;
+      // `end` after everything else — see the note above.
+      for (const pass of [false, true]) {
+        const ops: Op[] = [];
+        const undoOps: Op[] = [];
+        for (const [r, target] of targets.entries()) {
+          const found = live.tasks.find((task) => task.id === target.id);
+          if (!found) continue;
+          // Advanced as each cell lands, so the next one is validated
+          // against what this paste has already put on the row rather
+          // than against what it is replacing. Without it `:astart`
+          // measures itself against an `actual_end` that is on its way
+          // out, and a good span half-lands — a new finish beside the
+          // old start, which is worse than refusing the pair outright.
+          let row = found;
+
+          const cells = plan
+            .map((pair, c) => ({ pair, c }))
+            .filter(
+              ({ pair }) =>
+                !pair.refused && pair.to && (pair.to === "end") === pass,
+            );
+
+          // `began` and `ended` constrain each other, so ordering is not
+          // enough on its own — one of the two orders is always legal
+          // and `actualsWriteFirst` says which. Everything else is
+          // order-independent and keeps the columns' own order.
+          const nextStart = cells.find(({ pair }) => pair.to === "astart");
+          if (nextStart && cells.some(({ pair }) => pair.to === "aend")) {
+            const value = block.rows[r][nextStart.c];
+            if (actualsWriteFirst(value, row.actual_end) === "aend") {
+              cells.sort(({ pair: a }, { pair: b }) =>
+                a.to === "aend" ? -1 : b.to === "aend" ? 1 : 0,
+              );
+            }
+          }
+
+          for (const { pair, c } of cells) {
+            const line = cellWriteLine(pair.to!, block.rows[r][c]);
+            if (!line) continue;
+            const result = runCommand(line, {
+              data: live,
+              visible,
+              current: row,
+              // One cell names one row, the way a click does — the
+              // selection this paste came from is long gone.
+              selection: [row],
+              projects: projects.projects.map((p) => p.name),
+            });
+            if (!result || result.error) {
+              failed++;
+              continue;
+            }
+            if (result.ops) ops.push(...result.ops);
+            if (result.undoOps) undoOps.push(...result.undoOps);
+            // Carry the write forward locally. Only `patch` ops matter —
+            // a cell edit never creates or deletes — and only for this
+            // row, since `live` is what the *next* pass reads.
+            for (const op of result.ops ?? []) {
+              if (op.kind === "patch" && op.id === row.id) {
+                row = { ...row, ...op.patch };
+              }
+            }
+            wrote++;
+          }
+        }
+        if (!ops.length) continue;
+        const next = await run(ops, undoOps, "paste cells");
+        if (!next) return;
+        live = next;
+      }
+
+      const filed = undoStack.current.splice(filedBefore);
+      if (filed.length > 1) {
+        undoStack.current.push({
+          redo: filed.flatMap((step) => step.redo),
+          undo: filed.flatMap((step) => step.undo).reverse(),
+          label: "paste cells",
+        });
+      } else if (filed.length) {
+        undoStack.current.push(filed[0]);
+      }
+
+      // Never a silent truncation. A block that half landed looks
+      // exactly like one that landed, and the columns it missed are the
+      // ones you would not think to check.
+      const skipped = [
+        refused.some((pair) => pair.refused === "off the end") &&
+          t("past the last column"),
+        refused.some((pair) => pair.refused === "different kind") &&
+          t("into a column of another kind"),
+        shortRows > 0 && t("past the last row"),
+        failed > 0 && t("{n} refused", { n: failed }),
+      ].filter(Boolean) as string[];
+      if (!wrote) {
+        say(skipped.join(" · ") || t("nothing to paste"), "error");
+        return;
+      }
+      say(
+        skipped.length
+          ? `${t("pasted {n}", { n: wrote })} · ${skipped.join(" · ")}`
+          : t("pasted {n}", { n: wrote }),
+        // Not an error — cells did land. But not a plain `ok` either,
+        // because some did not and the row it stopped at is not
+        // something the list makes obvious.
+        skipped.length ? "info" : "ok",
+      );
+    },
+    [columns, data, liveOnly, projects, run, visible],
   );
 
   const undo = useCallback(async () => {
@@ -1860,7 +2097,16 @@ export function App() {
 
     e.preventDefault();
 
-    if (cmd === "" || (cmd.length === 1 && PREFIXES.has(cmd))) {
+    // `y` is a prefix everywhere except in visual, where it is the whole
+    // command: `v j j y` is what a block yank looks like, and waiting for
+    // a second key there would make it `v j j yy` — a doubled letter that
+    // means "the line" in a mode whose whole point is that you have
+    // already said which cells. `Y` is what yanks rows now.
+    const prefix =
+      cmd.length === 1 &&
+      PREFIXES.has(cmd) &&
+      !(cmd === "y" && activeMode === "visual");
+    if (cmd === "" || prefix) {
       setPendingKeys(buf);
       return;
     }
@@ -1873,6 +2119,15 @@ export function App() {
     const atCell: CellField = cellCols.includes(cellRef.current)
       ? cellRef.current
       : "title";
+    // The columns the selection covers. `V` pins it to the full width —
+    // that is the whole difference between the two visual modes — and
+    // outside visual there is no rectangle, only the cell you stand in.
+    const selCols: CellField[] =
+      activeMode === "visual"
+        ? visualLineRef.current
+          ? cellCols
+          : cellSpan(anchorCellRef.current ?? atCell, atCell, cellCols)
+        : [atCell];
 
     switch (cmd) {
       // ---- motion
@@ -1902,15 +2157,33 @@ export function App() {
       case "<esc>":
         enterMode("normal");
         putAnchor(null);
+        putAnchorCell(null);
+        putVisualLine(false);
         setLinkAnchor(null);
         break;
+      // `v` marks a corner, not a line. With `compact` up there is one
+      // column, so the rectangle is one cell wide and this is the line
+      // select it has always been; with `gd` up `l` widens it. Same
+      // shape as the motion keys: the second dimension only exists once
+      // there is a second column to have it in.
       case "v":
-        if (activeMode === "visual") {
+      case "V":
+        // `V` from inside `v` widens to the whole row rather than
+        // leaving, which is what vim does and what you want the moment
+        // you realise the block was the wrong shape. Pressing the same
+        // one twice is what leaves.
+        if (activeMode === "visual" && visualLineRef.current === (cmd === "V")) {
           enterMode("normal");
           putAnchor(null);
+          putAnchorCell(null);
+          putVisualLine(false);
+        } else if (activeMode === "visual") {
+          putVisualLine(cmd === "V");
         } else if (current) {
           enterMode("visual");
           putAnchor(current.id);
+          putAnchorCell(atCell);
+          putVisualLine(cmd === "V");
         }
         break;
       case ":":
@@ -2007,18 +2280,45 @@ export function App() {
       case "dd":
         deleteSelection(selection);
         break;
+      // Two registers, and they put into different worlds: rows create
+      // tasks, cells overwrite fields on tasks that are already there.
+      // `yy` / `Y` fill the first, `y` fills the second, and `p` puts
+      // down whichever was filled last — see `lastYank`.
       case "yy":
+      case "Y":
         register.current = selection;
+        lastYank.current = "rows";
         say(t("yanked {n}", { n: selection.length }), "ok");
-        if (activeMode === "visual") {
-          enterMode("normal");
-          putAnchor(null);
-        }
+        leaveVisual();
         break;
+      // Only ever reached in visual: `y` is a prefix elsewhere.
+      case "y": {
+        const block: CellBlock = {
+          cols: selCols,
+          rows: selection.map((task) =>
+            selCols.map((col) => cellRead(col, task, bySchedule.get(task.id))),
+          ),
+        };
+        cellRegister.current = block;
+        lastYank.current = "cells";
+        say(
+          t("yanked {rows}×{cols}", {
+            rows: block.rows.length,
+            cols: selCols.length,
+          }),
+          "ok",
+        );
+        leaveVisual();
+        break;
+      }
       case "p":
-        void paste(current?.id ?? null, "after", cursorParent);
+        if (lastYank.current === "cells") void pasteCells(current, atCell);
+        else void paste(current?.id ?? null, "after", cursorParent);
         break;
       case "P":
+        // A cell block has no "before": it overwrites where you point it
+        // rather than making room, so there is no side to land on. `P`
+        // stays the row paste it always was.
         void paste(current?.id ?? null, "before", cursorParent);
         break;
       case "J":
@@ -2580,6 +2880,7 @@ export function App() {
             bySchedule={bySchedule}
             cursor={cursor}
             selected={selectedIds}
+            selectedCols={selectedCols}
             editing={editing}
             onEditChange={(value) =>
               setEditing((prev) => (prev ? { ...prev, value } : prev))

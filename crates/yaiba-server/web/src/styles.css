@@ -865,6 +865,25 @@ button.row__date:focus-visible {
   box-shadow: inset 0 0 0 1px var(--edge-dim);
 }
 
+/* Inside the visual rectangle, when the rectangle is narrower than the
+   row. A selection covering every column keeps the `row--selected`
+   shading it has always had — see the note at `inCellSel`.
+
+   Literally `row--selected`'s fill, down to the alpha, rather than a
+   colour of its own: it is the same state drawn at cell granularity,
+   and a selection that changed hue when it got narrower would read as a
+   different thing happening. The magenta is load-bearing here — the
+   cyan next door means cursor and focus, which is what `row__cell` and
+   `--picking` are, and a selection wearing it would be claiming to be
+   one of those.
+
+   Sits above `--picking` and below `row__cell` for the same reason they
+   do: the panel you have open and the cell you are standing in both
+   outrank a range you are still dragging. */
+.row__cell--sel {
+  background: rgba(244, 114, 182, 0.1);
+}
+
 /* The cell the open calendar belongs to. Without it the panel floats
    over a list with nothing marked, and a mis-click lands on a date you
    did not mean to be setting. */
