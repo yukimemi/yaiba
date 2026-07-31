@@ -755,6 +755,18 @@ deliberately does not bump `notify`).
   just the two-node case. Client-side previews are a convenience and
   must agree with it, never replace it — including the expansion below,
   which is the part a preview is most likely to get wrong.
+- **A pinned start is a floor, and a pin adjusts the lag it crosses.**
+  The forward pass takes `max(pin, pred_end + lag)`, so a pin dropped
+  inside an edge's lag used to slide to the day the edge asked for —
+  the date visibly ignored. `pinStartOps` (web `commands.ts`) is the
+  one place that rule lives now: the pin adjusts every crossed edge's
+  lag to the spacing the date implies, and a pin before a predecessor's
+  finish — which would invert the edge — is refused. `:start` runs it,
+  and the calendar picker, a cell paste, the bar drag and `.` / `,` all
+  commit through those; the gantt's move preview clamps at the same
+  floor (`earliestStart`) so what you see is what the release commits.
+  A fifth path that patches `start` directly is the one that goes
+  stale.
 - **A summary is not scheduled, and every edge is expanded to leaves.**
   A task with children takes its span from their union and its progress
   from a duration-weighted roll-up; only leaves are ever scheduled.

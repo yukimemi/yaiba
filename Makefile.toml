@@ -218,6 +218,7 @@ node scripts/check-i18n.mjs
 # not the `bun run <script>` path that swallows stdout on Windows.
 bun scripts/check-folds.ts
 bun scripts/check-cells.ts
+bun scripts/check-pin.ts
 node node_modules/vite/bin/vite.js build
 '''
 

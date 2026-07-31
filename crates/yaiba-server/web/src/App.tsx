@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type PeersInfo, type ProjectsInfo } from "./api";
 import {
   assigneeNames,
+  pinStartOps,
   runCommand,
   type Columns,
   type DateField,
@@ -1788,20 +1789,70 @@ export function App() {
    * dependencies. Dragging it means "I want it here", so the computed
    * date becomes an explicit pin, which is also what makes the gesture
    * survive the next recompute.
+   *
+   * Through `pinStartOps`, the same commit `:start` makes: a drop inside
+   * a predecessor's lag adjusts the lag rather than sliding to tomorrow
+   * on the recompute, and the note says so — the one edit a drag cannot
+   * show coming, because the lag lives on the edge, not the bar.
    */
   const onMoveBar = useCallback(
     (id: string, days: number) => {
       const task = visible.find((t) => t.id === id);
       const sched = bySchedule.get(id);
-      if (!task || !sched) return;
+      if (!data || !task || !sched) return;
       const next = addDays(sched.start, days);
-      void run(
-        [{ kind: "patch", id, patch: { start: next } }],
-        [{ kind: "patch", id, patch: { start: task.start } }],
-        `start ${next}`,
-      );
+      const pin = pinStartOps(data, task, next);
+      if (typeof pin === "string") {
+        say(pin, "error");
+        return;
+      }
+      void run(pin.ops, pin.undoOps, `start ${next}`).then((ok) => {
+        if (ok && pin.note) say(pin.note, "info");
+      });
     },
-    [visible, bySchedule, run],
+    [data, visible, bySchedule, run],
+  );
+
+  /**
+   * `.` / `,`: nudge the start a day later / earlier, count included.
+   *
+   * The keyboard twin of dragging the bar body — `+` / `-` move the end
+   * by way of the duration, and this is the other grip. The duration is
+   * untouched, the bar's computed start becomes a pin where it lands,
+   * and the commit goes through `pinStartOps` exactly as the drag does,
+   * so a shift into a predecessor's lag adjusts the lag there too
+   * rather than being silently raised.
+   */
+  const shiftStart = useCallback(
+    (tasks: Task[], delta: number) => {
+      if (!data || !tasks.length) return;
+      const ops: Op[] = [];
+      const undo: Op[] = [];
+      const notes: string[] = [];
+      for (const task of tasks) {
+        const sched = bySchedule.get(task.id);
+        // A summary's dates are its children's; there is no bar to move.
+        if (!sched || sched.summary) continue;
+        const pin = pinStartOps(data, task, addDays(sched.start, delta));
+        if (typeof pin === "string") {
+          say(pin, "error");
+          return;
+        }
+        ops.push(...pin.ops);
+        undo.push(...pin.undoOps);
+        if (pin.note) notes.push(pin.note);
+      }
+      if (!ops.length) return;
+      const label = `start ${delta > 0 ? "+" : "−"}${Math.abs(delta)}d`;
+      void run(ops, undo, label).then((ok) => {
+        if (!ok) return;
+        say(
+          [tasks.length > 1 ? `${label} · ${tasks.length}` : label, ...notes].join(" · "),
+          notes.length ? "info" : "ok",
+        );
+      });
+    },
+    [data, bySchedule, run],
   );
 
   const onResizeBar = useCallback(
@@ -2332,6 +2383,12 @@ export function App() {
         break;
 
       // ---- planning
+      case ".":
+        shiftStart(selection, count);
+        break;
+      case ",":
+        shiftStart(selection, -count);
+        break;
       case "+":
       case "=":
         patchAll(

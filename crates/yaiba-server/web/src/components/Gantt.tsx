@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { Zoom } from "../commands";
+import { earliestStart, type Zoom } from "../commands";
 import { addDays, diffDays, isWeekend, monthLabel, weekdayLabel } from "../dates";
 import type { Lang } from "../lang";
 import type { Dep, Scheduled, Task } from "../types";
@@ -140,6 +140,16 @@ export function Gantt({
   useEffect(() => {
     if (!drag) return;
     const startX = drag.x;
+    // A move may not cross a predecessor's finish: the commit adjusts
+    // the lag on an edge the drop lands inside, but a drop before the
+    // finish would invert the edge and is refused. Clamp the preview at
+    // that floor so what you see is what the release commits.
+    const floorDays = (() => {
+      if (drag.kind !== "move") return null;
+      const sched = bySchedule.get(drag.id);
+      const floor = sched && earliestStart(deps, [...bySchedule.values()], drag.id);
+      return sched && floor ? diffDays(sched.start, floor) : null;
+    })();
 
     const onMove = (e: PointerEvent) => {
       const current = dragRef.current;
@@ -158,9 +168,11 @@ export function Gantt({
           ?.closest("[data-task-id]");
         over = row?.getAttribute("data-task-id") ?? null;
       }
+      let days = Math.round((e.clientX - startX) / dayW);
+      if (floorDays !== null) days = Math.max(days, floorDays);
       setDrag({
         ...current,
-        days: Math.round((e.clientX - startX) / dayW),
+        days,
         x: startX,
         y: e.clientY,
         px,
