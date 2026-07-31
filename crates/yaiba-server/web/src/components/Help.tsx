@@ -52,6 +52,7 @@ const groups = (): Group[] => [
     title: t("PLAN"),
     keys: [
       ["+ / -", t("duration ±1 day")],
+      [". / ,", t("start ±1 day — the bar moves")],
       ["gp / gP", t("priority up / down")],
       ["( / )", t("progress ∓10%")],
       ["D", t("add a dependency")],

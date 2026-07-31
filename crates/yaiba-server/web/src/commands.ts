@@ -302,6 +302,103 @@ function refuseSummary(data: AppData, task: Task, field: string): string | null 
   return t("“{title}” is a summary — its {field} comes from its children", { title: task.title, field });
 }
 
+/**
+ * The earliest date a start pin for `to` can actually hold: the latest
+ * finish among its predecessors, or null when nothing constrains it.
+ *
+ * Summary predecessors are exact here, not an approximation. The server
+ * expands an edge out of a summary into one edge per leaf, all carrying
+ * the original lag, and the forward pass takes the max — which is the
+ * bracket's own end plus that lag, the number this reads.
+ */
+export function earliestStart(
+  deps: AppData["deps"],
+  scheduled: Scheduled[],
+  to: string,
+): string | null {
+  let floor: string | null = null;
+  for (const dep of deps) {
+    if (dep.to !== to) continue;
+    const pred = scheduled.find((s) => s.id === dep.from);
+    if (pred && (!floor || pred.end > floor)) floor = pred.end;
+  }
+  return floor;
+}
+
+/** What pinning a start takes, beyond the patch itself. */
+export interface PinStart {
+  ops: Op[];
+  undoOps: Op[];
+  /** The lag adjustments the pin needed, for the status line. */
+  note: string | null;
+}
+
+/**
+ * Ops that pin `task`'s start at `date` — and make the pin stick.
+ *
+ * A pinned start is a floor to the scheduler, not a position: the
+ * forward pass takes `max(pin, pred_end + lag)`, so a pin dropped
+ * inside an edge's lag was silently raised to the day the edge asked
+ * for — #81's "the date I typed is visibly ignored", through every
+ * gesture that pins. Dropping inside the lag is unambiguous, though:
+ * there is no other reason to put it there, so the pin adjusts each
+ * crossed edge's lag to the spacing the date implies. Every edge that
+ * still crosses after that would keep the floor above the pin, which is
+ * why it is every crossed edge and not only the binding one. A pin
+ * before a predecessor's finish would invert the edge, and stays
+ * refused — with a date, so the retry is one keystroke away.
+ *
+ * This is the one implementation of that rule. `:start` runs it, and
+ * the calendar picker, a cell paste, a bar drag and `.` / `,` all
+ * commit through those, so the four gestures cannot drift.
+ */
+export function pinStartOps(
+  data: AppData,
+  task: Task,
+  date: string,
+): PinStart | string {
+  const adjust: { before: AppData["deps"][number]; after: AppData["deps"][number]; title: string }[] = [];
+  for (const dep of data.deps) {
+    if (dep.to !== task.id) continue;
+    const pred = data.schedule.tasks.find((s) => s.id === dep.from);
+    if (!pred) continue;
+    const gap = diffDays(pred.end, date);
+    if (gap < 0) {
+      const title =
+        data.tasks.find((task) => task.id === dep.from)?.title ?? dep.from;
+      return t("{d} is before “{title}” finishes ({end})", {
+        d: date,
+        title,
+        end: pred.end,
+      });
+    }
+    if (gap < dep.lag_days) {
+      const title =
+        data.tasks.find((task) => task.id === dep.from)?.title ?? dep.from;
+      adjust.push({ before: dep, after: { ...dep, lag_days: gap }, title });
+    }
+  }
+  const ops: Op[] = [{ kind: "patch", id: task.id, patch: { start: date } }];
+  const undoOps: Op[] = [
+    { kind: "patch", id: task.id, patch: { start: task.start } },
+  ];
+  for (const { before, after } of adjust) {
+    ops.push({ kind: "addDep", dep: after });
+    undoOps.push({ kind: "addDep", dep: before });
+  }
+  const note =
+    adjust.length === 0
+      ? null
+      : adjust.length === 1
+        ? t("lag {a}→{b} on “{title}”", {
+            a: adjust[0].before.lag_days,
+            b: adjust[0].after.lag_days,
+            title: adjust[0].title,
+          })
+        : t("lag adjusted on {n} links", { n: adjust.length });
+  return { ops, undoOps, note };
+}
+
 /** Resolve a 1-based row number as typed on the command line. */
 function rowAt(ctx: CommandContext, arg: string): Task | string {
   const n = Number(arg);
@@ -422,6 +519,36 @@ export function runCommand(
       const clearing = !arg || ["none", "clear", "-"].includes(arg);
       const date = clearing ? null : parseDateExpr(arg, data.today);
       if (!clearing && date === null) return { error: t("bad date: {d}", { d: arg }) };
+      // A start pin goes through `pinStartOps` so the date named is the
+      // date the bar lands on: an edge whose lag the pin crosses has its
+      // lag adjusted in the same commit, and a pin before a predecessor's
+      // finish is refused rather than silently raised. Everything that
+      // pins a start — this command, the calendar, a cell paste, the
+      // gantt's drag, `.` / `,` — meets here.
+      if (head === "start" && date) {
+        const ops: Op[] = [];
+        const undo: Op[] = [];
+        const notes: string[] = [];
+        for (const task of selection) {
+          const refusal = refuseSummary(data, task, t("start date"));
+          if (refusal) return { error: refusal };
+          const pin = pinStartOps(data, task, date);
+          if (typeof pin === "string") return { error: pin };
+          ops.push(...pin.ops);
+          undo.push(...pin.undoOps);
+          if (pin.note) notes.push(pin.note);
+        }
+        const label = `start ${date}`;
+        return {
+          ops,
+          undoOps: undo,
+          label,
+          message: [
+            selection.length > 1 ? `${label} · ${selection.length}` : label,
+            ...notes,
+          ].join(" · "),
+        };
+      }
       return patchSelection(
         selection,
         (task) => {

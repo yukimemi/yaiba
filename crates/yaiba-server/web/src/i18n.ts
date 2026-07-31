@@ -355,6 +355,11 @@ const JA: Record<string, string> = {
   "move the row down / up, level and all": "行を下 / 上へ（階層ごと）",
   "undo / redo": "元に戻す / やり直す",
   "duration ±1 day": "期間 ±1日",
+  "start ±1 day — the bar moves": "開始日 ±1日 — バーごと動く",
+  "{d} is before “{title}” finishes ({end})":
+    "{d} は「{title}」の終了 ({end}) より前です",
+  "lag {a}→{b} on “{title}”": "「{title}」とのラグ {a}→{b}",
+  "lag adjusted on {n} links": "{n} 件のラグを調整",
   "priority up / down": "優先度を上げる / 下げる",
   "progress ∓10%": "進捗 ∓10%",
   "add a dependency": "依存を張る",

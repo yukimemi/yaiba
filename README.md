@@ -116,7 +116,7 @@ yaiba self-update --check    # just tell me whether one exists
 | `dd` `yy` `Y` | delete, yank rows |
 | `p` `P` | put the last yank · `P` is rows only · `u` / `^r` undo, redo |
 | `J` `K` | move the row down / up, changing level to suit where it lands |
-| `+` `-` | duration ±1 day · `gp` `gP` priority · `(` `)` progress |
+| `+` `-` | duration ±1 day · `.` `,` start ±1 day · `gp` `gP` priority · `(` `)` progress |
 | `D` | add a dependency: pick the task this one waits for, `⏎` |
 | `X` | cut a dependency |
 | `v` `V` | select cells / whole rows — every edit above applies to the block |
@@ -257,10 +257,17 @@ and `:dep ⟨row⟩ +⟨days⟩` is where you say it:
 
 `+0` is the one worth knowing about. Two half-day jobs done in one
 sitting are a real shape, and until an edge could say so the second one
-was always pushed to tomorrow — pinning its date did not help either,
-since a pinned start is a floor and the edge raised it. Re-running `:dep`
-on an edge that already exists is how its spacing changes; there is no
-need to unlink first.
+was always pushed to tomorrow. Re-running `:dep` on an edge that
+already exists is how its spacing changes; there is no need to unlink
+first.
+
+You rarely have to, though. A pinned start is a floor to the scheduler,
+and a pin dropped inside an edge's lag — by dragging the bar onto its
+predecessor's day, by `:start`, from the calendar, by a pasted cell, or
+with `.` / `,` — adjusts the lag to the spacing the date implies, in
+the same commit, and says so on the status line. A pin before the
+predecessor's finish would invert the edge, and is refused with the
+date it does finish.
 
 The default stays at one day, so no existing plan moves. A negative lag
 is refused rather than clamped quietly: it would mean the two *overlap*,
