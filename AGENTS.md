@@ -411,6 +411,13 @@ in the dark theme and `0` in the light one, and every shadow is written
 in office mode. Office mode also drops the 刃 from the wordmark and the
 tab title — it has to survive a shared screen in a meeting.
 
+Alpha is the other theme trap. A signal fill written for `--void:
+#05070d` at 0.12–0.14 washes out to nothing over white (0.14 amber is
+`#fef6e0` — the page background to the eye). When a fill *is* the
+signal, as the overdue bar's is, office mode needs it re-stated
+stronger; the overdue rules at the end of the gantt block are the
+pattern to copy.
+
 ### Gantt interaction traps
 
 - **`.gantt__bar` has `overflow: hidden`** to clip the progress fill to
