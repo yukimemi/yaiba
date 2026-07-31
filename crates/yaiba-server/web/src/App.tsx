@@ -37,6 +37,7 @@ import {
   visibleTasks,
   type SortKey,
 } from "./filter";
+import { cellColumns, cellStep, type CellField } from "./cells";
 import { modeHint, type Mode } from "./mode";
 import { t } from "./i18n";
 import { applyLang, initialLang, type Lang } from "./lang";
@@ -171,6 +172,50 @@ export function App() {
   const [zoom, setZoom] = useState<Zoom>(savedView.zoom);
   /** Which columns the list carries — `:dates` / `gd` swaps them. */
   const [columns, setColumns] = useState<Columns>(savedView.columns);
+  /**
+   * Which cell of the cursor row `h` / `l` last walked to.
+   *
+   * Not persisted with the rest of the view state: where you were
+   * standing on a row is a position mid-edit, not a way of looking at
+   * the project, and a reload that put the cursor back on `ended` would
+   * be restoring a keystroke rather than a view.
+   *
+   * Deliberately *not* reset when the cursor row changes — that is what
+   * makes a column walkable straight down the page with `j`, which is
+   * the whole point of #87.
+   */
+  const [cellRaw, setCellRaw] = useState<CellField>("title");
+  /**
+   * The same, mirrored out of state for the reason `cursorRef` is: a
+   * burst of keys outruns React. Three `l` in one tick all read the same
+   * render-old column and set it to the same neighbour, so the cursor
+   * moved one cell and swallowed the other two — measured, not guessed,
+   * against a burst of `j` in the same page, which walked all three rows
+   * because it goes through `cursorRef`.
+   */
+  const cellRef = useRef<CellField>("title");
+  const cellCols = useMemo(() => cellColumns(columns), [columns]);
+  /**
+   * The cell cursor clamped to a column that is actually drawn.
+   *
+   * Derived rather than reset by an effect on `columns`, so there is no
+   * render in which the handler holds a column nothing is rendering —
+   * the hazard #87 named, and the one `picking` already has a rule
+   * about. Turning `gd` off leaves one column, so the clamp is what
+   * silently parks the cursor back on the title; turning it on again
+   * restores where you were, because `cellRaw` was never cleared.
+   */
+  const cell: CellField = cellCols.includes(cellRaw) ? cellRaw : "title";
+  /**
+   * Move the cell cursor, ref first — the only thing that writes either.
+   *
+   * `putCursor` for columns, and it exists for the same reason: the
+   * handler must never read the column out of a render.
+   */
+  const putCell = useCallback((next: CellField) => {
+    cellRef.current = next;
+    setCellRaw(next);
+  }, []);
   /**
    * The list's share of the split, as a percent.
    *
@@ -1781,6 +1826,13 @@ export function App() {
     setPendingKeys("");
     setMessage(null);
 
+    // Out of the ref, not the render, and clamped the way the list draws
+    // it — `gd` off leaves one column, and a burst that walked right
+    // before it must not act on a cell nothing is rendering.
+    const atCell: CellField = cellCols.includes(cellRef.current)
+      ? cellRef.current
+      : "title";
+
     switch (cmd) {
       // ---- motion
       case "j":
@@ -2000,9 +2052,26 @@ export function App() {
           say(t("pick the dependency to cut — ⏎ to confirm"));
         }
         break;
+      // Edit the cell under the cursor — one key for all six, where `cs`
+      // / `ce` / `ca` / `cA` / `co` are five keys that each name one.
+      // Those stay: they reach a field from any view without walking to
+      // it, and a display mode is not a precondition for an edit. This is
+      // what the walk is *for*, and it opens the same panels they do.
+      //
+      // The link modes keep it while they are up. They own the keyboard
+      // by then, and `⏎` is how they commit.
       case "<cr>":
         if (activeMode === "link") commitLink(current, false);
         else if (activeMode === "unlink") commitLink(current, true);
+        else if (atCell === "owner") openOwner(current);
+        else if (atCell !== "title") openDate(current, atCell);
+        else if (current) {
+          // The title, entered rather than cleared: `cc` is the one that
+          // means "change the line", and `⏎` here says "edit this cell",
+          // which on every other column opens what is already in it.
+          setEditing({ id: current.id, value: current.title, caret: "tail" });
+          enterMode("insert");
+        }
         break;
 
       // ---- view
@@ -2060,12 +2129,26 @@ export function App() {
       // behaviour a tree UI trains your hands for. A count has no meaning
       // on a fold, so it is ignored rather than applied.
       //
-      // The decision itself lives in `foldStep`, a pure function, so it
-      // can be asserted without a browser — see `scripts/check-folds.ts`.
-      // These arms only apply what it returns.
+      // Two things answer to them now, and in this order: the cell to the
+      // left or right, then the fold. They are the same motion — `h` is
+      // "back out one step", and a cell is a smaller step than a
+      // subtree — so the precedence is not a special case but what "one
+      // step" means when the row is six cells wide (#87).
+      //
+      // Neither decision is taken here. `cellStep` says which of the two
+      // owns the key and `foldStep` says what the fold does, both pure,
+      // both asserted without a browser by `check-cells.ts` and
+      // `check-folds.ts` — including that compact mode, with its single
+      // column, still reaches `foldStep` with nothing in front of it.
       case "h":
       case "l": {
         if (!current) break;
+        const move = cellStep(cmd === "l" ? "in" : "out", atCell, cellCols);
+        if (!move) break;
+        if (move.kind === "cell") {
+          putCell(move.cell);
+          break;
+        }
         const step = foldStep(
           cmd === "l" ? "open" : "close",
           {
@@ -2075,9 +2158,15 @@ export function App() {
           },
           collapsed,
         );
-        if (!step) break;
-        setCollapsed(step.collapsed);
-        if (step.cursor !== current.id) putCursor(step.cursor);
+        if (step) {
+          setCollapsed(step.collapsed);
+          if (step.cursor !== current.id) putCursor(step.cursor);
+          break;
+        }
+        // The fold declined — a leaf, or a summary already open. `l` then
+        // has one reading left, which is the columns. `h` has none: there
+        // is nothing to the left of the row itself.
+        if (move.fallback) putCell(move.fallback);
         break;
       }
       case "zf":
@@ -2467,6 +2556,7 @@ export function App() {
             }
             sort={sort}
             columns={columns}
+            cell={cell}
             picking={picking}
             onOpenDate={(id, field, anchor) => setPicking({ id, field, anchor })}
             pickingOwner={pickingOwner?.id ?? null}

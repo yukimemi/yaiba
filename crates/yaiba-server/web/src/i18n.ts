@@ -324,6 +324,10 @@ const JA: Record<string, string> = {
   EDIT: "編集",
   PLAN: "計画",
   MOUSE: "マウス",
+  // 列 rather than カラム: the heading names the thing on screen, and a
+  // spreadsheet in Japanese calls it 列. カラム is what you would call
+  // the code's `Columns` type, which is not what this panel is about.
+  COLUMNS: "列",
   BREAKDOWN: "階層",
   "DATE PICKER": "日付ピッカー",
   PEERS: "ピア",
@@ -398,7 +402,13 @@ const JA: Record<string, string> = {
   // direction in the tree, not a step back through history.
   "open this fold / close it, or step out and close":
     "この行を開く / 閉じる（葉なら親へ出て閉じる）",
-  "fold / unfold — arrows too": "畳む / 開く — 矢印キーも同じ",
+  // `h` / `l` answer to two things now, and which one depends on where
+  // the cell cursor stands. 外へ / 内へ is the reading both share — the
+  // fold and the columns are the same motion at two scales — so the
+  // Japanese names the motion and lets the two readings follow it,
+  // rather than spelling out a conditional the bar has no room for.
+  "out / in — a fold, or a column under gd":
+    "外へ / 内へ — 畳みか、gd の列か",
   "fold to projects only / unfold all": "プロジェクトだけに / すべて展開",
   "toggle this row · zo open · zc close": "この行を開閉 · zo 開く · zc 閉じる",
   "focus this subtree / show everything": "この部分木に絞る / すべて表示",
@@ -421,6 +431,16 @@ const JA: Record<string, string> = {
   "when it really finished — none clears": "実際に終えた日 — none で消去",
   "plan vs actual, and an owner column — gd toggles":
     "計画と実績、担当の列 — gd で切替",
+  // The COLUMNS group. セル for the cell, because the row is a table
+  // here and 升目 would be the calendar's word — the picker's own
+  // "walk the grid" above already owns that reading.
+  "walk the cells — arrows too": "セルを移動 — 矢印キーも同じ",
+  "keep the column, change the row": "列はそのまま、行を移動",
+  "edit the cell under the cursor": "カーソル位置のセルを編集",
+  // Not 折り畳みに戻る: nothing is being restored. At the leftmost cell
+  // there is no cell further out, so the same key goes back to meaning
+  // what it meant before the columns existed.
+  "back to folding": "そこから先は畳みの操作",
   "calendar on the planned start / end": "計画の開始 / 終了にカレンダー",
   "calendar on the actual start / end": "実績の着手 / 完了にカレンダー",
   "open the calendar over it": "そのセルの上にカレンダーを開く",

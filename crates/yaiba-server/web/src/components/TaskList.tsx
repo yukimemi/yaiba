@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef } from "react";
 
+import type { CellField } from "../cells";
 import type { Columns, DateField } from "../commands";
 import {
   DATE_COLUMNS,
@@ -38,6 +39,14 @@ interface Props {
   sort: SortKey;
   /** `dates` swaps the right-hand markers for the four date columns. */
   columns: Columns;
+  /**
+   * The column `h` / `l` last walked to, drawn on the cursor row only.
+   *
+   * Only marked when there is more than one column to be standing in:
+   * with `compact` up the cell is always the title, and a box around it
+   * would be a second cursor saying what `row--cursor` already says.
+   */
+  cell: CellField;
   /** The cell whose picker is open, so it can stay lit under the panel. */
   picking: { id: string; field: DateField } | null;
   /** Click a date cell to open the calendar over it. */
@@ -89,6 +98,7 @@ export function TaskList({
   emptyHint,
   sort,
   columns,
+  cell,
   picking,
   onOpenDate,
   pickingOwner,
@@ -257,6 +267,15 @@ export function TaskList({
             const lateDays =
               sched?.overdue && task.due ? diffDays(task.due, sched.end) : 0;
             const isCursor = index === cursor && draftIndex < 0;
+            /**
+             * Is the cell cursor standing here?
+             *
+             * Gated on `dates` as well as on the row, because in compact
+             * there is only one cell and a mark on it would be a second
+             * cursor for the same position — see the `cell` prop.
+             */
+            const atCell = (field: CellField) =>
+              isCursor && columns === "dates" && cell === field;
             const classes = [
               "row",
               `row--${task.status}`,
@@ -380,7 +399,7 @@ export function TaskList({
                     />
                   ) : (
                     <span
-                      className="row__title"
+                      className={`row__title${atCell("title") ? " row__cell" : ""}`}
                       onDoubleClick={() => onEditTitle(task.id)}
                     >
                       {task.title || "…"}
@@ -467,6 +486,7 @@ export function TaskList({
                         "row__owner-col",
                         !task.assignee && "row__owner-col--empty",
                         pickingOwner === task.id && "row__owner-col--picking",
+                        atCell("owner") && "row__cell",
                       ]
                         .filter(Boolean)
                         .join(" ")}
@@ -515,6 +535,7 @@ export function TaskList({
                         picking?.id === task.id &&
                           picking.field === col.field &&
                           "row__date--picking",
+                        atCell(col.field) && "row__cell",
                       ]
                         .filter(Boolean)
                         .join(" ");
