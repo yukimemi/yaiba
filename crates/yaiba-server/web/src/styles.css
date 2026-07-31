@@ -1556,6 +1556,27 @@ button.row__date:focus-visible {
   box-shadow: none;
 }
 
+/* Office mode re-states the overdue fills far stronger. The alphas above
+   were tuned on `--void: #05070d`, where a 0.14 wash is a clear shift;
+   over white the same wash lands at #fef6e0 — technically amber,
+   perceptually the page background. The border, the `+Nd` and the HUD
+   stat were always `--rust` and never had the problem.
+
+   Scoped with `:not(.gantt__bar--critical)`: the `[data-theme]` prefix
+   would otherwise out-specify the critical+overdue compound rule above
+   and paint the combo bar amber here, the same collision the compound
+   rule exists to prevent. */
+:root[data-theme="light"]
+  .gantt__bar--overdue:not(.gantt__bar--done):not(.gantt__bar--critical) {
+  background: rgba(251, 191, 36, 0.45);
+}
+
+:root[data-theme="light"]
+  .gantt__bar--overdue:not(.gantt__bar--done):not(.gantt__bar--critical)
+  .gantt__fill {
+  background: rgba(251, 191, 36, 0.6);
+}
+
 .gantt__label {
   position: absolute;
   top: 3px;
@@ -1582,6 +1603,16 @@ button.row__date:focus-visible {
   stroke-width: 1.6;
   stroke-linejoin: round;
   filter: drop-shadow(0 0 calc(4px * var(--glow)) rgba(203, 213, 225, 0.4));
+}
+
+/* In office mode `--steel` is near-black, and a near-black zigzag at
+   1.6px out-shouts the bars it reports on. Not `--ash`, though: that is
+   the actuals rail's own grey, and sharing it put the report and the
+   record in the same voice. `--ash-dim` keeps the dark theme's
+   hierarchy — today line strongest, progress line lightest — with the
+   line still legible on white. */
+:root[data-theme="light"] .gantt__progress-line {
+  stroke: var(--ash-dim);
 }
 
 .gantt__links {
