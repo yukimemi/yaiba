@@ -101,10 +101,15 @@ export function dateValue(
 /**
  * True when the value shown was computed rather than entered.
  *
- * Both halves of the plan hang off `start`: without a pin the scheduler
- * places the task as early as its dependencies allow, and the finish
- * follows it. Dimming both says the row will move on its own — which is
- * exactly what you need to know before reading a date off it.
+ * Both halves of the plan hang off `start`: without a pin the task sits
+ * on the day it was typed, as early as its dependencies allow, and the
+ * finish follows it. Dimming both says nobody chose this date — so a
+ * dependency slipping is free to carry it, where a pinned date would
+ * have held and pushed the successor instead.
+ *
+ * It no longer means the date drifts on its own. It did while the anchor
+ * was `today`, and "dim = this will have moved by tomorrow" is the
+ * reading to unlearn.
  */
 export function dateDerived(field: DateField, task: Task): boolean {
   return (field === "start" || field === "end") && task.start === null;
