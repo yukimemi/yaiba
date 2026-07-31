@@ -494,6 +494,28 @@ pattern to copy.
   classes that carry state — empty, locked, picking — so the state
   silently loses on exactly those two columns. Every rule from the base
   down is one class, and later wins.
+- **`h` / `l` are one motion, resolved at two scales.** They fold (#82)
+  *and* walk the cells (#87), and the two are not a conditional on the
+  display mode — which would be the "a display mode is a precondition
+  for an edit" this file refuses six bullets up. They mean one step out
+  and one step in; a cell is a smaller step than a subtree, so the cells
+  answer first and the fold answers at the leftmost one, where there is
+  no cell further out. `compact` has a single column, so every `h` / `l`
+  there reaches `foldStep` with nothing in front of it — identical to
+  what #82 shipped, and asserted as such in `check-cells.ts` rather than
+  promised in a comment.
+- **Neither half of that decision lives in the key handler.**
+  `cellStep` says which of the two owns the key, `foldStep` says what
+  the fold does; both are pure and both are run by `web-build`. A rule
+  only a real keyboard can check is how #80 shipped.
+- **The cell cursor is derived, not reset.** `cellRaw` holds where you
+  walked to and is clamped through `cellColumns(columns)` on every
+  render, so turning `gd` off cannot leave the handler holding a column
+  nothing is rendering — the same hazard as `picking` outliving its row,
+  without needing an effect to catch it. It is deliberately *not*
+  cleared when the cursor row changes: keeping the column while `j`
+  moves is what makes a column fillable straight down the page, which is
+  the whole point of #87.
 
 ### A project is a database file
 

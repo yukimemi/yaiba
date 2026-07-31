@@ -25,7 +25,7 @@ const groups = (): Group[] => [
       ["gg / G", t("first / last")],
       ["^d / ^u", t("half page")],
       ["H / M / L", t("top / middle / bottom")],
-      ["h / l", t("fold / unfold — arrows too")],
+      ["h / l", t("out / in — a fold, or a column under gd")],
       ["/ n N", t("search, next, previous")],
       ["tab", t("cycle split → list → gantt")],
     ],
@@ -57,6 +57,16 @@ const groups = (): Group[] => [
       ["v", t("visual line select")],
       ["gd", t("date columns ⇄ compact")],
       ["gt", t("office mode ⇄ neon mode")],
+    ],
+  },
+  {
+    title: t("COLUMNS"),
+    keys: [
+      ["gd", t("date columns ⇄ compact")],
+      ["h / l", t("walk the cells — arrows too")],
+      ["j / k", t("keep the column, change the row")],
+      ["⏎", t("edit the cell under the cursor")],
+      ["h at the title", t("back to folding")],
     ],
   },
   {

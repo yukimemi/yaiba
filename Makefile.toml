@@ -217,6 +217,7 @@ node scripts/check-i18n.mjs
 # node needs --experimental-strip-types for that. Executing a *file* is
 # not the `bun run <script>` path that swallows stdout on Windows.
 bun scripts/check-folds.ts
+bun scripts/check-cells.ts
 node node_modules/vite/bin/vite.js build
 '''
 

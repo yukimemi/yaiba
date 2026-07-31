@@ -123,6 +123,7 @@ yaiba self-update --check    # just tell me whether one exists
 | `tab` | split → list → gantt · `[` `]` zoom the timeline |
 | `gd` | plan-vs-actual date columns ⇄ compact |
 | `cs` `ce` `ca` `cA` | calendar on the planned start / end, actual start / end |
+| `h` `l` | out / in — a fold, or a cell once `gd` is up · `⏎` edits it |
 | `>>` `<<` | nest under the row above / move back out |
 | `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |
 | `za` | fold this row · `zf` focus its subtree, `zF` to come back |
@@ -392,6 +393,26 @@ command you could have typed, so it obeys the same rules: picking an
 `end` writes a duration, an actual span is refused if it would run
 backwards, and a summary's plan is not editable at all — those cells are
 plain text rather than buttons, and `cs` on one says so.
+
+Those five keys each name one field, which is what you want when you are
+somewhere else in the plan and just need to fix a date. Filling a column
+in is the other job, and for that the cursor walks:
+
+```text
+h l             out / in — the cell to the left, the cell to the right
+j k             the next row, still in this column
+⏎               edit the cell you are standing in
+```
+
+`h` and `l` mean one step out and one step in, and a cell is a smaller
+step than a subtree — so at the leftmost cell, where there is no cell
+further out, they are the fold's again. That is the whole rule. In the
+compact view there is one column, so they only ever fold, which is what
+they did before the columns existed.
+
+Standing still in a column while `j` walks down the page is the point:
+`⏎`, pick, `j`, `⏎`, pick — a roster or a set of planned starts, filled
+straight down without the mouse and without retyping a command per row.
 
 The gantt draws a **progress line** (イナズマ線) from the reference date:
 each row steps left or right by how far it deviates from where the plan
