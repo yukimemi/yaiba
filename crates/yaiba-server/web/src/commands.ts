@@ -237,6 +237,7 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ["t"],
   },
   { name: "notes", aliases: ["note"] },
+  { name: "title" },
   {
     name: "assign",
     aliases: ["owner"],
@@ -577,6 +578,26 @@ export function runCommand(
     case "notes": {
       if (!current) return needTask();
       return patchSelection([current], () => ({ notes: arg }), t("notes"));
+    }
+    // The title was the one field with no command behind it — `cc` edits
+    // it in place, which is the right way to type one and no way at all
+    // to *write* one from somewhere else. That was fine until a yanked
+    // block could carry a title column, because every put in this app
+    // goes through the line the keyboard would have typed and there was
+    // no line to run (#87).
+    //
+    // The whole selection, like `:assign`: renaming a block to one thing
+    // is a real edit — three placeholder rows becoming three copies of a
+    // heading — and a field command that took only the cursor row for no
+    // reason would be the odd one out.
+    case "title": {
+      if (!selection.length) return needTask();
+      // No `none`, unlike the dates and the owner. A row with no title
+      // is one you cannot find again; `finishEdit` already refuses to
+      // leave one behind and this would be the second way in.
+      const title = arg.trim();
+      if (!title) return { error: t("usage: :title ⟨text⟩") };
+      return patchSelection(selection, () => ({ title }), t("title"));
     }
     case "assign":
     case "owner": {

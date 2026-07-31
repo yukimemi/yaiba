@@ -508,6 +508,27 @@ pattern to copy.
   `cellStep` says which of the two owns the key, `foldStep` says what
   the fold does; both are pure and both are run by `web-build`. A rule
   only a real keyboard can check is how #80 shipped.
+- **A put runs the command line, a yank reads the field.** `cellWriteLine`
+  returns the line the keyboard would have typed and `pasteCells` runs
+  it, so `:end` still measures a duration, an actual span that runs
+  backwards is still refused and a summary's plan is still refused —
+  none of it restated at the paste. `:title` exists for exactly this
+  reason: the title was the one field with no command behind it, and a
+  block carrying a title column had no line to run.
+- **`end` is written in a second pass.** It measures back from the row's
+  start, so a block carrying both would compute the span against the
+  start it is in the middle of replacing. Two awaited passes, then the
+  filed undo steps are merged — one gesture is one `u`, the same shape
+  `paste` uses for rows.
+- **Two registers, and `p` puts the last one filled.** Rows create
+  tasks, cells overwrite fields on tasks that exist; a `p` that guessed
+  from the cursor would guess wrong on the row you were about to
+  duplicate. `lastYank` is the whole rule. `P` stays row-only — a cell
+  block overwrites where you point it, so it has no side to land on.
+- **Nothing is dropped silently.** A block that half landed looks
+  exactly like one that landed, and the columns it missed are the ones
+  nobody thinks to check, so `pasteCells` names every reason it skipped
+  something and downgrades the message from `ok` to `info`.
 - **The cell cursor is derived, not reset.** `cellRaw` holds where you
   walked to and is clamped through `cellColumns(columns)` on every
   render, so turning `gd` off cannot leave the handler holding a column

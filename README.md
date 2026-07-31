@@ -113,12 +113,13 @@ yaiba self-update --check    # just tell me whether one exists
 | `o` `O` | new task below / above — you type immediately, it saves on commit |
 | `i` `a` `c` | edit the title |
 | `x` | complete (the row gets cut) · `s` cycles todo → doing → done |
-| `dd` `yy` `p` | delete, yank, paste · `u` / `^r` undo, redo |
+| `dd` `yy` `Y` | delete, yank rows |
+| `p` `P` | put the last yank · `P` is rows only · `u` / `^r` undo, redo |
 | `J` `K` | move the row down / up, changing level to suit where it lands |
 | `+` `-` | duration ±1 day · `gp` `gP` priority · `(` `)` progress |
 | `D` | add a dependency: pick the task this one waits for, `⏎` |
 | `X` | cut a dependency |
-| `v` | visual line select — every edit above applies to the block |
+| `v` `V` | select cells / whole rows — every edit above applies to the block |
 | `/` `n` `N` | search |
 | `tab` | split → list → gantt · `[` `]` zoom the timeline |
 | `gd` | plan-vs-actual date columns ⇄ compact |
@@ -413,6 +414,39 @@ they did before the columns existed.
 Standing still in a column while `j` walks down the page is the point:
 `⏎`, pick, `j`, `⏎`, pick — a roster or a set of planned starts, filled
 straight down without the mouse and without retyping a command per row.
+
+Or copy what is already there. `v` selects a rectangle of cells rather
+than a run of rows, so the shape you take is the shape you put down:
+
+```text
+v j j y         one column, three rows
+v l j y         two columns, two rows
+p               put it down with the cursor on its top-left corner
+```
+
+It lands by offset, not by column name — that is what makes yanking
+`start` `end` and dropping it on `began` `ended` the two keystrokes it
+should be, which is the comparison the columns exist for. A column whose
+kind disagrees does not land: a date will not overwrite a title, and the
+status line says which cells it skipped rather than half-writing the
+block and looking like it wrote all of it. Running off the last column
+or the last row reads the same way.
+
+Every cell is written by running the command you could have typed, so
+the rules do not move: `end` is a duration measured back from the start,
+so pasting one onto a row that starts elsewhere changes its length; an
+actual span that would finish before it began is refused; a summary's
+plan cells are refused. And a `start` the scheduler placed for you looks
+the same as one you pinned — copying it pins it on the row it lands on.
+
+`V` takes whole rows instead, which is the selection `v` used to be.
+Rows and cells are two registers and two kinds of put: `yy` / `Y` yank
+rows and `p` makes copies of them, `y` yanks cells and `p` writes them
+over what is there. `p` puts down whichever you filled last.
+
+`P` is the exception: it only ever puts rows. A row block makes room
+above the cursor, which is what "before" means for a row; a cell block
+overwrites the cells you point it at, and there is no above to land on.
 
 The gantt draws a **progress line** (イナズマ線) from the reference date:
 each row steps left or right by how far it deviates from where the plan

@@ -14,7 +14,17 @@
  * silently otherwise.
  */
 
-import { cellColumns, cellStep, type CellField } from "../src/cells.ts";
+import {
+  cellColumns,
+  cellKind,
+  cellSpan,
+  cellStep,
+  cellWriteLine,
+  actualsWriteFirst,
+  pastePlan,
+  type CellBlock,
+  type CellField,
+} from "../src/cells.ts";
 import { foldStep } from "../src/filter.ts";
 
 let ran = 0;
@@ -132,6 +142,100 @@ check(
     : "walks",
   "opens",
 );
+
+// ---- the block yank (#87, second half) ------------------------------
+
+// A rectangle is the same however it was dragged.
+check("a span left to right", cellSpan("owner", "end", DATES).join(" "), "owner start end");
+check("and the same dragged back", cellSpan("end", "owner", DATES).join(" "), "owner start end");
+check("one cell is a span of one", cellSpan("start", "start", DATES).join(" "), "start");
+check("compact spans its single column", cellSpan("title", "title", COMPACT).join(" "), "title");
+
+// The kinds that decide whether a put lands.
+check(
+  "the four dates are one kind",
+  [...new Set(["start", "end", "astart", "aend"].map((f) => cellKind(f as CellField)))].join(" "),
+  "date",
+);
+check("a title is its own kind", cellKind("title"), "title");
+check("an owner is its own kind", cellKind("owner"), "owner");
+
+/** `from>to` per column, or `from>refusal`. */
+function plan(cols: CellField[], at: CellField): string {
+  const block: CellBlock = { cols, rows: [cols.map(() => null)] };
+  return pastePlan(block, at, DATES)
+    .map((p) => `${p.from}>${p.refused ?? p.to}`)
+    .join(" ");
+}
+
+// The motivating case: the plan pair dropped onto the record pair.
+check("start end lands on began ended", plan(["start", "end"], "astart"), "start>astart end>aend");
+// Offset, so it keeps its shape wherever it is put.
+check("and back the other way", plan(["astart", "aend"], "start"), "astart>start aend>end");
+check("a single column lands where you point", plan(["aend"], "start"), "aend>start");
+
+// Kinds that disagree are refused rather than coerced.
+check("a title will not land on a date", plan(["title"], "start"), "title>different kind");
+check("an owner will not either", plan(["owner"], "end"), "owner>different kind");
+check("a title lands on a title", plan(["title"], "title"), "title>title");
+// The block keeps its shape, so a pair straddling two kinds only half lands.
+check(
+  "a straddling pair lands only where the kinds agree",
+  plan(["title", "owner"], "title"),
+  "title>title owner>owner",
+);
+// Shifted by one, both halves land on a kind they are not: `owner` onto
+// the title and `start` onto the owner. The block does not slide to find
+// a fit — its shape is the thing being pasted.
+check(
+  "a block put where nothing fits refuses all of it",
+  plan(["owner", "start"], "title"),
+  "owner>different kind start>different kind",
+);
+
+// Running off the right edge is reported, never silently dropped.
+check("a block wider than what is left", plan(["start", "end"], "aend"), "start>aend end>off the end");
+
+// What each cell is written with. `end` is in here as a date command
+// because `:end` is what turns it back into a duration — the paste must
+// not do that arithmetic itself.
+check("a date writes its own command", cellWriteLine("astart", "2026-07-31"), "astart 2026-07-31");
+check("an empty date clears", cellWriteLine("aend", null), "aend none");
+check("an owner goes through assign", cellWriteLine("owner", "mary"), "assign mary");
+check("an empty owner clears", cellWriteLine("owner", null), "assign none");
+check("a title goes through title", cellWriteLine("title", "Ship it"), "title Ship it");
+// Nothing to write rather than a row left nameless.
+check("an empty title writes nothing", String(cellWriteLine("title", null)), "null");
+
+// ---- which of began / ended goes first (CodeRabbit, #102) ----------
+//
+// The two validate against each other, so a pasted span written in the
+// wrong order half-lands: `:astart` is measured against an `actual_end`
+// this same paste is about to replace. The regression that motivated
+// this is the first check below.
+
+// The reported bug: a August span onto a row still holding July.
+check(
+  "a later span writes its end first",
+  actualsWriteFirst("2026-08-01", "2026-07-05"),
+  "aend",
+);
+// The mirror: an earlier span is safe start-first, because the start
+// lands before the finish already on the row.
+check(
+  "an earlier span writes its start first",
+  actualsWriteFirst("2026-06-01", "2026-07-05"),
+  "astart",
+);
+// Overlapping spans need no reordering.
+check(
+  "a start on the finish itself still goes first",
+  actualsWriteFirst("2026-07-05", "2026-07-05"),
+  "astart",
+);
+// Nothing to collide with.
+check("no finish on the row", actualsWriteFirst("2026-08-01", null), "astart");
+check("clearing the start", actualsWriteFirst(null, "2026-07-05"), "astart");
 
 if (failures) {
   console.error(`\ncells: ${failures} check(s) failed`);

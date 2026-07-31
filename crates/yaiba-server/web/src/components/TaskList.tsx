@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef } from "react";
 
-import type { CellField } from "../cells";
+import { cellColumns, type CellField } from "../cells";
 import type { Columns, DateField } from "../commands";
 import {
   DATE_COLUMNS,
@@ -20,6 +20,14 @@ interface Props {
   bySchedule: Map<string, Scheduled>;
   cursor: number;
   selected: Set<string>;
+  /**
+   * The columns the visual selection covers, or null when there is none.
+   *
+   * With `compact` up this is always the single column, so a selection
+   * paints the row exactly as it always did — the shading only has
+   * somewhere narrower to go once `gd` gives it more than one column.
+   */
+  selectedCols: CellField[] | null;
   editing: { id: string; value: string; caret: "head" | "tail" } | null;
   onEditChange: (value: string) => void;
   onEditKey: (e: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -83,6 +91,7 @@ export function TaskList({
   bySchedule,
   cursor,
   selected,
+  selectedCols,
   editing,
   onEditChange,
   onEditKey,
@@ -116,6 +125,11 @@ export function TaskList({
 }: Props) {
   const cursorRef = useRef<HTMLDivElement>(null);
   const editRef = useRef<HTMLInputElement>(null);
+
+  // Whether the visual rectangle is the whole row. Computed once rather
+  // than per row: it is a property of the selection, not of any task.
+  const spanAllCols =
+    !selectedCols || selectedCols.length >= cellColumns(columns).length;
 
   // Keep the cursor row on screen the way a terminal editor would —
   // scrolled into view, but never yanked to the middle.
@@ -276,12 +290,27 @@ export function TaskList({
              */
             const atCell = (field: CellField) =>
               isCursor && columns === "dates" && cell === field;
+            /**
+             * Is this cell inside the visual rectangle?
+             *
+             * Only when the rectangle is narrower than the row. A
+             * selection covering every column — `V`, or anything at all
+             * in `compact` — is drawn as the row shading it has always
+             * been, because shading six cells edge to edge and shading
+             * the row are the same picture, and the row is the cheaper
+             * one to paint.
+             */
+            const rowSelected = selected.has(task.id);
+            const inCellSel = (field: CellField) =>
+              rowSelected &&
+              !spanAllCols &&
+              !!selectedCols?.includes(field);
             const classes = [
               "row",
               `row--${task.status}`,
               sched?.summary && "row--summary",
               isCursor && "row--cursor",
-              selected.has(task.id) && "row--selected",
+              rowSelected && spanAllCols && "row--selected",
               sched?.blocked && "row--blocked",
               cutting.has(task.id) && "row--cut",
               searchTerm &&
@@ -399,7 +428,9 @@ export function TaskList({
                     />
                   ) : (
                     <span
-                      className={`row__title${atCell("title") ? " row__cell" : ""}`}
+                      className={`row__title${atCell("title") ? " row__cell" : ""}${
+                        inCellSel("title") ? " row__cell--sel" : ""
+                      }`}
                       onDoubleClick={() => onEditTitle(task.id)}
                     >
                       {task.title || "…"}
@@ -487,6 +518,7 @@ export function TaskList({
                         !task.assignee && "row__owner-col--empty",
                         pickingOwner === task.id && "row__owner-col--picking",
                         atCell("owner") && "row__cell",
+                        inCellSel("owner") && "row__cell--sel",
                       ]
                         .filter(Boolean)
                         .join(" ")}
@@ -536,6 +568,7 @@ export function TaskList({
                           picking.field === col.field &&
                           "row__date--picking",
                         atCell(col.field) && "row__cell",
+                        inCellSel(col.field) && "row__cell--sel",
                       ]
                         .filter(Boolean)
                         .join(" ");

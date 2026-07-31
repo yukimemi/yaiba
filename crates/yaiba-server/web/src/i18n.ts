@@ -352,7 +352,6 @@ const JA: Record<string, string> = {
   "clear the title and edit": "タイトルを消して編集",
   "toggle done": "完了 / 未完了",
   delete: "削除",
-  "yank / paste a copy": "ヤンク / 複製を貼り付け",
   "move the row down / up, level and all": "行を下 / 上へ（階層ごと）",
   "undo / redo": "元に戻す / やり直す",
   "duration ±1 day": "期間 ±1日",
@@ -362,7 +361,6 @@ const JA: Record<string, string> = {
   "remove a dependency": "依存を切る",
   "gantt zoom out / in": "ガントを縮小 / 拡大",
   "scroll the timeline to the reference date": "タイムラインを基準日へ",
-  "visual line select": "行単位で選択",
   "date columns ⇄ compact": "日付列 ⇄ コンパクト",
   "office mode ⇄ neon mode": "オフィス ⇄ ネオン",
   "put the cursor on a row": "その行にカーソルを置く",
@@ -443,6 +441,38 @@ const JA: Record<string, string> = {
   // there is no cell further out, so the same key goes back to meaning
   // what it meant before the columns existed.
   "back to folding": "そこから先は畳みの操作",
+  // ---- the block yank ---------------------------------------------
+  //
+  // 件 counts rows elsewhere in this file; a rectangle is counted the
+  // way a spreadsheet counts one, 行×列, because "3件" would be the
+  // wrong unit for something two columns wide.
+  title: "タイトル",
+  // 矩形 is the word a spreadsheet uses for a cell range, and it is what
+  // separates these two lines from the row ones above them.
+  "select cells / whole rows": "セルを選択 / 行ごと選択",
+  "select a rectangle of cells": "セルの矩形を選択",
+  "copy that rectangle somewhere else": "その矩形を別の場所へコピー",
+  // The two yanks put into different worlds, so each line says what its
+  // own `p` does rather than leaving one `p` to mean both.
+  "yank rows — p pastes copies of them": "行をヤンク — p で複製を貼る",
+  "in visual: yank the cells — p writes them":
+    "visual 中: セルをヤンク — p で書き込む",
+  "put the last yank down — rows or cells": "最後にヤンクしたものを貼る — 行でもセルでも",
+  // `P` never puts cells: a cell block overwrites where you point it, so
+  // there is no "above" for it to land on. 行のみ says that in the place
+  // the question is actually asked.
+  "put rows above the cursor — rows only": "行をカーソルの上に貼る — 行のみ",
+  "rename — the whole selection": "改名 — 選択範囲すべて",
+  "yanked {rows}×{cols}": "{rows}行×{cols}列 をヤンク",
+  // Each of these is one clause of a status line that may carry several,
+  // so none of them repeats the subject — the sentence already said what
+  // was pasted.
+  "past the last column": "右端をはみ出した分は除外",
+  "past the last row": "最終行をはみ出した分は除外",
+  "into a column of another kind": "種類の違う列には貼れません",
+  "{n} refused": "{n}件は拒否されました",
+  "nothing to paste": "貼れるセルがありません",
+  "usage: :title ⟨text⟩": "使い方: :title ⟨文字列⟩",
   "calendar on the planned start / end": "計画の開始 / 終了にカレンダー",
   "calendar on the actual start / end": "実績の着手 / 完了にカレンダー",
   "open the calendar over it": "そのセルの上にカレンダーを開く",
