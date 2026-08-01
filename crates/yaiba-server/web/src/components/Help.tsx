@@ -70,7 +70,7 @@ const groups = (): Group[] => [
       ["gd", t("date columns ⇄ compact")],
       ["h / l", t("walk the cells — arrows too")],
       ["j / k", t("keep the column, change the row")],
-      ["⏎ / i / a", t("edit the cell under the cursor")],
+      ["⏎ / i / I / a / A", t("edit the cell under the cursor")],
       ["v h l j k", t("select a rectangle of cells")],
       ["y then p", t("copy that rectangle somewhere else")],
       ["h at the title", t("back to folding")],
