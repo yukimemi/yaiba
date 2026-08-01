@@ -1940,6 +1940,26 @@ button.row__date:focus-visible {
   white-space: nowrap;
 }
 
+/* The MARKS group draws its left column in the colour the mark actually
+   wears on a row, down to the glow, so the legend is a sample rather
+   than a description of one. Same variables as `.row__crit`,
+   `.row__note` and `.row__meta--overdue` on purpose: `gt` has to
+   recolour both at once, and a legend that named "magenta" in text
+   would be wrong the moment office mode turned it red. */
+.help__key--crit {
+  color: var(--blood);
+  text-shadow: 0 0 calc(8px * var(--glow)) rgba(244, 114, 182, 0.5);
+}
+
+.help__key--note {
+  color: var(--ash-dim);
+}
+
+.help__key--due {
+  color: var(--rust);
+  text-shadow: 0 0 calc(10px * var(--glow)) rgba(251, 191, 36, 0.4);
+}
+
 .help__desc {
   color: var(--ash);
   overflow: hidden;

@@ -329,6 +329,11 @@ const JA: Record<string, string> = {
   // spreadsheet in Japanese calls it 列. カラム is what you would call
   // the code's `Columns` type, which is not what this panel is about.
   COLUMNS: "列",
+  // 記号 rather than 凡例: 凡例 is the box beside a chart that maps
+  // colours to series, and this group is a list of the marks a row can
+  // grow. The rows under it read as "◆ は何か" and 記号 is that question's
+  // noun.
+  MARKS: "記号",
   BREAKDOWN: "階層",
   "DATE PICKER": "日付ピッカー",
   PEERS: "ピア",
@@ -447,6 +452,20 @@ const JA: Record<string, string> = {
   // there is no cell further out, so the same key goes back to meaning
   // what it meant before the columns existed.
   "back to folding": "そこから先は畳みの操作",
+  // The MARKS group. 余裕 rather than スラック: the forward/backward
+  // pass is 余裕日数 in every Japanese schedule textbook, and スラック
+  // would send a reader looking for the chat app. クリティカルパス is
+  // spelled out here where the top bar has room only for `CP` — this is
+  // the panel you open *because* you did not recognise the mark.
+  "critical path — zero slack": "クリティカルパス — 余裕 0 日",
+  "on the critical path — no slack, so a day here is a day on the project":
+    "クリティカルパス上 — 余裕がなく、ここでの1日はそのまま全体の1日",
+  "has a note — hover it": "メモあり — ホバーで読める",
+  // 遅延 is what the top bar's readout is called, so the legend uses the
+  // same word the number beside it does.
+  "a due date — this colour is overdue": "期限日 — この色なら遅延",
+  "a summary, folded / open": "サマリ、畳んだ / 開いた",
+  "todo / done — click it": "未完了 / 完了 — クリックで切替",
   // ---- the block yank ---------------------------------------------
   //
   // 件 counts rows elsewhere in this file; a rectangle is counted the
