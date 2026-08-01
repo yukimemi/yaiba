@@ -482,7 +482,17 @@ export function TaskList({
                       {sched.children}
                     </span>
                   )}
-                  {sched?.critical && <span className="row__crit">◆</span>}
+                  {/* The one mark on a row that is derived rather than
+                      entered, so hovering it is the only way to ask what
+                      it is without opening the help. */}
+                  {sched?.critical && (
+                    <span
+                      className="row__crit"
+                      title={t("on the critical path — no slack, so a day here is a day on the project")}
+                    >
+                      ◆
+                    </span>
+                  )}
                   {task.due && (
                     <span
                       className={`row__meta row__meta--due${

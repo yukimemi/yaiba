@@ -1,8 +1,22 @@
 import { t } from "../i18n";
 
+/**
+ * `[key, description]`, or `[key, description, class]` when the left
+ * column has to be drawn in the colour the mark wears on a row.
+ *
+ * The class exists so the legend can name a colour without writing one
+ * down. `magenta` is only true in neon mode — office mode swaps
+ * `--blood` to red and `--edge` to blue — so a line reading "magenta
+ * means critical path" is wrong for half the users, and wrong in
+ * exactly the mode a status meeting is looking at. Painting the mark
+ * itself with the same variable the row uses leaves nothing to go out
+ * of date: `gt` recolours the legend and the rows together.
+ */
+type Row = [string, string] | [string, string, string];
+
 interface Group {
   title: string;
-  keys: [string, string][];
+  keys: Row[];
 }
 
 /**
@@ -94,6 +108,22 @@ const groups = (): Group[] => [
       ["click arrow", t("cut that dependency")],
       ["◀ ▶ in the bar", t("reference date, a day at a time")],
       ["click the date", t("jump to one — or back to now")],
+    ],
+  },
+  {
+    /* The marks a row can grow, which are the one thing on screen with
+       no key to look up: every other group here answers "what does this
+       do", and this one answers "what is this". `◆` was the case that
+       needed it — it appears only on zero-slack rows, says nothing on
+       hover until now, and the schedule that puts it there is computed
+       rather than typed, so there is no command to find it under. */
+    title: t("MARKS"),
+    keys: [
+      ["◆", t("critical path — zero slack"), "help__key--crit"],
+      ["✎", t("has a note — hover it"), "help__key--note"],
+      ["8/14", t("a due date — this colour is overdue"), "help__key--due"],
+      ["▸ / ▾", t("a summary, folded / open")],
+      ["[ ] [x]", t("todo / done — click it")],
     ],
   },
   {
@@ -214,9 +244,11 @@ export function Help({ onClose }: Props) {
           {groups().map((group) => (
             <section key={group.title} className="help__group">
               <div className="help__head">{group.title}</div>
-              {group.keys.map(([key, desc]) => (
+              {group.keys.map(([key, desc, cls]) => (
                 <div key={key} className="help__row">
-                  <span className="help__key">{key}</span>
+                  <span className={cls ? `help__key ${cls}` : "help__key"}>
+                    {key}
+                  </span>
                   <span className="help__desc">{desc}</span>
                 </div>
               ))}
