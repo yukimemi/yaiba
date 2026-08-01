@@ -95,6 +95,58 @@ export function cellStep(
   return next ? { kind: "cell", cell: next } : null;
 }
 
+/** The keys that mean "edit what the cursor is on". */
+export type EditKey = "i" | "I" | "a" | "A" | "cc" | "<cr>";
+
+/**
+ * What an edit key opens from here.
+ *
+ * `caret` and `clear` mean something on the title alone: it is the one
+ * cell edited as text in place. The owner and the dates open panels,
+ * which have no caret to place and nothing to clear before you pick.
+ */
+export type CellEdit =
+  | { kind: "title"; caret: "head" | "tail"; clear: boolean }
+  | { kind: "owner" }
+  | { kind: "date"; field: DateField };
+
+/**
+ * Which cell an edit key edits.
+ *
+ * `⏎` has read the cell it stands in since the walk existed (#101); the
+ * four insert keys did not, so walking to `end` and pressing `a` — the
+ * ordinary way into an edit, and the one the fingers reach for — put
+ * you in the *title*. That is the "a display mode is a precondition for
+ * an edit" trap from the other side: the columns were somewhere to look
+ * rather than somewhere to work.
+ *
+ * So the rule is one line, and it takes no exceptions: an edit key
+ * edits the cell under the cursor. `i` / `I` / `a` / `A` / `cc` differ
+ * only in what they do to the text once they are in it — where the
+ * caret lands, and whether the old value is kept — which is a question
+ * the title alone can answer. On a date or the owner all five, and `⏎`
+ * with them, are spellings of the same panel.
+ *
+ * `cc` was the tempting exception, on the argument that it belongs to
+ * the `c` family, where `cs` / `ce` / `ca` / `cA` / `co` each name a
+ * field and reach it from wherever the cursor stands. But the family it
+ * is spelled after is not the rule it lives under: what the fingers
+ * mean by `cc` on a cell is *this* cell, and a key that jumped back to
+ * column one from a date you had walked to is the same surprise the
+ * insert keys were fixed for. Nothing is lost with it — both panels
+ * carry a `clear`, so emptying a date or an owner is still one gesture,
+ * and the title is reachable by `h` back to column one or by `:title`.
+ */
+export function cellEdit(key: EditKey, cell: CellField): CellEdit {
+  if (cell === "owner") return { kind: "owner" };
+  if (cell !== "title") return { kind: "date", field: cell };
+  return {
+    kind: "title",
+    caret: key === "i" || key === "I" ? "head" : "tail",
+    clear: key === "cc",
+  };
+}
+
 /**
  * What a cell holds, for the purpose of putting it somewhere else.
  *

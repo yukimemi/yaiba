@@ -111,7 +111,7 @@ yaiba self-update --check    # just tell me whether one exists
 |---|---|
 | `j` `k` `gg` `G` `^d` `^u` | move |
 | `o` `O` | new task below / above — you type immediately, it saves on commit |
-| `i` `a` `c` | edit the title |
+| `i` `I` `a` `A` `cc` | edit the cell under the cursor — on the title, at the head / tail / cleared |
 | `x` | complete (the row gets cut) · `s` cycles todo → doing → done |
 | `dd` `yy` `Y` | delete, yank rows |
 | `p` `P` | put the last yank · `P` is rows only · `u` / `^r` undo, redo |
@@ -124,7 +124,7 @@ yaiba self-update --check    # just tell me whether one exists
 | `tab` | split → list → gantt · `[` `]` zoom the timeline |
 | `gd` | plan-vs-actual date columns ⇄ compact |
 | `cs` `ce` `ca` `cA` | calendar on the planned start / end, actual start / end |
-| `h` `l` | out / in — a fold, or a cell once `gd` is up · `⏎` edits it |
+| `h` `l` | out / in — a fold, or a cell once `gd` is up · `⏎` `i` `I` `a` `A` `cc` edit it |
 | `>>` `<<` | nest under the row above / move back out |
 | `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |
 | `za` | fold this row · `zf` focus its subtree, `zF` to come back |

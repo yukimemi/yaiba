@@ -508,6 +508,21 @@ pattern to copy.
   `cellStep` says which of the two owns the key, `foldStep` says what
   the fold does; both are pure and both are run by `web-build`. A rule
   only a real keyboard can check is how #80 shipped.
+- **An edit key edits the cell under the cursor — every edit key, not
+  just `⏎`.** `i` / `I` / `a` / `A` / `cc` shipped reading the row and
+  `⏎` reading the cell, so walking to `end` and pressing `a` opened the
+  *title*: the walk was somewhere to look rather than somewhere to
+  work, which is the display-mode-as-precondition trap from the other
+  side. `cellEdit` is the one rule now, and `⏎` runs it too. On the
+  title they still differ by caret and by whether the old text is kept,
+  which is the only question a panel has no answer to. **`cc` is the
+  exception that isn't:** it is *spelled* after the `c` family, where
+  `cs` / `ce` / `co` each name a field and reach it from anywhere, but
+  the spelling is not the rule it lives under — what the fingers mean
+  by `cc` on a cell is that cell, and jumping back to column one from a
+  date you had walked to is the same surprise the insert keys were
+  fixed for. Nothing is lost: both panels carry a `clear`, and the
+  title is one `h` back, or `:title`.
 - **A put runs the command line, a yank reads the field.** `cellWriteLine`
   returns the line the keyboard would have typed and `pasteCells` runs
   it, so `:end` still measures a duration, an actual span that runs

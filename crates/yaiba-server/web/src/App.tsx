@@ -41,6 +41,7 @@ import {
 import {
   cellColumns,
   actualsWriteFirst,
+  cellEdit,
   cellRead,
   cellSpan,
   cellStep,
@@ -48,6 +49,7 @@ import {
   pastePlan,
   type CellBlock,
   type CellField,
+  type EditKey,
 } from "./cells";
 import { modeHint, type Mode } from "./mode";
 import { t } from "./i18n";
@@ -2180,6 +2182,36 @@ export function App() {
           : cellSpan(anchorCellRef.current ?? atCell, atCell, cellCols)
         : [atCell];
 
+    /**
+     * Open whatever the cursor is standing in.
+     *
+     * One body for `i` / `I` / `a` / `A` / `cc` / `⏎`, because they
+     * differ only in what `cellEdit` answers — a second copy behind the
+     * insert keys is how they came to disagree with `⏎` in the first
+     * place. It opens the same two panels `cs` / `ce` / `ca` / `cA` /
+     * `co` do, so a locked date is refused once, in `openDate`.
+     */
+    const editHere = (key: EditKey): void => {
+      const edit = cellEdit(key, atCell);
+      if (edit.kind === "owner") {
+        openOwner(current);
+        return;
+      }
+      if (edit.kind === "date") {
+        openDate(current, edit.field);
+        return;
+      }
+      if (!current) return;
+      // A cleared title costs nothing to back out of: `finishEdit`
+      // refuses a blank one, so <esc> *and* <cr> both leave the old one.
+      setEditing({
+        id: current.id,
+        value: edit.clear ? "" : current.title,
+        caret: edit.caret,
+      });
+      enterMode("insert");
+    };
+
     switch (cmd) {
       // ---- motion
       case "j":
@@ -2267,23 +2299,19 @@ export function App() {
         // store" — the opposite of what `O` says.
         openNew(current?.id ?? null, "before", cursorParent);
         break;
+      // Every way into an edit, and they all edit the cell the cursor is
+      // standing in — `cellEdit` owns which one that is, so `⏎` below
+      // runs the same line. `cc` included: it is spelled after the `c`
+      // family but not governed by it, because on a cell `cc` means
+      // *this* cell.
       case "i":
       case "I":
       case "a":
       case "A":
       case "cc":
-        if (current) {
-          // `cc` changes the line rather than entering it, so it opens
-          // empty. Backing out costs nothing: `finishEdit` refuses a
-          // blank title, so <esc> *and* <cr> both leave the old one.
-          const clear = cmd === "cc";
-          setEditing({
-            id: current.id,
-            value: clear ? "" : current.title,
-            caret: cmd === "i" || cmd === "I" ? "head" : "tail",
-          });
-          enterMode("insert");
-        }
+        // `cmd` is the raw key buffer, so the case labels are what narrow
+        // it — TypeScript cannot do that for a `string`.
+        editHere(cmd as EditKey);
         break;
       // `c` is change, and `cc` already changes the title — these change
       // the other four things a row holds. The letters follow the column
@@ -2456,20 +2484,17 @@ export function App() {
       // it, and a display mode is not a precondition for an edit. This is
       // what the walk is *for*, and it opens the same panels they do.
       //
+      // On the title it enters what is there rather than clearing it:
+      // `cc` is the one that means "change the line", and `⏎` says "edit
+      // this cell", which on every other column opens what is already in
+      // it. `cellEdit` is where that is written down.
+      //
       // The link modes keep it while they are up. They own the keyboard
       // by then, and `⏎` is how they commit.
       case "<cr>":
         if (activeMode === "link") commitLink(current, false);
         else if (activeMode === "unlink") commitLink(current, true);
-        else if (atCell === "owner") openOwner(current);
-        else if (atCell !== "title") openDate(current, atCell);
-        else if (current) {
-          // The title, entered rather than cleared: `cc` is the one that
-          // means "change the line", and `⏎` here says "edit this cell",
-          // which on every other column opens what is already in it.
-          setEditing({ id: current.id, value: current.title, caret: "tail" });
-          enterMode("insert");
-        }
+        else editHere("<cr>");
         break;
 
       // ---- view
