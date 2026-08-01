@@ -349,8 +349,8 @@ const JA: Record<string, string> = {
   "new task below / above, at this level": "同じ階層に行を追加（下 / 上）",
   "edit the cell — the title at the head": "セルを編集 — タイトルは先頭へ",
   "edit the cell — the title at the tail": "セルを編集 — タイトルは末尾へ",
-  "clear the title and edit — from any column":
-    "タイトルを消して編集 — どの列からでも",
+  "edit the cell — the title, cleared first":
+    "セルを編集 — タイトルは消してから",
   "toggle done": "完了 / 未完了",
   delete: "削除",
   "move the row down / up, level and all": "行を下 / 上へ（階層ごと）",

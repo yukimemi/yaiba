@@ -173,11 +173,12 @@ check("a enters it at the tail", edit("a", "title"), "title:tail");
 check("A too", edit("A", "title"), "title:tail");
 check("⏎ enters what is there", edit("<cr>", "title"), "title:tail");
 
-// `cc` names the title, the way `cs` / `ce` / `co` name theirs — it is
-// the one key here that does not follow the cursor.
+// `cc` follows the cursor like the rest of them. It is spelled after
+// the `c` family, where each key names one field from anywhere, but it
+// is not governed by it: on a cell, `cc` means *this* cell.
 check("cc clears the title from the title", edit("cc", "title"), "title:tail cleared");
-check("and from a date column, still the title", edit("cc", "aend"), "title:tail cleared");
-check("and from the owner", edit("cc", "owner"), "title:tail cleared");
+check("cc on a date opens that date", edit("cc", "aend"), "date:aend");
+check("cc on the owner opens the owner", edit("cc", "owner"), "owner");
 
 // With `gd` off there is one column, so every one of them is the title
 // again — the same "compact is what it always was" the fold checks

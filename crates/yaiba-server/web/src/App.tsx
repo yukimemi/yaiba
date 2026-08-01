@@ -2299,11 +2299,11 @@ export function App() {
         // store" — the opposite of what `O` says.
         openNew(current?.id ?? null, "before", cursorParent);
         break;
-      // The four ways into an edit, and they edit the cell the cursor is
+      // Every way into an edit, and they all edit the cell the cursor is
       // standing in — `cellEdit` owns which one that is, so `⏎` below
-      // runs the same line. `cc` is in the same arm because the same
-      // rule answers it: it names the title, the way the rest of the `c`
-      // family names a field each.
+      // runs the same line. `cc` included: it is spelled after the `c`
+      // family but not governed by it, because on a cell `cc` means
+      // *this* cell.
       case "i":
       case "I":
       case "a":
