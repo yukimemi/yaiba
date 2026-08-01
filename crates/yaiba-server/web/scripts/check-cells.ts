@@ -16,6 +16,7 @@
 
 import {
   cellColumns,
+  cellEdit,
   cellKind,
   cellSpan,
   cellStep,
@@ -24,6 +25,7 @@ import {
   pastePlan,
   type CellBlock,
   type CellField,
+  type EditKey,
 } from "../src/cells.ts";
 import { foldStep } from "../src/filter.ts";
 
@@ -142,6 +144,55 @@ check(
     : "walks",
   "opens",
 );
+
+// ---- which cell an edit key edits -----------------------------------
+//
+// The walk is only worth having if you can work where you walked to.
+// `⏎` read the cell from the day the walk shipped; `i` / `a` did not,
+// so `l l a` typed at a date opened the *title* — the bug this block
+// exists to keep fixed.
+
+/** `title:<caret><clear>`, `owner`, or `date:<field>`. */
+function edit(key: EditKey, cell: CellField): string {
+  const out = cellEdit(key, cell);
+  if (out.kind === "title") {
+    return `title:${out.caret}${out.clear ? " cleared" : ""}`;
+  }
+  return out.kind === "owner" ? "owner" : `date:${out.field}`;
+}
+
+check("a on a date opens that date", edit("a", "end"), "date:end");
+check("i on a date opens it too", edit("i", "astart"), "date:astart");
+check("A on the owner opens the owner", edit("A", "owner"), "owner");
+check("and ⏎ agrees, on the same cell", edit("<cr>", "end"), "date:end");
+
+// On the title the four still differ the only way they can.
+check("i enters the title at the head", edit("i", "title"), "title:head");
+check("I too", edit("I", "title"), "title:head");
+check("a enters it at the tail", edit("a", "title"), "title:tail");
+check("A too", edit("A", "title"), "title:tail");
+check("⏎ enters what is there", edit("<cr>", "title"), "title:tail");
+
+// `cc` names the title, the way `cs` / `ce` / `co` name theirs — it is
+// the one key here that does not follow the cursor.
+check("cc clears the title from the title", edit("cc", "title"), "title:tail cleared");
+check("and from a date column, still the title", edit("cc", "aend"), "title:tail cleared");
+check("and from the owner", edit("cc", "owner"), "title:tail cleared");
+
+// With `gd` off there is one column, so every one of them is the title
+// again — the same "compact is what it always was" the fold checks
+// above assert for `h` / `l`.
+const ONLY = cellColumns("compact")[0];
+for (const key of ["i", "a", "<cr>", "cc"] as EditKey[]) {
+  check(
+    `compact ${key} edits the title`,
+    cellEdit(key, ONLY).kind,
+    "title",
+  );
+}
+// A cell the columns stopped drawing never reaches here as itself:
+// `App` clamps to the leftmost before calling, which in compact mode is
+// the title — the same lock `cellStep` gets from the checks above.
 
 // ---- the block yank (#87, second half) ------------------------------
 

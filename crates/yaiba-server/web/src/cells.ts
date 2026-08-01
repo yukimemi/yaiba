@@ -96,6 +96,59 @@ export function cellStep(
 }
 
 /**
+ * The keys that mean "edit what the cursor is on".
+ *
+ * `cc` is in here because the same rule answers it, not because it
+ * behaves like the others — see `cellEdit`.
+ */
+export type EditKey = "i" | "I" | "a" | "A" | "cc" | "<cr>";
+
+/**
+ * What an edit key opens from here.
+ *
+ * `caret` and `clear` mean something on the title alone: it is the one
+ * cell edited as text in place. The owner and the dates open panels,
+ * which have no caret to place and nothing to clear before you pick.
+ */
+export type CellEdit =
+  | { kind: "title"; caret: "head" | "tail"; clear: boolean }
+  | { kind: "owner" }
+  | { kind: "date"; field: DateField };
+
+/**
+ * Which cell an edit key edits.
+ *
+ * `⏎` has read the cell it stands in since the walk existed (#101); the
+ * four insert keys did not, so walking to `end` and pressing `a` — the
+ * ordinary way into an edit, and the one the fingers reach for — put
+ * you in the *title*. That is the "a display mode is a precondition for
+ * an edit" trap from the other side: the columns were somewhere to look
+ * rather than somewhere to work.
+ *
+ * So the rule is one line: an edit key edits the cell under the cursor.
+ * `i` / `I` / `a` / `A` say *edit here* and differ only in where the
+ * caret lands, which is a question the title alone can answer — on a
+ * date they are four spellings of the panel `⏎` opens.
+ *
+ * `cc` looks like an exception and is not one: it belongs to the `c`
+ * family, where `cs` / `ce` / `ca` / `cA` / `co` each name a field and
+ * reach it from wherever the cursor stands. `cc` names the title. A
+ * `cc` that followed the cursor would be the only member of that family
+ * that did, and it would leave no key at all for "clear this row's
+ * name" once you had walked out of the first column.
+ */
+export function cellEdit(key: EditKey, cell: CellField): CellEdit {
+  const at = key === "cc" ? "title" : cell;
+  if (at === "owner") return { kind: "owner" };
+  if (at !== "title") return { kind: "date", field: at };
+  return {
+    kind: "title",
+    caret: key === "i" || key === "I" ? "head" : "tail",
+    clear: key === "cc",
+  };
+}
+
+/**
  * What a cell holds, for the purpose of putting it somewhere else.
  *
  * A block yanked from `start end` and put on `began` has to land: they
