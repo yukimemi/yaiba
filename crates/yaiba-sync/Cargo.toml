@@ -13,7 +13,7 @@ homepage.workspace     = true
 authors.workspace      = true
 
 [dependencies]
-yaiba-core = { path = "../yaiba-core", version = "0.15.0" }
+yaiba-core = { path = "../yaiba-core", version = "0.16.0" }
 
 anyhow              = { workspace = true }
 iroh                = { workspace = true }
