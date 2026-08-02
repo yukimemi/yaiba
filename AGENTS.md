@@ -552,6 +552,38 @@ pattern to copy.
   cleared when the cursor row changes: keeping the column while `j`
   moves is what makes a column fillable straight down the page, which is
   the whole point of #87.
+- **`V` is linewise, and that is what decides the verb — not the verb.**
+  It shipped as "the same rectangle, pinned to the full width", so
+  `V j j y` took six cells where `V j j Y` took two rows, and the two
+  readings would have split again the moment `d` arrived. `V` selects
+  *rows* now: `y` fills the row register there and `d` deletes the tasks,
+  exactly as `Y` and `dd` do. `v` is the only cellwise one. A key that
+  asks "which am I?" reads `visualLineRef`, and nothing branches on which
+  letter was pressed.
+- **Being a prefix is a property of the mode.** `y` and `d` wait for a
+  second key in normal, where `yy` / `dd` mean the row, and fire on their
+  own in visual, where you have already said what you are acting on.
+  Nothing is lost to a doubled habit: the first key leaves visual, so the
+  second lands in normal and simply waits there.
+- **`x` is the picker's own key, lifted onto the grid.** `DatePicker`
+  has always read `x` as clear, so `x` on a cell is that same reading one
+  level out — `cellClear` is the whole rule, `dl` is vim's spelling of it,
+  and `dh` deliberately does not exist because it would edit the cell
+  *beside* the cursor. Two cells answer differently and both are asserted
+  in `check-cells.ts` rather than promised here: `end` is refused through
+  the same `clearable` flag that hides the picker's clear button, and the
+  title is `cc`, because `finishEdit` refuses a blank title so "clear the
+  title" has no committed state to land in. Done moved to `<space>`,
+  which was already an undocumented alias for `x`.
+- **Standing visual down means all four pieces.** `deleteSelection`
+  cleared the mode and the row anchor but left `anchorCell` and
+  `visualLine` set. That was inert while only `dd` reached it — nothing
+  outside visual reads either — and became a linewise flag surviving into
+  the next selection the moment `V` + `d` arrived. `leaveVisual` is the
+  shape to copy, and note it stands *down* rather than standing by: it
+  returns early unless the mode is still `visual`, so a path that opens an
+  insert first (`x` on a title) has to call it *before* the edit or it
+  does nothing at all.
 
 ### A project is a database file
 

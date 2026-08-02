@@ -24,7 +24,7 @@
  */
 
 import type { Columns, DateField } from "./commands";
-import { DATE_COLUMNS, dateValue } from "./dateColumns";
+import { DATE_COLUMNS, dateClearable, dateValue } from "./dateColumns";
 import type { Scheduled, Task } from "./types";
 
 /**
@@ -272,6 +272,41 @@ export function cellWriteLine(
   if (cell === "title") return value ? `title ${value}` : null;
   if (cell === "owner") return `assign ${value ?? "none"}`;
   return `${cell} ${value ?? "none"}`;
+}
+
+/**
+ * What `x` does to one cell.
+ *
+ * `line` is the command it runs, which is `cellWriteLine`'s empty case —
+ * a clear is a put of nothing, and giving it a second implementation is
+ * the drift this module keeps refusing.
+ *
+ * `edit` is the title, and it hands back an `EditKey` rather than
+ * restating what that key does. A title cannot be cleared and left that
+ * way: `finishEdit` refuses a blank one, so "clear the title" has no
+ * committed state to land in and the only reading left is *clear it and
+ * let me type* — which is `cc`, already spelled and already tested. So
+ * `x` on the title is `cc`, said in one word.
+ *
+ * `refused` is the plan's finish, and it is the picker's own answer
+ * arriving from the grid: `end` is `start` + `duration_days` rather than
+ * a stored field, so `dateClearable` is false for it and the calendar
+ * draws no clear button. Refusing here rather than running `end none`
+ * keeps the two surfaces reading the same flag.
+ */
+export type CellClear =
+  | { kind: "line"; line: string }
+  | { kind: "edit"; as: EditKey }
+  | { kind: "refused" };
+
+export function cellClear(cell: CellField): CellClear {
+  if (cell === "title") return { kind: "edit", as: "cc" };
+  if (cell !== "owner" && !dateClearable(cell)) return { kind: "refused" };
+  const line = cellWriteLine(cell, null);
+  // Unreachable — the title is the only cell with no empty line, and it
+  // left above. Written as a branch rather than a `!` so a column added
+  // to `cellWriteLine` without one cannot arrive here as `"null"`.
+  return line ? { kind: "line", line } : { kind: "refused" };
 }
 
 /**
