@@ -221,6 +221,21 @@ const JA: Record<string, string> = {
   "undo: {label}": "元に戻す: {label}",
   "redo: {label}": "やり直す: {label}",
   "pattern not found: {q}": "見つかりません: {q}",
+
+  // The row menu. Labels are imperative, because every one of them is a
+  // thing about to happen to the row you right-clicked — and short,
+  // because the panel is one column of them beside a column of keys.
+  "mark it doing": "着手中にする",
+  "priority": "優先度",
+  "note…": "ノート…",
+  "nest / unnest": "ネスト / 解除",
+  "focus this subtree": "この配下だけ表示",
+  "yank the row": "行をヤンク",
+  "put it below": "下に貼り付け",
+  "undo": "元に戻す",
+  "right-click": "右クリック",
+  "the keys no other gesture reaches": "他の操作では届かないキー",
+  "the browser's own menu": "ブラウザのメニュー",
   "pick what this task waits for — ⏎ to confirm":
     "待つ相手を選んでください — ⏎ で確定",
   "pick the dependency to cut — ⏎ to confirm":

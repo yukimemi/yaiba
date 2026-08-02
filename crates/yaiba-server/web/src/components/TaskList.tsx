@@ -81,6 +81,8 @@ interface Props {
   onEditTitle: (id: string) => void;
   /** Drag a row onto another to reorder. */
   onDropRow: (draggedId: string, targetId: string) => void;
+  /** Right-click a row for the keys the mouse cannot otherwise reach. */
+  onRowMenu: (id: string, x: number, y: number) => void;
 }
 
 const BOX = { todo: "[ ]", doing: "[~]", done: "[x]" } as const;
@@ -122,6 +124,7 @@ export function TaskList({
   onToggleFold,
   onEditTitle,
   onDropRow,
+  onRowMenu,
 }: Props) {
   const cursorRef = useRef<HTMLDivElement>(null);
   const editRef = useRef<HTMLInputElement>(null);
@@ -332,6 +335,16 @@ export function TaskList({
                   // click on the checkbox doesn't also move the cursor
                   // somewhere the user didn't ask for.
                   onMouseDown={() => onPick(task.id)}
+                  // Shift declines the event, and declining is the only
+                  // way to offer the browser's own menu — nothing can
+                  // *open* it from script. Everything outside a row keeps
+                  // it unconditionally, so devtools is never more than a
+                  // right-click on the background away.
+                  onContextMenu={(e) => {
+                    if (e.shiftKey) return;
+                    e.preventDefault();
+                    onRowMenu(task.id, e.clientX, e.clientY);
+                  }}
                   draggable
                   onDragStart={(e) => {
                     e.dataTransfer.setData("text/plain", task.id);

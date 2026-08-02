@@ -841,6 +841,72 @@ deliberately does not bump `notify`).
   Two peers can concurrently close a dependency loop or re-parent into
   a cycle, so the renderer degrades rather than throwing.
 
+### `runKey` is the command layer, `onKey` is the event
+
+`App.tsx` splits the keyboard in two. `onKey` is about the *press* —
+which overlay owns the keyboard, the modifiers, `NORMALIZE`, the
+pending-key buffer that makes `dd` and `gp` two presses of one command,
+and the count. `runKey(cmd, count, counted)` is about the *command*, and
+is the whole 470-line switch.
+
+The split exists so something other than a keyboard can ask for a
+command, and the row menu is that something. Consequences worth knowing:
+
+- **A menu item is the key it advertises, not a copy of it.** Items carry
+  a `runKey` string and nothing else, so a refusal — a locked cell under
+  `:asof`, a summary's plan, a blocked move — happens once, in the place
+  it always did. This is the bargain `commitOwner` and `commitDate`
+  already make with the `:` line, one level down.
+- **`counted` is not `count > 1`.** `1gg` and a bare `gg` both mean row
+  one; `1G` means row one where `G` means the last. Only the *presence*
+  of a typed count separates them, which is why it is a third argument
+  rather than something inferred. It was `match?.[1]` before the split,
+  reading the regex from inside the switch.
+- **`liveCursor()` reads the ref, not the memo.** Both layers need it and
+  the memo is a render behind — see the burst-typing note under the
+  cells section.
+- **A new overlay must decline in `onKey`.** `rowMenu` sits with
+  `showProjects` / `picking` / `pickingOwner` at the top; a panel that
+  runs its own input and forgets that line gets every keystroke twice.
+- **And having declined, it must guarantee it can hand the keyboard
+  back.** That line makes the app answer *nothing* while the panel is
+  up, so focus leaving the panel is a keyboard that is simply dead —
+  there is no handler left anywhere to hear `esc`, and the only way out
+  is the mouse. `RowMenu` was reachable that way: thirteen buttons, and
+  the fourteenth `Tab` landed on `<body>`. Trapping `Tab` fixes the
+  route; `onBlur` closing the panel when focus lands outside it is the
+  invariant, and is what a new overlay should copy. Test it by tabbing
+  past the last control, not by tabbing once.
+
+### The row menu is bounded by a rule, not by taste
+
+`rowMenu.ts` holds the table and the argument; `check-rowmenu.ts` holds
+it to it. **An item belongs there exactly when the mouse cannot already
+reach the action, and every item names the key it runs.**
+
+The failure this guards against is not someone adding a bad item — it is
+someone adding a *direct gesture* and never coming back to delete the
+menu entry it made redundant. So the check is against `DIRECT_GESTURES`,
+a list in the same file: add a gesture to `TaskList` or `Gantt`, add its
+command there, and the check tells you which menu item to drop. Skip
+that step and the build fails rather than the menu quietly offering the
+same thing twice in two places that will drift.
+
+Two smaller things the check also pins, both of which have already been
+got wrong once by hand: the hint has to *be* the command (a menu that
+says `gp` and runs `gP` is worse than no hint), and `dd` / `s` / `u` have
+to stay on it, since those three are the gap the menu was added to close.
+
+**Labels are data, so `check-i18n.mjs` cannot see them by scanning call
+sites.** It reads `label:` out of `rowMenu.ts` the way it already reads
+`head:` / `title:` out of `dateColumns.ts`. Without that line the entire
+menu ships in English inside a `ja` UI and nothing says so.
+
+**There is no API to open the browser's own context menu.** A page can
+only decline the event, which is what `⇧` does on a row — so an item
+*inside* our menu could never offer it, and the footer says where it
+went instead. Only rows and bars call `preventDefault` at all.
+
 ### Verifying UI changes by hand
 
 `cargo make check` will not catch any of the above — every interaction

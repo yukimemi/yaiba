@@ -62,6 +62,15 @@ const columns = readFileSync(join(SRC, "dateColumns.ts"), "utf8");
 for (const m of columns.matchAll(/(?:head|title):\s*"([^"]*)"/g)) used.add(m[1]);
 for (const m of columns.matchAll(/return "([^"]*)";/g)) used.add(m[1]);
 
+// The row menu's labels, for the same reason and by the same trick. The
+// menu is a table in `rowMenu.ts` that `RowMenu.tsx` renders through
+// `t(item.label)`, so every label is invisible to the call-site scan
+// above — and without this line the whole menu would have shipped in
+// English inside a `ja` UI, quietly, which is the exact failure this
+// script exists to make loud.
+const menu = readFileSync(join(SRC, "rowMenu.ts"), "utf8");
+for (const m of menu.matchAll(/label:\s*"([^"]*)"/g)) used.add(m[1]);
+
 // The catalogue's own keys: quoted, or bare where the key is an
 // identifier (`crit:`, `due:`).
 const catalogue = readFileSync(join(SRC, "i18n.ts"), "utf8");
