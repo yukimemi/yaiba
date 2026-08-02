@@ -5,6 +5,6 @@
   "type": "module",
   "description": "Records assets/demo.gif. Deliberately outside crates/yaiba-server/web so that building the binary never installs a browser.",
   "devDependencies": {
-    "playwright-core": "^1.58.0"
+    "playwright-core": "^1.62.1"
   }
 }

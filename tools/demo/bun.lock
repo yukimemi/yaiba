@@ -5,7 +5,7 @@
     "": {
       "name": "yaiba-demo",
       "devDependencies": {
-        "playwright-core": "^1.58.0",
+        "playwright-core": "^1.62.1",
       },
     },
   },
