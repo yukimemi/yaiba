@@ -51,11 +51,13 @@ const groups = (): Group[] => [
       ["i / I", t("edit the cell — the title at the head")],
       ["a / A", t("edit the cell — the title at the tail")],
       ["cc", t("edit the cell — the title, cleared first")],
-      ["x", t("toggle done")],
+      ["x / dl", t("clear the cell — on the title, same as cc")],
+      ["<space>", t("toggle done")],
       ["s", "cycle todo → doing → done"],
-      ["dd", t("delete")],
+      ["dd", t("delete the row")],
       ["yy / Y", t("yank rows — p pastes copies of them")],
-      ["y", t("in visual: yank the cells — p writes them")],
+      ["y / d", t("in v: yank / clear the cells")],
+      ["y / d", t("in V: yank / delete the rows")],
       ["p", t("put the last yank down — rows or cells")],
       ["P", t("put rows above the cursor — rows only")],
       ["J / K", t("move the row down / up, level and all")],
@@ -244,8 +246,16 @@ export function Help({ onClose }: Props) {
           {groups().map((group) => (
             <section key={group.title} className="help__group">
               <div className="help__head">{group.title}</div>
-              {group.keys.map(([key, desc, cls]) => (
-                <div key={key} className="help__row">
+              {/*
+                Keyed by position, not by the key column. Two rows in one
+                group can share a left column and mean different things —
+                `y / d` answers one way under `v` and another under `V` —
+                and keying on the string made those two siblings collide.
+                The list is rebuilt whole on every render and never
+                reorders, so the index is the stable identity here.
+              */}
+              {group.keys.map(([key, desc, cls], i) => (
+                <div key={i} className="help__row">
                   <span className={cls ? `help__key ${cls}` : "help__key"}>
                     {key}
                   </span>

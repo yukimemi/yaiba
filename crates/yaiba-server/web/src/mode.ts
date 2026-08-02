@@ -29,7 +29,10 @@ export function modeHint(mode: Mode): string {
     case "insert":
       return t("⏎ commit · esc cancel");
     case "visual":
-      return t("j/k extend · x done · d delete · esc cancel");
+      // `d` is the one key whose answer depends on which visual you are
+      // in — cells under `v`, rows under `V` — so it is the one the hint
+      // spends its width on.
+      return t("j/k extend · space done · d cells or rows · esc cancel");
     case "command":
       return t("⏎ run · esc cancel");
     case "search":
@@ -39,6 +42,6 @@ export function modeHint(mode: Mode): string {
     case "unlink":
       return t("pick the dependency to cut · ⏎ confirm · esc cancel");
     case "normal":
-      return t("j/k move · o new · x done · D link · ? help");
+      return t("j/k move · o new · space done · x clear · ? help");
   }
 }

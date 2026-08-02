@@ -99,6 +99,36 @@ export function dateValue(
 }
 
 /**
+ * Whether `:<field> none` is a thing this column can be told.
+ *
+ * The flag itself is on `DATE_COLUMNS`, where the picker reads it to
+ * decide whether to draw a clear button. `x` on a cell asks the same
+ * question from the grid, and asking it here rather than at the call
+ * site is what keeps the two from drifting into a key that clears a
+ * column the panel says is derived.
+ *
+ * An unknown field reads as not clearable, which is the safe way round:
+ * the caller says so instead of writing a command the parser refuses.
+ */
+export function dateClearable(field: DateField): boolean {
+  return DATE_COLUMNS.find((col) => col.field === field)?.clearable ?? false;
+}
+
+/**
+ * What to call this column when telling the user about it.
+ *
+ * The heading, not the field: `astart` is drawn as `began` and
+ * translated from there (`TaskList`, `t(col.head)`), so a message that
+ * named the field would be pointing at a column that says something
+ * else — in Japanese, at one that says 終了 while the message reads
+ * `end`. Callers pass the result through `t()` the same way the heading
+ * does. Falls back to the field so an unknown one still names itself.
+ */
+export function dateHead(field: DateField): string {
+  return DATE_COLUMNS.find((col) => col.field === field)?.head ?? field;
+}
+
+/**
  * True when the value shown was computed rather than entered.
  *
  * Both halves of the plan hang off `start`: without a pin the task sits

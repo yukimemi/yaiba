@@ -17,7 +17,7 @@ import {
   stepCompletion,
   type Completion,
 } from "./completion";
-import { DATE_COLUMNS, dateLocked, dateValue } from "./dateColumns";
+import { DATE_COLUMNS, dateHead, dateLocked, dateValue } from "./dateColumns";
 import { DAY_W, Gantt } from "./components/Gantt";
 import { DatePicker, type Anchor } from "./components/DatePicker";
 import { Help } from "./components/Help";
@@ -41,6 +41,7 @@ import {
 import {
   cellColumns,
   actualsWriteFirst,
+  cellClear,
   cellEdit,
   cellRead,
   cellSpan,
@@ -524,8 +525,10 @@ export function App() {
    * The columns the selection covers, for the list to draw.
    *
    * The render's own copy of what the key handler computes off the refs.
-   * Null outside visual, and the full width under `V` — a selection that
-   * drew narrower than it acts would be lying about what `y` will take.
+   * Null outside visual, and the full width under `V` — which is not a
+   * rectangle six cells wide but the row itself, drawn edge to edge
+   * because that is the unit `V` acts on. A selection that drew narrower
+   * than it acts would be lying about what `y` and `d` will take.
    */
   const selectedCols = useMemo<CellField[] | null>(() => {
     if (!selecting) return null;
@@ -1288,11 +1291,19 @@ export function App() {
         })),
         `delete ${tasks.length}`,
       );
+      // The whole of visual, not half of it. This stood the mode and the
+      // row anchor down but left `anchorCell` and `visualLine` set, which
+      // was inert while only `dd` came through here — nothing outside
+      // visual reads either. `V` + `d` arrives here now, so the leftover
+      // `visualLine` would be a linewise flag surviving into the next
+      // selection.
       enterMode("normal");
       putAnchor(null);
+      putAnchorCell(null);
+      putVisualLine(false);
       if (below && !tasks.some((t) => t.id === below.id)) putCursor(below.id);
     },
-    [data, visible, run],
+    [data, visible, run, putAnchorCell, putVisualLine],
   );
 
   /**
@@ -1534,6 +1545,111 @@ export function App() {
       );
     },
     [columns, data, liveOnly, projects, run, visible],
+  );
+
+  /**
+   * Empty every cell of a rectangle — `x` / `dl`, and `d` in visual.
+   *
+   * A clear is a put of nothing, so it runs the same command line a paste
+   * of an empty cell would (`cellClear` → `cellWriteLine(cell, null)`) and
+   * inherits the refusals with it: a summary's plan still refuses itself,
+   * and a column with nothing stored behind it says so rather than being
+   * written.
+   *
+   * **One pass, unlike `pasteCells`.** That one orders its writes because
+   * the values validate against each other — `:astart` measured against an
+   * `actual_end` on its way out, `:end` measured back from a `start` being
+   * replaced. Every one of those checks is guarded on a date being
+   * *given* (`commands.ts`, the `date &&` in the actuals), so a clear
+   * meets none of them and no order can be wrong. `end` never runs at all.
+   *
+   * The rows come from the caller — the cursor's row in normal, the whole
+   * selection in visual — and so do the columns, which is what lets one
+   * body serve a 1×1 cell and a dragged block without a second rule about
+   * which is which.
+   */
+  const clearCells = useCallback(
+    async (rows: Task[], cols: CellField[]) => {
+      if (!liveOnly()) return;
+      if (!data || !rows.length) {
+        say(t("no task under the cursor"), "error");
+        return;
+      }
+
+      // Decided once for the whole rectangle: the columns are the same on
+      // every row, so nothing here depends on which row it lands on.
+      const plan = cols.map((cell) => ({ cell, clear: cellClear(cell) }));
+      const lines = plan.flatMap(({ clear }) =>
+        clear.kind === "line" ? [clear.line] : [],
+      );
+      const derived = plan.filter(({ clear }) => clear.kind === "refused");
+      const titles = plan.filter(({ clear }) => clear.kind === "edit");
+
+      const ops: Op[] = [];
+      const undoOps: Op[] = [];
+      let cleared = 0;
+      let failed = 0;
+      for (const row of rows) {
+        // Read out of `data` rather than trusted from the caller: the poll
+        // may have replaced the task since the selection was taken.
+        const found = data.tasks.find((task) => task.id === row.id);
+        if (!found) continue;
+        for (const line of lines) {
+          const result = runCommand(line, {
+            data,
+            visible,
+            current: found,
+            // One row at a time, so a refusal on a summary stops that row
+            // rather than the whole gesture — `patchSelection` returns the
+            // first error for the selection it is handed.
+            selection: [found],
+            projects: projects.projects.map((p) => p.name),
+          });
+          if (!result || result.error) {
+            failed++;
+            continue;
+          }
+          if (result.ops) ops.push(...result.ops);
+          if (result.undoOps) undoOps.push(...result.undoOps);
+          cleared++;
+        }
+      }
+
+      if (ops.length && !(await run(ops, undoOps, "clear cells"))) return;
+
+      // Nothing is dropped silently — the same rule `pasteCells` keeps.
+      // A rectangle that half cleared looks exactly like one that cleared,
+      // and the columns it missed are the ones nobody thinks to check.
+      const skipped = [
+        derived.length &&
+          // Named by heading rather than by field, and translated the way
+          // the heading is: `astart` is drawn as `began`, and in Japanese
+          // `end` is drawn as 終了 — a message naming the field would be
+          // pointing at a column the screen calls something else. Only
+          // date fields ever land in `derived`, so the lookup always hits.
+          t("{cols}: nothing stored to clear", {
+            cols: derived
+              .map(({ cell }) => t(dateHead(cell as DateField)))
+              .join(" "),
+          }),
+        // Only ever reached from a rectangle. A lone title cell never gets
+        // here: the key handler sends it to `cc`, which is what clearing a
+        // title means when there is a caret to put in it.
+        titles.length && t("a title is cleared with cc"),
+        failed > 0 && t("{n} refused", { n: failed }),
+      ].filter(Boolean) as string[];
+      if (!cleared) {
+        say(skipped.join(" · ") || t("nothing to clear"), "error");
+        return;
+      }
+      say(
+        skipped.length
+          ? `${t("cleared {n}", { n: cleared })} · ${skipped.join(" · ")}`
+          : t("cleared {n}", { n: cleared }),
+        skipped.length ? "info" : "ok",
+      );
+    },
+    [data, liveOnly, projects, run, visible],
   );
 
   const undo = useCallback(async () => {
@@ -2150,15 +2266,22 @@ export function App() {
 
     e.preventDefault();
 
-    // `y` is a prefix everywhere except in visual, where it is the whole
-    // command: `v j j y` is what a block yank looks like, and waiting for
-    // a second key there would make it `v j j yy` — a doubled letter that
-    // means "the line" in a mode whose whole point is that you have
-    // already said which cells. `Y` is what yanks rows now.
+    // `y` and `d` are prefixes everywhere except in visual, where each is
+    // the whole command: `v j j y` is what a block yank looks like, and
+    // waiting for a second key there would make it `v j j yy` — a doubled
+    // letter that means "the line" in a mode whose whole point is that you
+    // have already said what you are acting on. Being a prefix is a
+    // property of the mode, not of the key, which is exactly how vim
+    // spends the same two letters.
+    //
+    // Nothing is lost on the second `d` of a habit: the first one fires
+    // and leaves visual, so the second arrives in normal and simply waits
+    // there. `d d` typed out of muscle memory is one delete and a pending
+    // key, not two deletes.
     const prefix =
       cmd.length === 1 &&
       PREFIXES.has(cmd) &&
-      !(cmd === "y" && activeMode === "visual");
+      !((cmd === "y" || cmd === "d") && activeMode === "visual");
     if (cmd === "" || prefix) {
       setPendingKeys(buf);
       return;
@@ -2210,6 +2333,14 @@ export function App() {
         caret: edit.caret,
       });
       enterMode("insert");
+    };
+
+    /** Fill the row register — `yy` / `Y`, and `y` under linewise `V`. */
+    const yankRows = (rows: Task[]): void => {
+      register.current = rows;
+      lastYank.current = "rows";
+      say(t("yanked {n}", { n: rows.length }), "ok");
+      leaveVisual();
     };
 
     switch (cmd) {
@@ -2337,13 +2468,52 @@ export function App() {
         openOwner(current);
         break;
       case "<space>":
-      case "x":
         toggleDone(selection);
-        if (activeMode === "visual") {
-          enterMode("normal");
-          putAnchor(null);
-        }
+        leaveVisual();
         break;
+      // `x` is delete-what-is-under-the-cursor, which on a grid of cells
+      // is the cell — the reading the date picker has always had for it
+      // (`DatePicker.tsx`), lifted out of the panel and onto the grid so
+      // the same key means the same thing in both. `dl` is vim's own
+      // spelling of it and costs nothing to honour; `dh` deliberately
+      // does not exist, because it would edit the cell *beside* the one
+      // the cursor stands in and every edit key in yaiba refuses that.
+      //
+      // Done moved to `<space>`, which was already an undocumented alias
+      // for it — so nothing was lost but the spelling everyone's fingers
+      // knew, which is the cost of the key being worth more here.
+      case "x":
+      case "dl":
+      case "d": {
+        // `V` is linewise, so there is no rectangle to speak of: `d` and
+        // `x` delete the rows, exactly as `dd` does. Only `v` selects
+        // cells, and outside visual the "rectangle" is the one cell the
+        // cursor stands in.
+        if (activeMode === "visual" && visualLineRef.current) {
+          // Stands visual down itself, the way `dd` has always relied on.
+          deleteSelection(selection);
+          break;
+        }
+        // A lone title cell has a caret to put somewhere, and a title
+        // cannot be left blank — `finishEdit` refuses one — so clearing
+        // it means `cc`. A rectangle has no caret, so there `cellClear`
+        // reports the title column as skipped instead.
+        if (
+          selCols.length === 1 &&
+          selCols[0] === "title" &&
+          selection.length === 1
+        ) {
+          // Before the edit, not after: `leaveVisual` stands down unless
+          // the mode is still `visual`, so opening the insert first would
+          // leave the anchor behind for the next `v` to inherit.
+          leaveVisual();
+          editHere("cc");
+          break;
+        }
+        void clearCells(selection, selCols);
+        leaveVisual();
+        break;
+      }
       case "s":
         patchAll(
           selection,
@@ -2365,13 +2535,18 @@ export function App() {
       // down whichever was filled last — see `lastYank`.
       case "yy":
       case "Y":
-        register.current = selection;
-        lastYank.current = "rows";
-        say(t("yanked {n}", { n: selection.length }), "ok");
-        leaveVisual();
+        yankRows(selection);
         break;
       // Only ever reached in visual: `y` is a prefix elsewhere.
       case "y": {
+        // Which register is `v` against `V`, not which key: `V` selects
+        // rows, so `V j j y` is the row yank `V j j Y` is. It read the
+        // full width as a rectangle before, which made `V` mean one thing
+        // to `y` and would have made it mean another to `d`.
+        if (visualLineRef.current) {
+          yankRows(selection);
+          break;
+        }
         const block: CellBlock = {
           cols: selCols,
           rows: selection.map((task) =>

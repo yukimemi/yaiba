@@ -15,6 +15,7 @@
  */
 
 import {
+  cellClear,
   cellColumns,
   cellEdit,
   cellKind,
@@ -258,6 +259,61 @@ check("an empty owner clears", cellWriteLine("owner", null), "assign none");
 check("a title goes through title", cellWriteLine("title", "Ship it"), "title Ship it");
 // Nothing to write rather than a row left nameless.
 check("an empty title writes nothing", String(cellWriteLine("title", null)), "null");
+
+// ---- what x clears --------------------------------------------------
+//
+// A clear is a put of nothing, so the whole of it is `cellWriteLine`'s
+// empty case plus two cells that answer differently. Asserted here
+// because both exceptions are invisible to the type checker: a title
+// that cleared to blank would type-check and ship a nameless row, and an
+// `end` that ran `end none` would type-check and print a parse failure
+// where the picker quietly draws no button at all.
+
+/** `line:<cmd>`, `edit:<key>` or `refused`. */
+function clear(cell: CellField): string {
+  const out = cellClear(cell);
+  if (out.kind === "line") return `line:${out.line}`;
+  return out.kind === "edit" ? `edit:${out.as}` : "refused";
+}
+
+check("x on a start clears it", clear("start"), "line:start none");
+check("x on began clears it", clear("astart"), "line:astart none");
+check("x on ended clears it", clear("aend"), "line:aend none");
+check("x on the owner goes through assign", clear("owner"), "line:assign none");
+
+// The plan's finish is `start` + `duration_days`, so there is no stored
+// field behind it. `dateClearable` is the one flag that says so and the
+// picker reads the same one to hide its clear button — the two surfaces
+// cannot disagree about which columns can be emptied.
+check("x on the planned end is refused", clear("end"), "refused");
+
+// A title cannot be cleared and left that way: `finishEdit` refuses a
+// blank one, so the only reading of "clear the title" that lands
+// anywhere is `cc` — clear it and put the caret in it.
+check("x on the title is cc", clear("title"), "edit:cc");
+// And whichever key it delegates to is still what that key was, so the
+// delegation is not a second definition of it. Run the `as` it actually
+// returns — hardcoding `"cc"` here made this assert that `cc` clears the
+// title, which `cellEdit`'s own checks already cover, rather than that
+// `cellClear` reaches for it. (CodeRabbit, #113)
+{
+  const out = cellClear("title");
+  check(
+    "which is the title edit that key always was",
+    edit(out.kind === "edit" ? out.as : "i", "title"),
+    "title:tail cleared",
+  );
+}
+
+// Every cell the cursor can stand in has an answer. A column added to
+// `DATE_COLUMNS` without one would otherwise reach `x` as `undefined`.
+for (const cell of cellColumns("dates")) {
+  ran++;
+  if (["line", "edit", "refused"].includes(cellClear(cell).kind)) continue;
+  failures++;
+  console.error(`FAIL  every cell answers x\n        ${cell} does not`);
+}
+console.log("  ok  every cell answers x");
 
 // ---- which of began / ended goes first (CodeRabbit, #102) ----------
 //

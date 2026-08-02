@@ -150,11 +150,11 @@ const JA: Record<string, string> = {
     "1語 · ⏎ 確定 · ⌫ 担当を外す · esc 閉じる",
 
   // ---- the status line, per mode ---------------------------------
-  "j/k move · o new · x done · D link · ? help":
-    "j/k 移動 · o 追加 · x 完了 · D 依存 · ? ヘルプ",
+  "j/k move · o new · space done · x clear · ? help":
+    "j/k 移動 · o 追加 · space 完了 · x セルを空に · ? ヘルプ",
   "⏎ commit · esc cancel": "⏎ 確定 · esc 取消",
-  "j/k extend · x done · d delete · esc cancel":
-    "j/k 拡張 · x 完了 · d 削除 · esc 取消",
+  "j/k extend · space done · d cells or rows · esc cancel":
+    "j/k 拡張 · space 完了 · d セル / 行 · esc 取消",
   "⏎ run · esc cancel": "⏎ 実行 · esc 取消",
   "⏎ jump · esc cancel": "⏎ 移動 · esc 取消",
   "pick the task this one waits for · ⏎ confirm · esc cancel":
@@ -356,8 +356,13 @@ const JA: Record<string, string> = {
   "edit the cell — the title at the tail": "セルを編集 — タイトルは末尾へ",
   "edit the cell — the title, cleared first":
     "セルを編集 — タイトルは消してから",
+  // `x` は「カーソルの下にあるものを消す」で、セルの並ぶ画面ではそれがセル
+  // にあたる — カレンダーの中で `x` がずっとそう読まれてきたのと同じ。
+  // タイトルだけは空のままでは確定できないので `cc` に委ねる。
+  "clear the cell — on the title, same as cc":
+    "セルを空にする — タイトルでは cc と同じ",
   "toggle done": "完了 / 未完了",
-  delete: "削除",
+  "delete the row": "行を削除",
   "move the row down / up, level and all": "行を下 / 上へ（階層ごと）",
   "undo / redo": "元に戻す / やり直す",
   "duration ±1 day": "期間 ±1日",
@@ -480,8 +485,10 @@ const JA: Record<string, string> = {
   // The two yanks put into different worlds, so each line says what its
   // own `p` does rather than leaving one `p` to mean both.
   "yank rows — p pastes copies of them": "行をヤンク — p で複製を貼る",
-  "in visual: yank the cells — p writes them":
-    "visual 中: セルをヤンク — p で書き込む",
+  // どちらの世界に入るかを決めるのは動詞ではなく `v` か `V` か。`V` は行を
+  // 選ぶので、`V j j y` は `V j j Y` と同じ行ヤンクになる。
+  "in v: yank / clear the cells": "v 中: セルをヤンク / 空にする",
+  "in V: yank / delete the rows": "V 中: 行をヤンク / 削除する",
   "put the last yank down — rows or cells": "最後にヤンクしたものを貼る — 行でもセルでも",
   // `P` never puts cells: a cell block overwrites where you point it, so
   // there is no "above" for it to land on. 行のみ says that in the place
@@ -497,6 +504,15 @@ const JA: Record<string, string> = {
   "into a column of another kind": "種類の違う列には貼れません",
   "{n} refused": "{n}件は拒否されました",
   "nothing to paste": "貼れるセルがありません",
+  // クリアも同じ形の一文で、どれを飛ばしたかを必ず名指しする。半分だけ
+  // 消えた矩形は、全部消えた矩形と見分けがつかないため。
+  "cleared {n}": "{n} 件を空にしました",
+  "nothing to clear": "空にできるセルがありません",
+  // 計画の終了は start + duration_days の結果で、消せる実体がない。{cols} は
+  // 画面の見出しと同じ訳語（`t(dateHead(...))`）が入る — フィールド名を出すと
+  // 「終了」と表示されている列を `end` と呼ぶことになる。
+  "{cols}: nothing stored to clear": "{cols}: 消せる値がありません",
+  "a title is cleared with cc": "タイトルは cc で消します",
   "usage: :title ⟨text⟩": "使い方: :title ⟨文字列⟩",
   "calendar on the planned start / end": "計画の開始 / 終了にカレンダー",
   "calendar on the actual start / end": "実績の着手 / 完了にカレンダー",
