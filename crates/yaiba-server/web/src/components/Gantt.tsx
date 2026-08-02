@@ -35,6 +35,8 @@ interface Props {
   /** Draw the progress line (イナズマ線) against the reference date. */
   showProgressLine: boolean;
   onPick: (id: string) => void;
+  /** Right-click a bar: the same menu a row gives. */
+  onRowMenu: (id: string, x: number, y: number) => void;
   /** Drag a bar sideways: pin a new start date. */
   onMoveBar: (id: string, days: number) => void;
   /** Drag a bar's right edge: change its duration. */
@@ -60,6 +62,7 @@ export function Gantt({
   onScroll,
   showProgressLine,
   onPick,
+  onRowMenu,
   onMoveBar,
   onResizeBar,
   onLinkBars,
@@ -312,6 +315,14 @@ export function Gantt({
                 className={`gantt__row${index === cursor ? " gantt__row--cursor" : ""}`}
                 style={{ top: index * ROW_H }}
                 onMouseDown={() => onPick(task.id)}
+                // A bar is a row, so it answers the right button the same
+                // way one does. Shift declines, and the browser's own menu
+                // comes back — see `TaskList`.
+                onContextMenu={(e) => {
+                  if (e.shiftKey) return;
+                  e.preventDefault();
+                  onRowMenu(task.id, e.clientX, e.clientY);
+                }}
               >
                 <div
                   className={[

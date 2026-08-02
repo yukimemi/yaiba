@@ -24,6 +24,8 @@ import { Help } from "./components/Help";
 import { ProjectPalette } from "./components/ProjectPalette";
 import { Hud } from "./components/Hud";
 import { OwnerPicker } from "./components/OwnerPicker";
+import { RowMenu, type RowMenuAt } from "./components/RowMenu";
+import { isCmdline, type MenuAction } from "./rowMenu";
 import { SplitGrip } from "./components/SplitGrip";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
@@ -295,6 +297,8 @@ export function App() {
     id: string;
     anchor: Anchor;
   } | null>(null);
+  /** The row menu, and where the pointer asked for it. */
+  const [rowMenu, setRowMenu] = useState<RowMenuAt | null>(null);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>(savedView.sort);
   const [theme, setTheme] = useState<Theme>(initialTheme);
@@ -397,6 +401,17 @@ export function App() {
   const lastYank = useRef<"rows" | "cells">("rows");
   const history = useRef<string[]>([]);
   const historyAt = useRef(0);
+  /**
+   * The command layer, published for callers that are not a keyboard.
+   *
+   * Declared here rather than beside `runKey` because the row menu's
+   * handler is defined long before it and closes over this binding; a
+   * ref filled in later is the same trick `keyRef` uses, and keeps the
+   * menu from re-subscribing on every render.
+   */
+  const runKeyRef = useRef<
+    (cmd: string, count?: number, counted?: boolean) => void
+  >(() => {});
 
   // ---- derived ----------------------------------------------------
 
@@ -2154,6 +2169,54 @@ export function App() {
   }, []);
 
   /**
+   * Open the row menu on a right-click.
+   *
+   * The cursor moves to the row first, and that is not a convenience: the
+   * commands the menu runs all act on the row under the cursor, so the
+   * right-click has to *be* a cursor move for the menu to mean what it
+   * says. It is the same thing a left-click already does.
+   */
+  const openRowMenu = useCallback(
+    (id: string, x: number, y: number) => {
+      putCursor(id);
+      // A menu opened out of visual mode would show `dd` next to a block
+      // the pointer did not choose. Right-clicking is a statement about
+      // one row, so it ends the selection the way a left-click does.
+      //
+      // `leaveVisual`, not the mode and the anchor by hand: those are two
+      // of the four pieces, and the two left behind are exactly the ones
+      // AGENTS.md records as this bug class. It is reachable, not
+      // theoretical — `selecting` is true in *command* mode too, so `V`,
+      // right-click another row, `:` left a stale `visualLine` painting
+      // the cursor row edge to edge under an open command line.
+      leaveVisual();
+      setRowMenu({ id, x, y });
+    },
+    [putCursor, leaveVisual],
+  );
+
+  /**
+   * Run what the menu was pointing at.
+   *
+   * Through `runKey`, not through a reimplementation — which is the whole
+   * design: the item advertises a key, so it had better be that key that
+   * runs, refusals and status line and all.
+   */
+  const pickRowMenu = useCallback((action: MenuAction) => {
+    setRowMenu(null);
+    if (isCmdline(action)) {
+      // `:note ` and friends: hand over the line rather than guessing at
+      // prose. Mirrors the `:` case in `runKey`.
+      setCmdline(action.cmd.slice(1));
+      setCompletion(null);
+      historyAt.current = history.current.length;
+      enterMode("command");
+      return;
+    }
+    runKeyRef.current(action.cmd);
+  }, [enterMode]);
+
+  /**
    * Commit a name picked out of the owner panel.
    *
    * Through `:assign`, not by patching the field — the same bargain
@@ -2190,44 +2253,44 @@ export function App() {
 
   // ---- key handling -----------------------------------------------
 
-  const onKey = (e: KeyboardEvent) => {
+  /**
+   * Where the cursor actually is, out of the refs.
+   *
+   * Read from the refs rather than the memos, which are a render behind.
+   * `v` `j` `yy` typed as one burst is the case that made this
+   * necessary: React had not re-rendered by the time `yy` ran, so the
+   * yank saw a null anchor and took the single row `v` was pressed on
+   * while the screen showed a block. Two `j`s in a row had the same
+   * shape — both moved from the same starting index, so the second went
+   * nowhere.
+   */
+  const liveCursor = (): number => {
+    const at = visible.findIndex((t) => t.id === cursorRef.current);
+    return at >= 0 ? at : 0;
+  };
+
+  /**
+   * Run one command — the parsed thing a key press means, not the press.
+   *
+   * Split from `onKey` so that something other than a keyboard can ask
+   * for it. The row menu is that something: every item on it names a key,
+   * and rather than reimplementing what the key does it calls this with
+   * the same string, so a menu item cannot drift from the key it claims
+   * to be. `commitOwner` and `commitDate` already make that bargain with
+   * the `:` line; this is the same one, one level down.
+   *
+   * What stays in `onKey` is everything about the *event*: which overlay
+   * owns the keyboard, the modifiers, `NORMALIZE`, the pending-key buffer
+   * and the count. None of it means anything to a caller that already
+   * knows which command it wants.
+   */
+  const runKey = (cmd: string, count = 1, counted = false) => {
     // Read the ref, not the state: see enterMode.
     const activeMode = modeRef.current;
-    // The palette and the date picker each run their own input and own
-    // every key while up, exactly as insert / command / search do.
-    if (showProjects || picking || pickingOwner) return;
-    // Same bargain for the reference-date picker, which carries a date
-    // field of its own. Escape is the one key it hands back, so the
-    // popover closes the way every other overlay here does.
-    if (showAsof) {
-      if (e.key === "Escape") {
-        setShowAsof(false);
-        e.preventDefault();
-      }
-      return;
-    }
-    if (showHelp) {
-      if (e.key === "Escape" || e.key === "?" || e.key === "Enter") {
-        setShowHelp(false);
-        e.preventDefault();
-      }
-      return;
-    }
-    // Insert / command / search live in their own <input>; those
-    // handlers own the keystroke.
-    if (activeMode === "insert" || activeMode === "command" || activeMode === "search") return;
 
-    // Everything below acts on the row under the cursor, so it is read
-    // from the refs rather than from the memos, which are a render
-    // behind. `v` `j` `yy` typed as one burst is the case that made this
-    // necessary: React had not re-rendered by the time `yy` ran, so the
-    // yank saw a null anchor and took the single row `v` was pressed on
-    // while the screen showed a block. Two `j`s in a row had the same
-    // shape — both moved from the same starting index, so the second
-    // went nowhere. These names shadow the memoised ones on purpose:
-    // the body below is written against the live values.
-    const cursorAt = visible.findIndex((t) => t.id === cursorRef.current);
-    const cursor = cursorAt >= 0 ? cursorAt : 0;
+    // These names shadow the memoised ones on purpose: the body below is
+    // written against the live values. See `liveCursor`.
+    const cursor = liveCursor();
     const current: Task | null = visible[cursor] ?? null;
     const selection = selectionIn(
       visible,
@@ -2243,51 +2306,6 @@ export function App() {
       current && data
         ? effectiveParent(current, new Set(data.tasks.map((t) => t.id)))
         : null;
-
-    if (e.ctrlKey || e.metaKey) {
-      if (e.ctrlKey && !e.metaKey) {
-        if (e.key === "d") moveTo(cursor + HALF_PAGE);
-        else if (e.key === "u") moveTo(cursor - HALF_PAGE);
-        else if (e.key === "r") void redo();
-        else return;
-        e.preventDefault();
-      }
-      return;
-    }
-    if (e.altKey) return;
-
-    const key = NORMALIZE[e.key] ?? e.key;
-    if (key.length > 1 && !key.startsWith("<")) return;
-
-    const buf = pendingRef.current + key;
-    const match = /^([1-9]\d*)?(.*)$/.exec(buf);
-    const count = match?.[1] ? Number(match[1]) : 1;
-    const cmd = match?.[2] ?? "";
-
-    e.preventDefault();
-
-    // `y` and `d` are prefixes everywhere except in visual, where each is
-    // the whole command: `v j j y` is what a block yank looks like, and
-    // waiting for a second key there would make it `v j j yy` — a doubled
-    // letter that means "the line" in a mode whose whole point is that you
-    // have already said what you are acting on. Being a prefix is a
-    // property of the mode, not of the key, which is exactly how vim
-    // spends the same two letters.
-    //
-    // Nothing is lost on the second `d` of a habit: the first one fires
-    // and leaves visual, so the second arrives in normal and simply waits
-    // there. `d d` typed out of muscle memory is one delete and a pending
-    // key, not two deletes.
-    const prefix =
-      cmd.length === 1 &&
-      PREFIXES.has(cmd) &&
-      !((cmd === "y" || cmd === "d") && activeMode === "visual");
-    if (cmd === "" || prefix) {
-      setPendingKeys(buf);
-      return;
-    }
-    setPendingKeys("");
-    setMessage(null);
 
     // Out of the ref, not the render, and clamped the way the list draws
     // it — `gd` off leaves one column, and a burst that walked right
@@ -2351,11 +2369,15 @@ export function App() {
       case "k":
         moveTo(cursor - count);
         break;
+      // `counted`, not `count > 1`: `1gg` and a bare `gg` both mean row
+      // one, but `1G` means row one where `G` means the last. Only the
+      // *presence* of a typed count separates them, so it is passed in
+      // rather than inferred from the number.
       case "gg":
-        moveTo(match?.[1] ? count - 1 : 0);
+        moveTo(counted ? count - 1 : 0);
         break;
       case "G":
-        moveTo(match?.[1] ? count - 1 : visible.length - 1);
+        moveTo(counted ? count - 1 : visible.length - 1);
         break;
       case "H":
         moveTo(0);
@@ -2813,11 +2835,98 @@ export function App() {
     }
   };
 
+  /**
+   * A key press, turned into a command and handed to `runKey`.
+   *
+   * Everything here is about the event rather than the edit: which
+   * overlay owns the keyboard, the modifiers, the pending-key buffer that
+   * makes `dd` and `gp` two presses of one command.
+   */
+  const onKey = (e: KeyboardEvent) => {
+    // Read the ref, not the state: see enterMode.
+    const activeMode = modeRef.current;
+    // The palette and the date picker each run their own input and own
+    // every key while up, exactly as insert / command / search do.
+    if (showProjects || picking || pickingOwner) return;
+    // The row menu is the same bargain — it runs its own keyboard while
+    // it is up, and hands back `esc`.
+    if (rowMenu) return;
+    // Same bargain for the reference-date picker, which carries a date
+    // field of its own. Escape is the one key it hands back, so the
+    // popover closes the way every other overlay here does.
+    if (showAsof) {
+      if (e.key === "Escape") {
+        setShowAsof(false);
+        e.preventDefault();
+      }
+      return;
+    }
+    if (showHelp) {
+      if (e.key === "Escape" || e.key === "?" || e.key === "Enter") {
+        setShowHelp(false);
+        e.preventDefault();
+      }
+      return;
+    }
+    // Insert / command / search live in their own <input>; those
+    // handlers own the keystroke.
+    if (activeMode === "insert" || activeMode === "command" || activeMode === "search") return;
+
+    if (e.ctrlKey || e.metaKey) {
+      if (e.ctrlKey && !e.metaKey) {
+        if (e.key === "d") moveTo(liveCursor() + HALF_PAGE);
+        else if (e.key === "u") moveTo(liveCursor() - HALF_PAGE);
+        else if (e.key === "r") void redo();
+        else return;
+        e.preventDefault();
+      }
+      return;
+    }
+    if (e.altKey) return;
+
+    const key = NORMALIZE[e.key] ?? e.key;
+    if (key.length > 1 && !key.startsWith("<")) return;
+
+    const buf = pendingRef.current + key;
+    const match = /^([1-9]\d*)?(.*)$/.exec(buf);
+    const count = match?.[1] ? Number(match[1]) : 1;
+    const cmd = match?.[2] ?? "";
+
+    e.preventDefault();
+
+    // `y` and `d` are prefixes everywhere except in visual, where each is
+    // the whole command: `v j j y` is what a block yank looks like, and
+    // waiting for a second key there would make it `v j j yy` — a doubled
+    // letter that means "the line" in a mode whose whole point is that you
+    // have already said what you are acting on. Being a prefix is a
+    // property of the mode, not of the key, which is exactly how vim
+    // spends the same two letters.
+    //
+    // Nothing is lost on the second `d` of a habit: the first one fires
+    // and leaves visual, so the second arrives in normal and simply waits
+    // there. `d d` typed out of muscle memory is one delete and a pending
+    // key, not two deletes.
+    const prefix =
+      cmd.length === 1 &&
+      PREFIXES.has(cmd) &&
+      !((cmd === "y" || cmd === "d") && activeMode === "visual");
+    if (cmd === "" || prefix) {
+      setPendingKeys(buf);
+      return;
+    }
+    setPendingKeys("");
+    setMessage(null);
+
+    runKey(cmd, count, Boolean(match?.[1]));
+  };
+
   // The handler closes over a lot of state; keeping it in a ref means
   // one listener for the life of the app instead of a re-subscribe on
   // every keystroke.
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
+  // Same trick, same reason — see the declaration up with the refs.
+  runKeyRef.current = runKey;
   useEffect(() => {
     const listener = (e: KeyboardEvent) => keyRef.current(e);
     window.addEventListener("keydown", listener);
@@ -3176,6 +3285,7 @@ export function App() {
             onToggleFold={onToggleFold}
             onEditTitle={onEditTitle}
             onDropRow={onDropRow}
+            onRowMenu={openRowMenu}
           />
         )}
         {/* Only in split: with one pane there is nothing to divide, and a
@@ -3198,6 +3308,7 @@ export function App() {
             onlyPane={view === "gantt"}
             paneRef={ganttPane}
             onScroll={syncScroll(ganttPane)}
+            onRowMenu={openRowMenu}
             showProgressLine={showProgressLine}
             onPick={onPick}
             onMoveBar={onMoveBar}
@@ -3264,6 +3375,19 @@ export function App() {
           anchor={pickingOwner.anchor}
           onPick={(name) => commitOwner(ownerTask.id, name)}
           onClose={() => setPickingOwner(null)}
+        />
+      )}
+
+      {/* Keyed on the row, for the reason the owner panel is: right-
+          clicking straight from one row onto another batches the close
+          and the open, and an unkeyed instance would keep the highlight
+          the pointer left on the previous one. */}
+      {rowMenu && (
+        <RowMenu
+          key={rowMenu.id}
+          at={rowMenu}
+          onPick={pickRowMenu}
+          onClose={() => setRowMenu(null)}
         />
       )}
 

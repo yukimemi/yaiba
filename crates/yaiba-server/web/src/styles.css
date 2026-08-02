@@ -2270,3 +2270,96 @@ button.row__date:focus-visible {
   border-bottom: 1px solid var(--grid-strong);
   color: var(--rust);
 }
+
+/* ---- the row menu ------------------------------------------------
+ *
+ * Same furniture as `.ownerpick`: it is the same kind of thing — a panel
+ * the pointer summons, which then owns the keyboard until `esc`. What is
+ * different is that this one is positioned by the pointer rather than
+ * anchored to a cell, so `RowMenu` flips it up when it would hang off
+ * the bottom.
+ */
+.rowmenu {
+  position: fixed;
+  z-index: 70;
+  padding: 4px 0;
+  min-width: 30ch;
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, calc(0.12 * var(--glow))),
+    0 12px 40px rgba(0, 0, 0, calc(0.6 * var(--glow)));
+  outline: none;
+  line-height: 20px;
+}
+
+.rowmenu__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px;
+}
+
+.rowmenu__glyph {
+  width: 1.4ch;
+  text-align: center;
+  color: var(--fg-dim);
+}
+
+.rowmenu__label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.rowmenu__actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* The hit target is the key, not the label: an item with two of them —
+ * priority, progress, nesting — has two, and which one you are on has to
+ * be visible before the click rather than after it. */
+.rowmenu__action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--fg-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.rowmenu__action--on {
+  border-color: var(--edge-dim);
+  background: var(--sel);
+  color: var(--fg);
+}
+
+.rowmenu__side {
+  color: var(--fg);
+}
+
+.rowmenu__hint {
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
+.rowmenu__rule {
+  margin: 4px 0;
+  border-top: 1px solid var(--edge-dim);
+}
+
+/* Says how to get the browser's menu back. There is no API to open it,
+ * so declining the event is the only offer we can make — and a menu that
+ * took the right button without saying so would be the rudest thing in
+ * the app. */
+.rowmenu__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 10px;
+  color: var(--fg-dim);
+  font-size: 0.85em;
+}

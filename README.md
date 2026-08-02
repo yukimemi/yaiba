@@ -179,6 +179,8 @@ require handing over the keybindings too:
 | | |
 |---|---|
 | click a row | put the cursor on it |
+| right-click a row or its bar | the menu of what nothing else here reaches |
+| `⇧` right-click | the browser's own menu, untouched |
 | click the `+` on it | a new task below, at the same level — what `o` does |
 | click `[ ]` | complete / reopen |
 | click `▾` | fold a summary |
@@ -192,6 +194,53 @@ require handing over the keybindings too:
 | `◀` `▶` beside the date | move the reference date a day |
 | click the date | jump to one, or back to now |
 | drag the divider | give the list more of the width, or less |
+
+That table used to have a hole in it, and the hole was the shape of a
+rule this project keeps in the other direction: *nothing should be
+reachable only by clicking*. Deleting a row was reachable only by
+typing. So were its priority, its progress, its nesting, its note — and
+`doing`, which is the one a status meeting is actually about, since
+`[ ]` only ever toggles the two ends of `todo → doing → done`.
+
+Right-click fills it. What is on the menu is decided by a rule rather
+than by taste — **an item is there exactly when the mouse cannot already
+reach it, and every item names the key it runs**:
+
+```text
+⚑  mark it doing                       s
+◆  priority                    ▲ gp ▼ gP
+%  progress                     + ) − (
+✎  note…                           :note
+⇥  nest / unnest               → >> ← <<
+⌖  focus this subtree                 zf
+✂  yank the row                       yy
+⎘  put it below                        p
+↶  undo                                u
+✖  delete the row                     dd
+```
+
+Both halves of the rule are load-bearing. The first keeps the menu from
+becoming fifteen items nobody reads, and shrinks it on its own: add a
+direct gesture for something and its entry leaves, which
+`check-rowmenu.ts` asserts against the list of gestures rather than
+leaving to memory. The second makes the menu teach — you right-click to
+delete a row and the menu tells you it was `dd` all along, so the mouse
+path advertises the keyboard one instead of competing with it.
+
+It is also the one panel here with no keyboard opener, and for the same
+reason: `co` had to have one because it lists the names already in use,
+which is something no key can tell you, and this lists keys, which `?`
+already does. Nothing is behind a click that is not also behind a
+keystroke — that is the point, not an exception to it.
+
+Deleting from the menu asks nothing first. `dd` does not either, `u`
+brings the row back, and right-click → move → click is already two acts
+of intent; the status line says what went.
+
+`⇧` and right-click declines the event and you get the browser's menu,
+because there is no API that *opens* it — declining is the only offer a
+page can make. Only rows and bars take the button at all, so anywhere
+else it was never ours.
 
 The divider between the list and the timeline is draggable — the line you
 see is the thing you grab, with a few pixels either side so it is

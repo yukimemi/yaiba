@@ -96,6 +96,8 @@ const groups = (): Group[] => [
     title: t("MOUSE"),
     keys: [
       ["click", t("put the cursor on a row")],
+      ["right-click", t("the keys no other gesture reaches")],
+      ["⇧ right-click", t("the browser's own menu")],
       ["click +", t("new task below, at this level")],
       ["click [ ]", t("complete / reopen")],
       ["click ▾", t("fold a summary")],
