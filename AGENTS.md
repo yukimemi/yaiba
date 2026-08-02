@@ -911,6 +911,84 @@ bug listed here passed CI.
   the `:` command path reading the *memoised* selection instead, which is
   the bug fixed in #75.
 
+### Re-recording the README's demo gif
+
+`cargo make demo-gif` records `assets/demo.gif` end to end — it starts a
+release binary on a scratch `YAIBA_DATA_DIR`, seeds a plan over the API,
+drives Chromium under playwright, and encodes. `cargo make demo-shots`
+runs the same storyboard and writes one PNG per beat to
+`target/demo-shots` instead, which is the loop for changing it; the
+encode is the slow part and you rarely need it to see whether a beat
+lands. Everything lives in `tools/demo/`, with its own `package.json` so
+that `web-build` never installs a browser driver.
+
+**Prerequisites: `bun`, `node` and `ffmpeg` on `PATH`.** The first two
+are already what the web bundle needs; `ffmpeg` is the encoder and is
+the one thing neither task can install for you — `demo-gif` says so and
+stops if it is missing, and `demo-shots` never reaches it.
+
+**The first run on a machine also downloads a browser** (~150MB), and
+both tasks depend on `demo-deps`, which is where that happens. The
+dependency there is `playwright-core` precisely *because* it downloads
+nothing on install — that is what keeps a browser out of every release
+build — so the browser is a second, explicit step:
+
+```sh
+cd tools/demo
+bun install
+node node_modules/playwright-core/cli.js install chromium   # no-op once present
+```
+
+Only needed if you run `node record.mjs` by hand; `cargo make demo-gif`
+and `cargo make demo-shots` both run it for you. Skipping it fails inside
+`chromium.launch` with a message about an executable path, so
+`record.mjs` catches that one and says this instead.
+
+The first gif was recorded by hand and nothing said how, which is why it
+could not be updated when the UI grew past it. That is the point of the
+task, so keep it working:
+
+- **Run the recorder with `node`, not `bun`.** Playwright speaks CDP over
+  extra stdio pipes on fd 3 and 4, and bun's `child_process` does not
+  carry them. The browser launches, nothing ever connects, and it fails
+  three minutes later with a launch timeout whose message points at the
+  browser rather than at the pipe.
+- **Capture frames, not video.** `recordVideo` writes VP8, and on a
+  motionless screen VP8 still changes a pixel or two everywhere — which a
+  gif cannot collapse, since it only knows "identical". The first take
+  came out at 6.2MB, five of them compression noise over a screen where
+  nothing was happening. `Page.startScreencast` with `format: png` gives
+  the real pixels and only emits on paint, and the same storyboard
+  encodes to about 600KB. The frames carry their own timestamps, so the
+  gif ships variable delays rather than being resampled to a constant
+  rate — a whole take is barely a hundred distinct pictures, because this
+  UI paints on state changes rather than on a clock.
+- **Neither capture path draws the cursor**, so a mouse beat needs a
+  pointer drawn into the page. Without one the divider slides with
+  nothing touching it, which reads as an animation rather than a drag.
+- **`⏎` on a new row opens the next one.** `o`, type, `⏎` leaves you in
+  insert mode with a fresh draft, so a storyboard that carries on
+  pressing normal-mode keys types them into a task title. `esc` is what
+  commits and stops.
+- **The drag leaves the grip holding the keyboard,** which is the
+  behaviour `README.md` documents — so `h` / `l` move the divider, not
+  the cell cursor, until something else takes focus. Click a row after
+  dragging.
+- **The gantt pane follows the cursor, and only the cursor.** An edge
+  that moves a bar a fortnight out does not scroll the pane, because the
+  effect is keyed on the cursor and the cursor did not move. `k` then `j`
+  is the cheapest way to ask it to look again.
+- **A pin that lands later than the scheduler's placement adds slack
+  upstream**, and the critical path goes from magenta to nothing.
+  Correct, and worth avoiding in a take: the calendar beat picks a
+  planned *end* on a leaf instead, which extends the chain rather than
+  loosening it.
+- **The storyboard is a keybinding consumer like any other.** A key whose
+  meaning moves — `x` off "done" and onto the cell, `V` off cells and
+  onto rows — is a key the take may be pressing for the old reason. It
+  will not fail; it will record the wrong thing. `demo-shots` after a
+  keymap change is cheap, and is the only thing that catches it.
+
 ### Traps in the worktree loop itself
 
 **`renri remove` can half-succeed.** A `cargo run` launched from a
