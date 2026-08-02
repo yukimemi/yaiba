@@ -11,14 +11,18 @@ scheduling with a critical path, and peer-to-peer replication over
 [iroh](https://iroh.computer). `cargo install yaiba`.**
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/yukimemi/yaiba/main/assets/demo.gif" alt="a row opened with o, lengthened with +, made to wait for another with D — and the gantt following" width="900">
+  <img src="https://raw.githubusercontent.com/yukimemi/yaiba/main/assets/demo.gif" alt="a row opened with o and made to wait for another with D, the date columns filled by walking them, a block of dates yanked onto the actuals, and the same plan in office mode and in Japanese" width="900">
 </p>
 
 <p align="center">
   <sub><code>o</code> opens a row · <code>+</code> lengthens it ·
   <code>D</code> makes it wait for another, and the critical path
-  moves to follow · <code>zm</code> folds an altitude ·
-  <code>gt</code> is office mode</sub>
+  moves to follow · the divider drags · <code>gd</code> puts the dates
+  in columns, <code>h</code> <code>l</code> walk them and <code>⏎</code>
+  edits one · <code>v</code> <code>y</code> <code>p</code> move a block
+  of cells · <code>co</code> hands the row over ·
+  <code>zm</code> folds an altitude · <code>gt</code> is office mode ·
+  <code>:lang ja</code> is the whole UI</sub>
 </p>
 
 ## Why
@@ -31,8 +35,8 @@ server.
 `yaiba` refuses the choice:
 
 - **The keyboard is the interface.** Modal editing, `:` commands,
-  operators that wait for a motion. `o` opens a row and you type; `x`
-  completes it; `dd` deletes and `u` brings it back.
+  operators that wait for a motion. `o` opens a row and you type;
+  `space` completes it; `dd` deletes and `u` brings it back.
 - **Dependencies are real, not decoration.** Finish-to-start edges feed a
   forward/backward pass that computes each task's earliest start, its
   slack, and the critical path — so "when does this actually land"
@@ -112,7 +116,8 @@ yaiba self-update --check    # just tell me whether one exists
 | `j` `k` `gg` `G` `^d` `^u` | move |
 | `o` `O` | new task below / above — you type immediately, it saves on commit |
 | `i` `I` `a` `A` `cc` | edit the cell under the cursor — on the title, at the head / tail / cleared |
-| `x` | complete (the row gets cut) · `s` cycles todo → doing → done |
+| `space` | complete (the row gets cut) · `s` cycles todo → doing → done |
+| `x` | clear the cell under the cursor · `dl` is vim's spelling of it |
 | `dd` `yy` `Y` | delete, yank rows |
 | `p` `P` | put the last yank · `P` is rows only · `u` / `^r` undo, redo |
 | `J` `K` | move the row down / up, changing level to suit where it lands |
@@ -124,6 +129,8 @@ yaiba self-update --check    # just tell me whether one exists
 | `tab` | split → list → gantt · `[` `]` zoom the timeline |
 | `gd` | plan-vs-actual date columns ⇄ compact |
 | `cs` `ce` `ca` `cA` | calendar on the planned start / end, actual start / end |
+| `co` | hand the row over — the panel lists the names already in use |
+| `gt` | office mode ⇄ neon · `:theme` and `:lang` say it by name |
 | `h` `l` | out / in — a fold, or a cell once `gd` is up · `⏎` `i` `I` `a` `A` `cc` edit it |
 | `>>` `<<` | nest under the row above / move back out |
 | `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |

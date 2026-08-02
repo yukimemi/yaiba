@@ -32,6 +32,12 @@ apm_modules/
 crates/yaiba-server/web/node_modules/
 crates/yaiba-server/web/dist/
 
+# The demo recorder's dependencies. It has its own `package.json`
+# precisely so that `cargo make web-build` — which every release goes
+# through — never installs a browser: `tools/demo` is opt-in, and only
+# `cargo make demo-gif` reaches for it.
+tools/demo/node_modules/
+
 # `tsc -b`'s incremental cache. Machine-local by nature — it records
 # absolute paths and mtimes — so a committed one lands in the diff of
 # every branch that so much as type-checks, and never usefully merges.

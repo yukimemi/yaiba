@@ -264,3 +264,51 @@ command = "cargo"
 # which would make this task a no-op exactly when you re-run it to pick
 # up your own changes.
 args = ["install", "--locked", "--force", "--path", "crates/yaiba-server"]
+
+[tasks.demo-deps]
+description = "Install what tools/demo needs: the npm package, then the browser it drives"
+script_runner = "@shell"
+# Two steps, because `playwright-core` is the package that deliberately
+# does *not* download a browser on install — which is why it is the one
+# in `tools/demo/package.json`, and why the second line has to exist.
+# Without it the first run on a machine that has never had playwright
+# fails inside `chromium.launch`, which is a long way from anything that
+# mentions a download. Already-present browsers make it a silent no-op,
+# so it costs nothing on every run after the first.
+#
+# `tools/demo` keeps its own `package.json` so that this is the only
+# place that ever installs any of it; `web-build`, which every release
+# goes through, must not.
+script = '''
+cd tools/demo
+bun install
+node node_modules/playwright-core/cli.js install chromium
+'''
+
+[tasks.demo-gif]
+description = "Re-record assets/demo.gif from a scratch database"
+# The release binary, because the gif shows the shipped UI — and
+# `release-build` already sequences the web bundle ahead of it.
+dependencies = ["release-build", "demo-deps"]
+script_runner = "@shell"
+# `node`, not `bun`. Playwright talks to the browser over extra stdio
+# pipes on fd 3 and 4, and bun's `child_process` does not carry them:
+# the browser launches, nothing connects, and it fails three minutes
+# later with a launch timeout that says nothing about why. `bun install`
+# above is still fine — that is a download, not a pipe.
+script = '''
+cd tools/demo
+node record.mjs
+'''
+
+[tasks.demo-shots]
+description = "Run the demo storyboard to target/demo-shots as one PNG per beat"
+# No encode and no video, so it takes seconds rather than a minute —
+# this is the loop for changing the storyboard, and `demo-gif` is what
+# you run once it reads right.
+dependencies = ["release-build", "demo-deps"]
+script_runner = "@shell"
+script = '''
+cd tools/demo
+node record.mjs --shots
+'''
