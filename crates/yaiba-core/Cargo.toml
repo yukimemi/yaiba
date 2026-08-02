@@ -20,3 +20,8 @@ serde      = { workspace = true }
 serde_json = { workspace = true }
 thiserror  = { workspace = true }
 uuid       = { workspace = true }
+
+[dev-dependencies]
+# Only the version check in `tests/check_versions.rs` needs it — reading a
+# manifest by substring is how that test shipped its own false negative.
+toml = { workspace = true }
