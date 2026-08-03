@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { earliestStart, type Zoom } from "../commands";
 import { addDays, diffDays, isWeekend, monthLabel, weekdayLabel } from "../dates";
+import { depKey, type FlashKind } from "../flash";
 import type { Lang } from "../lang";
 import type { Dep, Scheduled, Task } from "../types";
 
@@ -29,6 +30,16 @@ interface Props {
   zoom: Zoom;
   rangeStart: string;
   rangeEnd: string;
+  /**
+   * Bars mid-stroke — the same map the list draws from, see `flash.ts`.
+   *
+   * Both panes get it because either can be the only one on screen: in
+   * the gantt-only view the list is unmounted, so a completion drawn on
+   * a row alone was a completion nothing drew.
+   */
+  flashes: Map<string, FlashKind>;
+  /** Edges mid-sever, keyed by `depKey`. */
+  severing: Set<string>;
   onlyPane: boolean;
   paneRef: React.RefObject<HTMLDivElement | null>;
   onScroll: () => void;
@@ -57,6 +68,8 @@ export function Gantt({
   zoom,
   rangeStart,
   rangeEnd,
+  flashes,
+  severing,
   onlyPane,
   paneRef,
   onScroll,
@@ -337,6 +350,8 @@ export function Gantt({
                     sched.overdue && "gantt__bar--overdue",
                     dragging && "gantt__bar--dragging",
                     dropTarget === task.id && "gantt__bar--drop",
+                    flashes.has(task.id) &&
+                      `gantt__bar--${flashes.get(task.id)}`,
                   ]
                     .filter(Boolean)
                     .join(" ")}
@@ -511,26 +526,50 @@ export function Gantt({
                       y1 + (y2 >= y1 ? ROW_H / 2 : -ROW_H / 2)
                     } H${x2 - 14} V${y2} H${x2 - 5}`;
 
+              // Cut, and on screen for `SEVER_MS` more while the stroke
+              // plays — see `onUnlinkDep`. The state it is drawn in wins
+              // over focus and critical both, which is why it is applied
+              // instead of `suffix` rather than alongside it.
+              const severed = severing.has(depKey(dep));
+
               return (
                 <g key={`${dep.from}-${dep.to}`}>
                   {/* An invisible fat stroke over the same path: a 1px
                       line is not something anyone can be asked to hit.
                       Drawn first so the two visible siblings below can
-                      react to its hover. */}
+                      react to its hover.
+
+                      Gone once the edge is severed: there is nothing left
+                      to click, and the hover rule it drives — the grey
+                      dashes that preview the edge's absence — is written
+                      with a specificity that would otherwise paint over
+                      the stroke, with the pointer sitting right on it. */}
+                  {!severed && (
+                    <path
+                      className="gantt__link-hit"
+                      d={d}
+                      onClick={() => onUnlinkDep(dep)}
+                    >
+                      <title>click to cut this dependency</title>
+                    </path>
+                  )}
                   <path
-                    className="gantt__link-hit"
-                    d={d}
-                    onClick={() => onUnlinkDep(dep)}
-                  >
-                    <title>click to cut this dependency</title>
-                  </path>
-                  <path
-                    className={`gantt__link ${suffix ? `gantt__link${suffix}` : ""}`}
+                    className={`gantt__link ${
+                      severed
+                        ? "gantt__link--severed"
+                        : suffix
+                          ? `gantt__link${suffix}`
+                          : ""
+                    }`}
                     d={d}
                   />
                   <polygon
                     className={`gantt__arrow ${
-                      suffix ? `gantt__arrow${suffix}` : ""
+                      severed
+                        ? "gantt__arrow--severed"
+                        : suffix
+                          ? `gantt__arrow${suffix}`
+                          : ""
                     }`}
                     points={`${x2},${y2} ${x2 - 5},${y2 - 3.5} ${x2 - 5},${y2 + 3.5}`}
                   />
