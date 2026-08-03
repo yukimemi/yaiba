@@ -389,6 +389,42 @@ failing.
     `main`'s required checks; renaming the job un-requires it silently,
     because protection keeps waiting on a context nothing reports.
 
+### A release bumps one line, and a test makes sure that is true
+
+The kata-managed release section above says to edit
+`[workspace.package] version` and let `cargo build` follow. That is now
+the whole edit, but it was not always: until v0.17.0 the three crates
+depended on each other through longhand `path` dependencies that each
+carried their own `version` literal, and a release had to bump four
+files. They now live in `[workspace.dependencies]` — where the block's
+own comment already said version bumps should happen — and the members
+say `yaiba-core.workspace = true`.
+
+**The literal cannot go away entirely.** All three crates are published,
+and crates.io needs a requirement it can resolve for somebody who is not
+building from this checkout, so a `path` alone will not do. What it can
+be is *one* place, next to the version it has to agree with.
+
+**The failure mode is silence, not breakage.** `version = "0.16.0"` is
+`^0.16.0`, so a stale pin keeps resolving through every patch release and
+only stops the first release that moves the minor — v0.17.0 was that
+release here, three bumps after the pins were last right, and it failed
+with `candidate versions found which didn't match`. So
+`crates/yaiba-core/tests/check_versions.rs` asserts the pins equal the
+workspace version, and it is a test rather than a script because
+`cargo test` already runs in `cargo make check` and in CI. Confirmed both
+ways: a patch drift builds clean and fails the test; a minor drift never
+reaches the test because cargo refuses to resolve first.
+
+It also refuses a member that writes its own `version` or reaches for a
+sibling by `path = "../"`, since both are how the four-file version of
+this came about.
+
+**`kanade` has the same shape and is mid-drift** — workspace at 0.45.4,
+`kanade-shared` pinned at 0.45.0 — and is green only because it has not
+bumped a minor since. Worth porting this test there rather than waiting
+for the release that trips over it.
+
 ### The binary crate is `yaiba`, not `yaiba-server`
 
 Only the directory carries the suffix, so `-p yaiba-server` fails with
