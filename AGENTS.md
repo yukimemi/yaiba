@@ -933,6 +933,19 @@ got wrong once by hand: the hint has to *be* the command (a menu that
 says `gp` and runs `gP` is worse than no hint), and `dd` / `s` / `u` have
 to stay on it, since those three are the gap the menu was added to close.
 
+**An item with one action *is* the row.** The hit target used to be the
+key printed at the right end, which asked the pointer to aim past the
+sentence it had just finished reading — the one thing a context menu
+exists to spare it. So a one-action item renders as a single row-wide
+`<button>`, and only the two-way items (priority, progress, nesting)
+keep an inert label with two targets beside it, because a row that meant
+both `>>` and `<<` would have to pick one. The consequence for anyone
+adding an item: `RowMenu` walks the flat `WALK` list with
+`at = walked + 1; walked += item.actions.length`, which is what keeps
+the two branches in step and the lit element's `id` equal to what
+`aria-activedescendant` names. A third action on an item is the case
+that would break it.
+
 **Labels are data, so `check-i18n.mjs` cannot see them by scanning call
 sites.** It reads `label:` out of `rowMenu.ts` the way it already reads
 `head:` / `title:` out of `dateColumns.ts`. Without that line the entire

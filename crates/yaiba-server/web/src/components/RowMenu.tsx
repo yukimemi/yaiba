@@ -135,42 +135,76 @@ export function RowMenu({ at, onPick, onClose }: Props) {
       {ROW_MENU.map((item) => {
         const rule = group && group !== item.group;
         group = item.group;
+        // An item with one action *is* that action, so the row is the
+        // button. The key printed at its right end used to be the only
+        // place a click landed, which asked the pointer to aim past the
+        // sentence it had just read — the one thing a context menu
+        // exists to spare it. The key still shows; it is no longer the
+        // target.
+        //
+        // A two-way item cannot be one button, since a row that meant
+        // both `>>` and `<<` would have to pick one. Those keep a label
+        // and two targets, widened in CSS instead.
+        const only = item.actions.length === 1 ? item.actions[0] : null;
+        // Where this item's actions start in `WALK`. Advancing by the
+        // item's own length is what keeps the two branches below in step
+        // with the flat list `↑` / `↓` walk.
+        const at = walked + 1;
+        walked += item.actions.length;
         return (
           <div key={item.id}>
             {rule ? <div className="rowmenu__rule" /> : null}
-            <div className="rowmenu__row">
-              <span className="rowmenu__glyph" aria-hidden="true">
-                {item.glyph}
-              </span>
-              <span className="rowmenu__label">{t(item.label)}</span>
-              <span className="rowmenu__actions">
-                {item.actions.map((action) => {
-                  walked += 1;
-                  const at = walked;
-                  return (
-                    <button
-                      key={action.cmd}
-                      // Indexed by the walk order, so the id the panel
-                      // points at is the item the highlight is on — one
-                      // counter for both, rather than two that can drift.
-                      id={`rowmenu-action-${at}`}
-                      type="button"
-                      role="menuitem"
-                      className={`rowmenu__action${
-                        cursor === at ? " rowmenu__action--on" : ""
-                      }`}
-                      onPointerEnter={() => setCursor(at)}
-                      onClick={() => onPick(action)}
-                    >
-                      {action.side ? (
-                        <span className="rowmenu__side">{action.side}</span>
-                      ) : null}
-                      <span className="rowmenu__hint">{action.hint}</span>
-                    </button>
-                  );
-                })}
-              </span>
-            </div>
+            {only ? (
+              <button
+                // Indexed by the walk order, so the id the panel points
+                // at is the item the highlight is on — one counter for
+                // both, rather than two that can drift.
+                id={`rowmenu-action-${at}`}
+                type="button"
+                role="menuitem"
+                className={`rowmenu__row rowmenu__row--one${
+                  cursor === at ? " rowmenu__on" : ""
+                }`}
+                onPointerEnter={() => setCursor(at)}
+                onClick={() => onPick(only)}
+              >
+                <span className="rowmenu__glyph" aria-hidden="true">
+                  {item.glyph}
+                </span>
+                <span className="rowmenu__label">{t(item.label)}</span>
+                <span className="rowmenu__hint">{only.hint}</span>
+              </button>
+            ) : (
+              <div className="rowmenu__row">
+                <span className="rowmenu__glyph" aria-hidden="true">
+                  {item.glyph}
+                </span>
+                <span className="rowmenu__label">{t(item.label)}</span>
+                <span className="rowmenu__actions">
+                  {item.actions.map((action, side) => {
+                    const here = at + side;
+                    return (
+                      <button
+                        key={action.cmd}
+                        id={`rowmenu-action-${here}`}
+                        type="button"
+                        role="menuitem"
+                        className={`rowmenu__action${
+                          cursor === here ? " rowmenu__on" : ""
+                        }`}
+                        onPointerEnter={() => setCursor(here)}
+                        onClick={() => onPick(action)}
+                      >
+                        {action.side ? (
+                          <span className="rowmenu__side">{action.side}</span>
+                        ) : null}
+                        <span className="rowmenu__hint">{action.hint}</span>
+                      </button>
+                    );
+                  })}
+                </span>
+              </div>
+            )}
           </div>
         );
       })}
@@ -181,7 +215,13 @@ export function RowMenu({ at, onPick, onClose }: Props) {
           button without saying how to get it back would be the rudest
           thing in the app. */}
       <div className="rowmenu__foot">
-        <span>⇧ {t("right-click")}</span>
+        <span>
+          {/* The one character in the footer that has to be read as a
+              shape rather than as a word, set in the one size the footer
+              had shrunk. `⇧` at 0.85em is a smudge, and a smudge is a
+              poor way to say "this is how you get your browser back". */}
+          <span className="rowmenu__shift">⇧</span> {t("right-click")}
+        </span>
         <span>{t("the browser's own menu")}</span>
       </div>
     </div>
