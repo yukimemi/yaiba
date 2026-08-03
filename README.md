@@ -186,7 +186,7 @@ require handing over the keybindings too:
 | click `▾` | fold a summary |
 | double-click | edit the title |
 | click the owner cell | pick who it belongs to (`gd` shows the column) |
-| drag a row | reorder |
+| drag a row | reorder — a line shows the slot, indented to the level it lands at |
 | drag a bar | move its start date |
 | drag its right edge | change the duration |
 | drag the dot past its end onto another bar | make that task wait for this one |

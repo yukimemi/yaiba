@@ -1082,6 +1082,40 @@ button.row__date:focus-visible {
   background: rgba(244, 114, 182, 0.1);
 }
 
+/* The row in the air. Dimmed rather than hidden: a gap where it used to
+   be would reflow the list under the pointer mid-gesture, and the drag
+   is about where it is going, not about pretending it has left. */
+.row--dragging {
+  opacity: 0.4;
+}
+
+/* Where releasing would put it — drawn on the target row, on the side
+   `planDrop` says the row lands.
+
+   `left` comes from the component, measured off the target's title,
+   because the line is indented to the level the row would land at
+   rather than run edge to edge: a drop takes the target's slot *and*
+   its level, so dropped on a child the row becomes a child. That is
+   the half of the answer a plain insertion line cannot give. */
+.row__drop {
+  position: absolute;
+  right: var(--gutter);
+  height: 2px;
+  background: var(--edge);
+  box-shadow: 0 0 calc(8px * var(--glow)) var(--edge);
+  /* The line sits over the row it points at; a drop target that
+     swallowed its own `dragover` would flicker the line off and on. */
+  pointer-events: none;
+}
+
+.row__drop--above {
+  top: -1px;
+}
+
+.row__drop--below {
+  bottom: -1px;
+}
+
 .row--match .row__title {
   color: var(--rust);
 }

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 import { cellColumns, type CellField } from "../cells";
 import type { Columns, DateField } from "../commands";
@@ -81,6 +81,16 @@ interface Props {
   onEditTitle: (id: string) => void;
   /** Drag a row onto another to reorder. */
   onDropRow: (draggedId: string, targetId: string) => void;
+  /**
+   * Which side of `targetId` the dragged row would land on, or `null`
+   * when releasing there would achieve nothing.
+   *
+   * Asked on every new target so the drop can be drawn before it
+   * happens. It is `App`'s to answer because the answer comes out of
+   * `dropOrder` — the function the drop itself runs — over the whole
+   * task list, which is more than this component is given.
+   */
+  planDrop: (draggedId: string, targetId: string) => "above" | "below" | null;
   /** Right-click a row for the keys the mouse cannot otherwise reach. */
   onRowMenu: (id: string, x: number, y: number) => void;
 }
@@ -124,10 +134,38 @@ export function TaskList({
   onToggleFold,
   onEditTitle,
   onDropRow,
+  planDrop,
   onRowMenu,
 }: Props) {
   const cursorRef = useRef<HTMLDivElement>(null);
   const editRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * The drag in progress: what is being moved, and what it is over.
+   *
+   * Kept here rather than in `App` for the same reason `Gantt` keeps its
+   * own — it is the gesture, not the plan, and it dies with the mouse
+   * button. The dragged id has to be remembered at `dragstart` because
+   * `dataTransfer.getData` is deliberately empty until `drop`: a page
+   * may not read what is being dragged over it until it is released.
+   */
+  const [drag, setDrag] = useState<{
+    id: string;
+    /**
+     * The row under the pointer and where its title starts, in pixels
+     * from the row's own left edge.
+     *
+     * Measured rather than derived from the level, because deriving it
+     * means restating the flex skeleton — five gaps and four column
+     * widths — in a stylesheet that cannot see whether it is still
+     * true. That sum was wrong by 14px the first time it was written,
+     * and it would have gone on being wrong silently. `offsetLeft` is
+     * read once per row the drag crosses, which is cheap and cannot
+     * drift.
+     */
+    over: { id: string; lead: number } | null;
+  } | null>(null);
+  const landing = drag?.over ? planDrop(drag.id, drag.over.id) : null;
 
   // Whether the visual rectangle is the whole row. Computed once rather
   // than per row: it is a property of the selection, not of any task.
@@ -320,6 +358,7 @@ export function TaskList({
                 task.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
                 "row--match",
               linkAnchor === task.id && "row--selected",
+              drag?.id === task.id && "row--dragging",
             ]
               .filter(Boolean)
               .join(" ");
@@ -349,19 +388,59 @@ export function TaskList({
                   onDragStart={(e) => {
                     e.dataTransfer.setData("text/plain", task.id);
                     e.dataTransfer.effectAllowed = "move";
+                    setDrag({ id: task.id, over: null });
                   }}
                   onDragOver={(e) => {
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
+                    // `dragover` fires continuously; only a change of
+                    // row is news, and answering it costs a measurement
+                    // here and a walk of the task list in `planDrop`.
+                    const lead = (
+                      e.currentTarget.querySelector(
+                        ".row__lead",
+                      ) as HTMLElement | null
+                    )?.offsetLeft;
+                    setDrag((d) =>
+                      !d || d.over?.id === task.id
+                        ? d
+                        : { ...d, over: { id: task.id, lead: lead ?? 0 } },
+                    );
                   }}
+                  // Leaving the last row for the empty space below it
+                  // must take the line with it, or the list keeps
+                  // promising a drop the pointer has walked away from.
+                  onDragLeave={() => {
+                    setDrag((d) =>
+                      d?.over?.id === task.id ? { ...d, over: null } : d,
+                    );
+                  }}
+                  // Fires on the row that was picked up, however the
+                  // drag ended — including `esc` and a release over
+                  // another window, neither of which sends a `drop`.
+                  onDragEnd={() => setDrag(null)}
                   onDrop={(e) => {
                     e.preventDefault();
+                    setDrag(null);
                     const dragged = e.dataTransfer.getData("text/plain");
                     if (dragged && dragged !== task.id) {
                       onDropRow(dragged, task.id);
                     }
                   }}
                 >
+                  {/* The line the drop would land on. A child rather
+                      than a pseudo-element because both of this row's
+                      are spoken for — `row--cursor::before` is the
+                      cursor bar and `row--cut::after` is the completion
+                      sweep — and the drop target is very often the
+                      cursor row. */}
+                  {drag?.over?.id === task.id && landing ? (
+                    <span
+                      className={`row__drop row__drop--${landing}`}
+                      style={{ left: drag.over.lead }}
+                      aria-hidden="true"
+                    />
+                  ) : null}
                   <span className="row__num">{index + 1}</span>
                   {/* Indent by position in the work breakdown, and mark
                       summaries so a collapsed one is obviously hiding

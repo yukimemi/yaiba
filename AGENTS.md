@@ -956,6 +956,33 @@ only decline the event, which is what `⇧` does on a row — so an item
 *inside* our menu could never offer it, and the footer says where it
 went instead. Only rows and bars call `preventDefault` at all.
 
+### The drop line is answered by the drop
+
+`planDrop` in `App.tsx` runs `dropOrder` — the same function
+`onDropRow` runs, over the same tasks — and reads the side out of the
+order it returns. It does not decide which way the pointer is
+travelling and infer from that, and the reason is worth keeping: the
+inference is wrong exactly where nobody can check it. Dragging
+*downwards* onto a sibling, the row's removal shifts the target up and
+the row lands **below** it; dragging downwards onto a row at another
+level, it takes the target's slot and lands **above** it. Same
+gesture, opposite answers. Same rule as the gantt's move preview
+clamping at `earliestStart`: a preview that disagrees with the commit
+is worse than no preview.
+
+`null` is "draw nothing", and it deliberately does not stop the drop.
+A drop onto itself or into its own subtree, or any drop at all while
+`:sort` is not `manual`, still runs and still says why in the status
+line — silence is not an explanation, and `:sort manual` is the part
+worth learning.
+
+The line is placed from a measurement (`.row__lead`'s `offsetLeft`,
+read once per row the drag crosses), not from the level times an
+indent constant. It is indented because a drop takes the target's
+*level* as well as its slot, and the first version of that sum — four
+column widths and five flex gaps restated in CSS — was 14px wrong and
+would have stayed wrong silently.
+
 ### Verifying UI changes by hand
 
 `cargo make check` will not catch any of the above — every interaction
