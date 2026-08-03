@@ -1161,8 +1161,19 @@ task, so keep it working:
   the real pixels and only emits on paint, and the same storyboard
   encodes to about 600KB. The frames carry their own timestamps, so the
   gif ships variable delays rather than being resampled to a constant
-  rate — a whole take is barely a hundred distinct pictures, because this
-  UI paints on state changes rather than on a clock.
+  rate.
+- **That last property stopped holding when the blade got effects.** A
+  take used to be barely a hundred distinct pictures, because the UI
+  painted on state changes rather than on a clock. A CSS animation *is*
+  a clock: the 500ms shell wipe comes back as 32 frames about 10ms
+  apart, and the storyboard has six such bursts now. A gif carries a
+  delay per frame and the format's own floor is 10ms, so every one of
+  them shipped — 289 frames and 1.7MB, against 109 and 610KB before.
+  `MIN_GAP` in `record.mjs` drops frames closer together than 22ms,
+  which is invisible at that speed and gives most of the difference
+  back. It cannot touch a still beat, since those are one frame each
+  already. Budget accordingly: a beat that *animates* costs frames on
+  this scale, a beat that merely holds costs one.
 - **Neither capture path draws the cursor**, so a mouse beat needs a
   pointer drawn into the page. Without one the divider slides with
   nothing touching it, which reads as an animation rather than a drag.
