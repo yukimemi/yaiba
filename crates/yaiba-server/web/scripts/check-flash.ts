@@ -114,9 +114,18 @@ function longestMs(sel: string): number {
   return ms;
 }
 
+/**
+ * Is there a rule that actually animates `sel`?
+ *
+ * `none` is a word like any other, so a bare `[\w-]` here counted
+ * `animation: none` as a stroke — and the two ways to silence one are
+ * spelled exactly that. A rule outside both of those scopes that turns
+ * the animation off is the one thing this check exists to catch, and it
+ * was the one thing that satisfied it.
+ */
 const draws = (sel: string) =>
   drawing.some(
-    (r) => r.selector.includes(sel) && /animation:\s*[\w-]/.test(r.body),
+    (r) => r.selector.includes(sel) && /animation:\s*(?!none\b)[\w-]/.test(r.body),
   );
 
 const officeSilences = (sel: string) =>
@@ -151,12 +160,17 @@ for (const kind of FLASH_KINDS) {
 
   // The class is pulled on a timer; an animation outlasting it is cut
   // off part-played rather than finishing into its `forwards` state.
-  const ms = longestMs(`.row--${kind}`);
+  // Both selectors, because one timer pulls both: asking only the row's
+  // left the bar free to animate for longer than the class it rides on.
+  const ms = Math.max(
+    longestMs(`.row--${kind}`),
+    longestMs(`.gantt__bar--${kind}`),
+  );
   check(
     `${kind}: the stroke fits in the ${FLASH_MS[kind]}ms the class is held`,
     ms <= FLASH_MS[kind],
-    `styles.css animates .row--${kind} for ${ms}ms, and flash.ts removes ` +
-      `the class after ${FLASH_MS[kind]}ms.`,
+    `styles.css animates .row--${kind} / .gantt__bar--${kind} for ${ms}ms, ` +
+      `and flash.ts removes the class after ${FLASH_MS[kind]}ms.`,
   );
 }
 
@@ -170,12 +184,17 @@ for (const sel of [".gantt__link--severed", ".gantt__arrow--severed", ".wipe"]) 
   check(`${sel} stands down in office mode`, officeSilences(sel));
 }
 
-const severMs = longestMs(".gantt__link--severed");
+// The path and its arrowhead are one gesture on one timer, so the slower
+// of the two is what has to fit — same pairing as the row and its bar.
+const severMs = Math.max(
+  longestMs(".gantt__link--severed"),
+  longestMs(".gantt__arrow--severed"),
+);
 check(
   `the sever fits in the ${SEVER_MS}ms the edge is held on screen`,
   severMs <= SEVER_MS,
-  `styles.css animates .gantt__link--severed for ${severMs}ms, and ` +
-    `flash.ts removes the edge after ${SEVER_MS}ms.`,
+  `styles.css animates .gantt__link--severed / .gantt__arrow--severed for ` +
+    `${severMs}ms, and flash.ts removes the edge after ${SEVER_MS}ms.`,
 );
 
 console.log(`\nflash: ${ran} checks, ${failures} failed`);
