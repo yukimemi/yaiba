@@ -181,8 +181,8 @@ export function RowMenu({ at, onPick, onClose }: Props) {
                 </span>
                 <span className="rowmenu__label">{t(item.label)}</span>
                 <span className="rowmenu__actions">
-                  {item.actions.map((action, side) => {
-                    const here = at + side;
+                  {item.actions.map((action, offset) => {
+                    const here = at + offset;
                     return (
                       <button
                         key={action.cmd}

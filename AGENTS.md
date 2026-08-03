@@ -943,8 +943,11 @@ both `>>` and `<<` would have to pick one. The consequence for anyone
 adding an item: `RowMenu` walks the flat `WALK` list with
 `at = walked + 1; walked += item.actions.length`, which is what keeps
 the two branches in step and the lit element's `id` equal to what
-`aria-activedescendant` names. A third action on an item is the case
-that would break it.
+`aria-activedescendant` names. That arithmetic holds for any number of
+actions; what stops at two is `MenuItem.actions`, typed
+`[MenuAction] | [MenuAction, MenuAction]`, and `check-rowmenu.ts`
+asserting that a two-action item labels both sides. Widening that type
+is the change that needs a third *layout*, not a third index.
 
 **Labels are data, so `check-i18n.mjs` cannot see them by scanning call
 sites.** It reads `label:` out of `rowMenu.ts` the way it already reads
