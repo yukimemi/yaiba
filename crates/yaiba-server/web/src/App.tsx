@@ -1983,6 +1983,38 @@ export function App() {
    * takes the target's slot among the target's siblings, which for a
    * cross-level drop means changing its parent too.
    */
+  /**
+   * Where a drop would put the row, asked mid-drag so the list can draw
+   * it before the mouse commits.
+   *
+   * Answered by `dropOrder` — the same function the drop itself runs, on
+   * the same tasks — rather than by a rule of thumb about which way the
+   * pointer is travelling. That rule of thumb is wrong, and wrong in the
+   * case the eye cannot check: dragging *downwards* the removal shifts
+   * the target up and the row lands below it, but only while the two are
+   * siblings. Across levels the row takes the target's slot and lands
+   * *above* it in the same downward drag. Reading the answer out of the
+   * order `dropOrder` returns is what keeps the line honest — a preview
+   * that disagreed with the drop would be worse than no preview.
+   *
+   * `null` means no line: a drop that would refuse (itself, its own
+   * descendant, a sorted view). The drop is still allowed to happen and
+   * still says why in the status line, because "nothing is drawn" is not
+   * an explanation and `:sort manual` is the part worth learning.
+   */
+  const planDrop = useCallback(
+    (draggedId: string, targetId: string): "above" | "below" | null => {
+      if (!data || sort !== "manual") return null;
+      const dropped = dropOrder(data.tasks, draggedId, targetId);
+      if (!dropped) return null;
+      const landed = dropped.ids.indexOf(draggedId);
+      const target = dropped.ids.indexOf(targetId);
+      if (landed < 0 || target < 0) return null;
+      return landed > target ? "below" : "above";
+    },
+    [data, sort],
+  );
+
   const onDropRow = useCallback(
     (draggedId: string, targetId: string) => {
       if (!data) return;
@@ -3417,6 +3449,7 @@ export function App() {
             onToggleFold={onToggleFold}
             onEditTitle={onEditTitle}
             onDropRow={onDropRow}
+            planDrop={planDrop}
             onRowMenu={openRowMenu}
           />
         )}

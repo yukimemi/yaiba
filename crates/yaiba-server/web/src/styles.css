@@ -1082,6 +1082,40 @@ button.row__date:focus-visible {
   background: rgba(244, 114, 182, 0.1);
 }
 
+/* The row in the air. Dimmed rather than hidden: a gap where it used to
+   be would reflow the list under the pointer mid-gesture, and the drag
+   is about where it is going, not about pretending it has left. */
+.row--dragging {
+  opacity: 0.4;
+}
+
+/* Where releasing would put it — drawn on the target row, on the side
+   `planDrop` says the row lands.
+
+   `left` comes from the component, measured off the target's title,
+   because the line is indented to the level the row would land at
+   rather than run edge to edge: a drop takes the target's slot *and*
+   its level, so dropped on a child the row becomes a child. That is
+   the half of the answer a plain insertion line cannot give. */
+.row__drop {
+  position: absolute;
+  right: var(--gutter);
+  height: 2px;
+  background: var(--edge);
+  box-shadow: 0 0 calc(8px * var(--glow)) var(--edge);
+  /* The line sits over the row it points at; a drop target that
+     swallowed its own `dragover` would flicker the line off and on. */
+  pointer-events: none;
+}
+
+.row__drop--above {
+  top: -1px;
+}
+
+.row__drop--below {
+  bottom: -1px;
+}
+
 .row--match .row__title {
   color: var(--rust);
 }
@@ -2483,7 +2517,22 @@ button.row__date:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 10px;
+  width: 100%;
+  padding: 3px 10px;
+}
+
+/* A one-action item is a button the whole way across. The row already
+ * reads as one thing, and making only the key at its right end clickable
+ * asked the pointer to aim past the sentence it had just finished
+ * reading — the opposite of what a context menu is for. */
+.rowmenu__row--one {
+  border: 1px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .rowmenu__glyph {
@@ -2502,14 +2551,19 @@ button.row__date:focus-visible {
   gap: 4px;
 }
 
-/* The hit target is the key, not the label: an item with two of them —
- * priority, progress, nesting — has two, and which one you are on has to
- * be visible before the click rather than after it. */
+/* Two-way items — priority, progress, nesting — are the ones that
+ * cannot be a single row-wide button, since the row would have to mean
+ * both directions at once. So they keep two targets, and the targets get
+ * the width a target needs: at `0 6px` they were a pair of two-character
+ * words to hit, which is the thing that made the whole menu feel like it
+ * was aimed at a mouse only by accident. */
 .rowmenu__action {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 0 6px;
+  min-width: 6ch;
+  padding: 2px 8px;
   border: 1px solid transparent;
   background: none;
   color: var(--fg-dim);
@@ -2517,7 +2571,10 @@ button.row__date:focus-visible {
   cursor: pointer;
 }
 
-.rowmenu__action--on {
+/* One highlight for both shapes: whichever element is the target is the
+ * element that lights up, so what `↑` / `↓` walk and what the pointer
+ * hovers are the same rectangle. */
+.rowmenu__on {
   border-color: var(--edge-dim);
   background: var(--sel);
   color: var(--fg);
@@ -2548,4 +2605,20 @@ button.row__date:focus-visible {
   padding: 2px 10px;
   color: var(--fg-dim);
   font-size: 0.85em;
+}
+
+/* `⇧` is read as a shape, not as a word, and 0.85em is where that shape
+ * stops arriving — the arrow closes into a smudge and the line reads as
+ * a stray mark before "right-click".
+ *
+ * It needs more than the footer's own size back, because the character
+ * is drawn small inside its em: at the panel's 13px its ink is shorter
+ * than the lowercase beside it, where the filled `▲` / `▼` on the rows
+ * above are legible at exactly that size. `1.5em` of the footer is the
+ * point where the arrow reads as the key it names rather than as a
+ * speck, and `--fg` against the footer's `--fg-dim` does the rest. */
+.rowmenu__shift {
+  font-size: 1.5em;
+  line-height: 1;
+  color: var(--fg);
 }
