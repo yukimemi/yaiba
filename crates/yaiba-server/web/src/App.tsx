@@ -30,6 +30,13 @@ import { SplitGrip } from "./components/SplitGrip";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { TaskList } from "./components/TaskList";
 import { addDays, diffDays, toISO } from "./dates";
+import {
+  depKey,
+  FLASH_MS,
+  SEVER_MS,
+  SLAIN_MS,
+  type FlashKind,
+} from "./flash";
 import { DEFAULT_LAG } from "./types";
 import {
   collapsedForDepth,
@@ -162,7 +169,27 @@ export function App() {
   } | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [lastSearch, setLastSearch] = useState("");
-  const [cutting, setCutting] = useState<Set<string>>(new Set());
+  /**
+   * The stroke each task is playing, if any — see `flash.ts`.
+   *
+   * A map rather than the set of completed rows it started as, because
+   * three events draw now and a row can be handed a second one while the
+   * first is still on it (finish a task, delete it before the sweep is
+   * over). Whoever wrote last owns the row.
+   */
+  const [flashes, setFlashes] = useState<Map<string, FlashKind>>(new Map());
+  /**
+   * Edges mid-sever, keyed by `depKey`.
+   *
+   * Separate from `flashes` because a dep is not a task and its key is a
+   * pair; merging them would mean one map whose keys mean two things.
+   */
+  const [severing, setSevering] = useState<Set<string>>(new Set());
+  /**
+   * Bumped to replay the blade across the whole shell — a new node each
+   * time, because an animation only restarts from a fresh one.
+   */
+  const [wipe, setWipe] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
 
   const [peers, setPeers] = useState<PeersInfo>({ ticket: null, peers: [] });
@@ -602,6 +629,26 @@ export function App() {
   }, [view, zoom, columns, sort]);
 
   /**
+   * A pass of the blade whenever the view changes — `<tab>`, `:view`,
+   * `:split`. The panes below the HUD are replaced wholesale, and without
+   * a stroke across the swap the new contents simply appear, which is
+   * indistinguishable from a reload that lost your place.
+   *
+   * Keyed on the *previous* view rather than a "have I mounted yet" flag,
+   * so the boot never fires it: at mount the two are equal, and they stay
+   * equal under StrictMode's second run, where a one-shot flag would have
+   * been spent by the first and let the wipe play over the boot sweep.
+   * `:split 40` on an already-split screen changes only the width, and
+   * correctly draws nothing.
+   */
+  const lastView = useRef(view);
+  useEffect(() => {
+    if (lastView.current === view) return;
+    lastView.current = view;
+    setWipe((n) => n + 1);
+  }, [view]);
+
+  /**
    * The per-project half, debounced: a burst of `zm`/`zr` is one write,
    * not one per key. Gated both at scheduling and inside the timer — a
    * write armed just before a project switch must not land this project's
@@ -715,6 +762,10 @@ export function App() {
         // The incoming project's own saved state replaces those defaults,
         // and reopens the save gate once it is applied.
         await loadProjectUi();
+        // After the load, not before it: the stroke marks the moment the
+        // other project's tasks are actually on screen. Started at the
+        // click it would have swept a screen still showing the old one.
+        setWipe((n) => n + 1);
         say(t("project · {name}", { name }), "ok");
       })
       .catch((e: Error) => failProject(e));
@@ -946,6 +997,36 @@ export function App() {
   }, []);
 
   /**
+   * Draw one of the blade's strokes across some rows — see `flash.ts`.
+   *
+   * Defined up here rather than with the actions below because
+   * `createTask` calls it, and a `const` read before its initialiser has
+   * run is a ReferenceError rather than a lint warning.
+   *
+   * Each id is cleared on its own timer rather than the whole map being
+   * emptied, which is what the completion flash used to do while it was
+   * the only one. Two of them can overlap now — deleting a row mid-sweep,
+   * pasting a block over one — and a shared timer would wipe the second
+   * stroke off part-played. The `=== kind` guard is the other half: a row
+   * handed a second stroke keeps it when the first one's timer lands.
+   */
+  const flash = useCallback((ids: string[], kind: FlashKind) => {
+    if (!ids.length) return;
+    setFlashes((prev) => {
+      const next = new Map(prev);
+      for (const id of ids) next.set(id, kind);
+      return next;
+    });
+    window.setTimeout(() => {
+      setFlashes((prev) => {
+        const next = new Map(prev);
+        for (const id of ids) if (next.get(id) === kind) next.delete(id);
+        return next;
+      });
+    }, FLASH_MS[kind]);
+  }, []);
+
+  /**
    * Refuse writes while the view is pinned to another date.
    *
    * Editing then would apply a change computed from stale values to the
@@ -1107,6 +1188,11 @@ export function App() {
         setData(next);
         const created = next.tasks.find((t) => !seen.has(t.id));
         if (created) {
+          // The draw. Here rather than in `commitDraft` so a row born
+          // from a paste gets it too — the register lands through this
+          // same call, one row at a time. A restore does not, and that
+          // is the line: `u` puts back a task that already existed.
+          flash([created.id], "born");
           undoStack.current.push({
             redo: [{ kind: "restore", task: created, deps: [] }],
             undo: [{ kind: "delete", id: created.id }],
@@ -1120,7 +1206,7 @@ export function App() {
         return null;
       }
     },
-    [data, liveOnly],
+    [data, liveOnly, flash],
   );
 
   /**
@@ -1178,18 +1264,13 @@ export function App() {
 
   // ---- actions ----------------------------------------------------
 
-  const flash = (ids: string[]) => {
-    setCutting(new Set(ids));
-    window.setTimeout(() => setCutting(new Set()), 400);
-  };
-
   const toggleDone = useCallback(
     (tasks: Task[]) => {
       if (!tasks.length) return;
       // A mixed selection completes rather than toggling each row —
       // "finish these" is the intent behind pressing x on a block.
       const allDone = tasks.every((t) => t.status === "done");
-      if (!allDone) flash(tasks.map((t) => t.id));
+      if (!allDone) flash(tasks.map((t) => t.id), "cut");
       patchAll(
         tasks,
         () =>
@@ -1199,7 +1280,7 @@ export function App() {
         allDone ? "reopen" : "done",
       );
     },
-    [patchAll],
+    [patchAll, flash],
   );
 
   const moveTo = useCallback(
@@ -1290,21 +1371,46 @@ export function App() {
 
   const deleteSelection = useCallback(
     (tasks: Task[]) => {
-      if (!tasks.length || !data) return;
+      // Asked here as well as inside `run`, because the wait below means
+      // a refusal would otherwise arrive after the rows had visibly been
+      // struck — the report has to come before the stroke, not after it.
+      if (!tasks.length || !data || !liveOnly()) return;
       const at = visible.findIndex((t) => t.id === cursorRef.current);
       const below =
         visible[
           Math.min((at >= 0 ? at : 0) + tasks.length, visible.length - 1)
         ];
       register.current = tasks;
-      void run(
-        tasks.map((t) => ({ kind: "delete", id: t.id })),
-        tasks.map((t) => ({
-          kind: "restore",
-          task: t,
-          deps: data.deps.filter((d) => d.from === t.id || d.to === t.id),
-        })),
-        `delete ${tasks.length}`,
+      // Both lists are built now, against the `data` the rows were
+      // chosen from, because the run below happens after a wait.
+      const ops: Op[] = tasks.map((t) => ({ kind: "delete", id: t.id }));
+      const undoOps: Op[] = tasks.map((t) => ({
+        kind: "restore",
+        task: t,
+        deps: data.deps.filter((d) => d.from === t.id || d.to === t.id),
+      }));
+      /*
+       * The stroke needs the row to still be there to cross, so the
+       * delete is filed `SLAIN_MS` late — the one place in the app where
+       * an effect costs a write any delay at all, and why that number is
+       * the shortest of the three.
+       *
+       * Everything else about the gesture happens now: the cursor moves,
+       * visual stands down, the register is filled. So a second `dd`
+       * inside the window names the row below, exactly as it would have,
+       * and lands its own delete behind this one. What it does leave is a
+       * row that is on screen but already condemned — a `u` typed inside
+       * those 200ms takes back the step *before* this one, since this one
+       * has not been filed yet. Reachable in theory, and 200ms is well
+       * inside the reaction time it would take to notice and act.
+       */
+      flash(
+        tasks.map((t) => t.id),
+        "slain",
+      );
+      window.setTimeout(
+        () => void run(ops, undoOps, `delete ${tasks.length}`),
+        SLAIN_MS,
       );
       // The whole of visual, not half of it. This stood the mode and the
       // row anchor down but left `anchorCell` and `visualLine` set, which
@@ -1318,7 +1424,7 @@ export function App() {
       putVisualLine(false);
       if (below && !tasks.some((t) => t.id === below.id)) putCursor(below.id);
     },
-    [data, visible, run, putAnchorCell, putVisualLine],
+    [data, visible, run, putAnchorCell, putVisualLine, liveOnly, flash],
   );
 
   /**
@@ -2021,15 +2127,37 @@ export function App() {
     [data, run],
   );
 
+  /**
+   * Cut an edge — the arrow's click, and `:undep`.
+   *
+   * The one gesture the app already called cutting, and the one with no
+   * blade in it: the arrow stopped being rendered and that was the whole
+   * of it. It is severed on screen first and removed `SEVER_MS` later,
+   * for the same reason a deleted row is held — an element that unmounts
+   * on the click has nothing left to animate.
+   *
+   * Same bargain as the delete, and a cheaper one: an edge is not
+   * something a second keystroke can name in the meantime.
+   */
   const onUnlinkDep = useCallback(
     (dep: Dep) => {
-      void run(
-        [{ kind: "removeDep", dep }],
-        [{ kind: "addDep", dep }],
-        "unlink",
-      );
+      if (!liveOnly()) return;
+      const key = depKey(dep);
+      setSevering((prev) => new Set(prev).add(key));
+      window.setTimeout(() => {
+        setSevering((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+        void run(
+          [{ kind: "removeDep", dep }],
+          [{ kind: "addDep", dep }],
+          "unlink",
+        );
+      }, SEVER_MS);
     },
-    [run],
+    [run, liveOnly],
   );
 
   /**
@@ -3200,6 +3328,10 @@ export function App() {
 
   return (
     <div className="app">
+      {/* Keyed on the counter, so each bump mounts a new node and the
+          animation runs again — restarting one in place needs a reflow
+          poke, and this says what it means. */}
+      {wipe > 0 && <div key={wipe} className="wipe" aria-hidden="true" />}
       <Hud
         mode={mode}
         tasks={data.tasks}
@@ -3260,7 +3392,7 @@ export function App() {
             }
             onDraftKey={onDraftKey}
             searchTerm={searchTerm}
-            cutting={cutting}
+            flashes={flashes}
             linkAnchor={linkAnchor}
             onlyPane={view === "list"}
             emptyHint={
@@ -3305,6 +3437,8 @@ export function App() {
             zoom={zoom}
             rangeStart={rangeStart}
             rangeEnd={rangeEnd}
+            flashes={flashes}
+            severing={severing}
             onlyPane={view === "gantt"}
             paneRef={ganttPane}
             onScroll={syncScroll(ganttPane)}

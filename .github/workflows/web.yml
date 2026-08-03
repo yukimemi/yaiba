@@ -87,3 +87,13 @@ jobs:
         # anything, and nothing was ever going to fail a check. `bun`, not
         # `node`, because this imports the app's TypeScript to execute it.
         run: bun scripts/check-folds.ts
+
+      - name: Check the blade effects
+        working-directory: crates/yaiba-server/web
+        # The class names are built from `FlashKind` (`row--${kind}`), so
+        # a kind with no CSS behind it type-checks and draws nothing. And
+        # an effect that cannot be turned off is worse than one that is
+        # missing: office mode has to survive a shared screen, and
+        # `prefers-reduced-motion` is not a preference to honour when
+        # convenient. Neither is visible to `tsc`.
+        run: bun scripts/check-flash.ts

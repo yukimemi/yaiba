@@ -454,6 +454,61 @@ signal, as the overdue bar's is, office mode needs it re-stated
 stronger; the overdue rules at the end of the gantt block are the
 pattern to copy.
 
+### Where the blade is drawn, and how it is put away
+
+Completion was the only effect for a long time: `x` swept a stroke across
+the row and left the line-through behind. There are five now, and they
+are one object seen at different moments rather than five decorations —
+`flash.ts` holds the kinds and the timings, `check-flash.ts` holds the
+stylesheet to them.
+
+- **Three of them are a task's life**: `born` on create (the draw, left
+  to right), `cut` on complete (the signature, unchanged), `slain` on
+  delete (the cut with the magenta taken out, and the row falls away from
+  it). The other two are `sever` on an edge and `wipe` across the shell.
+- **Only `cut` spends magenta.** It predates the rule in the palette
+  section above and is the one exception to it; the strokes added beside
+  it are cyan, and a sixth should be too. A stroke is a moment, not a
+  status, so it has no claim on a colour that means something.
+- **A destructive stroke runs *before* the write, not after it.** An
+  element that unmounts on the click has nothing left to animate, which
+  is exactly why cutting a dependency — the gesture the app already
+  *called* cutting — had no blade in it. So `deleteSelection` and
+  `onUnlinkDep` both file their ops on a timer, and those two delays
+  (`SLAIN_MS`, `SEVER_MS`) are the only place in the app where an effect
+  costs a write any latency at all. Keep them short and keep them the
+  shortest of the strokes. Everything else about the gesture still
+  happens immediately — the cursor moves, visual stands down, the
+  register fills — so a second `dd` inside the window names the row below
+  exactly as it would have. What the window does leave open is a `u`
+  typed inside it taking back the step *before* the delete, since the
+  delete is not filed yet.
+- **Both panes draw, because either can be the only one on screen.** In
+  the gantt-only view the list is unmounted entirely, so a completion
+  drawn on a row alone was a completion nothing drew. `flashes` goes to
+  `TaskList` and `Gantt` both, and the bar clips its overflow so the
+  sweep runs inside the task's own width.
+- **A severed edge stops being clickable while it plays.** `Gantt` drops
+  the `.gantt__link-hit` path, which is both true — there is nothing left
+  to cut — and necessary: the hover rule it drives is written
+  `.gantt__link-hit:hover ~ .gantt__link`, three classes' worth of
+  specificity, and it would otherwise paint its grey dashes straight over
+  the stroke with the pointer sitting right on it.
+- **The wipe is an element, not `.app::before`.** That one is the boot
+  and has already run; an animation only replays from a fresh node, which
+  is what the `key={wipe}` counter is for. It is keyed on the *previous*
+  view rather than a "have I mounted" flag so StrictMode's second pass
+  cannot spend the flag and play a wipe over the boot sweep.
+- **Every stroke has to be turned off twice, and `check-flash.ts` fails
+  the build if one is not.** Office mode has to survive a shared screen
+  and `prefers-reduced-motion` is not a preference to honour when it is
+  convenient. Neither is visible to `tsc`, and the class names are built
+  from the kind (`row--${kind}`), so a kind added with no CSS behind it
+  compiles perfectly and draws nothing. Note the one asymmetry the check
+  encodes: under reduced motion `row--slain` keeps its `opacity`, because
+  blanking the row and *then* deleting it 200ms later is two disappearing
+  acts for one delete.
+
 ### Gantt interaction traps
 
 - **`.gantt__bar` has `overflow: hidden`** to clip the progress fill to

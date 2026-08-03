@@ -220,6 +220,7 @@ bun scripts/check-folds.ts
 bun scripts/check-cells.ts
 bun scripts/check-pin.ts
 bun scripts/check-rowmenu.ts
+bun scripts/check-flash.ts
 node node_modules/vite/bin/vite.js build
 '''
 

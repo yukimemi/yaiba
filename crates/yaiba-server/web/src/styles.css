@@ -1112,12 +1112,40 @@ button.row__date:focus-visible {
 /*
  * The signature: completing a task cuts it. A single cyan-to-magenta
  * stroke sweeps the row once, then the line-through is what remains.
+ *
+ * Three moments in a task's life are drawn with the same stroke, and
+ * which one it is decides the direction and the colour — the blade is
+ * one object, so a second gradient per event would only be a second
+ * thing to keep in step:
+ *
+ *   born  ← the draw, left to right, cyan alone
+ *   cut   → completion, right to left, cyan through white into magenta
+ *   slain → deletion, right to left, cyan alone, and the row falls
+ *
+ * Magenta appears in `cut` only. It is the critical path's colour and
+ * the completion stroke is the one place it is spent on something else
+ * — old enough to be the signature, and deliberately not extended to
+ * the two events added beside it.
  */
-.row--cut::after {
+/* Both panes draw it. In the gantt-only view the list is unmounted
+   entirely, so a stroke drawn on a row alone was a stroke nothing drew;
+   the bar clips its overflow, so there the sweep runs inside the task's
+   own width rather than across the whole chart. */
+.row--cut::after,
+.row--slain::after,
+.row--born::after,
+.gantt__bar--cut::after,
+.gantt__bar--slain::after,
+.gantt__bar--born::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
+  background-size: 260% 100%;
+}
+
+.row--cut::after,
+.gantt__bar--cut::after {
   background: linear-gradient(
     104deg,
     transparent 0 42%,
@@ -1126,7 +1154,6 @@ button.row__date:focus-visible {
     rgba(244, 114, 182, 0.9) 51%,
     transparent 58% 100%
   );
-  background-size: 260% 100%;
   animation: cut 340ms ease-out forwards;
 }
 
@@ -1137,6 +1164,67 @@ button.row__date:focus-visible {
   }
   to {
     background-position: -60% 0;
+    opacity: 0;
+  }
+}
+
+/* Deletion. The same stroke, and then the row goes with it rather than
+   staying to carry a line-through — which is the whole difference
+   between finishing something and destroying it.
+   Timed against `SLAIN_MS` in `flash.ts`, which is how long the row is
+   held on screen before the delete is actually run: shorter and the
+   stroke is cut off mid-sweep, longer and the list visibly waits. */
+.row--slain::after,
+.gantt__bar--slain::after {
+  background: linear-gradient(
+    104deg,
+    transparent 0 42%,
+    rgba(34, 211, 238, 0.9) 49%,
+    #fff 50%,
+    rgba(34, 211, 238, 0.9) 51%,
+    transparent 58% 100%
+  );
+  animation: cut 200ms ease-out forwards;
+}
+
+.row--slain,
+.gantt__bar--slain {
+  animation: slain 200ms ease-in forwards;
+}
+
+@keyframes slain {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0.1;
+    transform: translateX(10px) skewX(-6deg);
+  }
+}
+
+/* A new task is the draw — the one stroke that runs the other way, and
+   the only one that leaves something behind rather than taking it. No
+   white core and no magenta: nothing was severed. */
+.row--born::after,
+.gantt__bar--born::after {
+  background: linear-gradient(
+    76deg,
+    transparent 0 44%,
+    rgba(34, 211, 238, 0.75) 50%,
+    rgba(34, 211, 238, 0.25) 54%,
+    transparent 60% 100%
+  );
+  animation: draw 300ms ease-out forwards;
+}
+
+@keyframes draw {
+  from {
+    background-position: -60% 0;
+    opacity: 1;
+  }
+  to {
+    background-position: 130% 0;
     opacity: 0;
   }
 }
@@ -1739,6 +1827,48 @@ button.row__date:focus-visible {
   fill: var(--ash-dim);
 }
 
+/* And then the click. The hover above promises the edge's absence; this
+   is the moment it happens, so it is drawn with the blade rather than
+   with the preview — one white flash along the path, thinning to
+   nothing, and the arrowhead comes off the end.
+   Timed against `SEVER_MS` in `flash.ts`, which holds the edge on screen
+   that long before the removal runs. Without that delay the path
+   unmounts on the click and there is nothing left to animate — which is
+   what "the arrow just disappears" was. `Gantt` also drops the hit path
+   while this plays, both because a severed edge is no longer something
+   to click and because the hover rule above out-specifies this one. */
+.gantt__link--severed {
+  stroke: #fff;
+  animation: sever 220ms ease-out forwards;
+}
+
+.gantt__arrow--severed {
+  fill: #fff;
+  animation: sever-tip 220ms ease-out forwards;
+}
+
+@keyframes sever {
+  from {
+    stroke-opacity: 1;
+    stroke-width: 2.4;
+  }
+  to {
+    stroke-opacity: 0;
+    stroke-width: 0.4;
+  }
+}
+
+@keyframes sever-tip {
+  from {
+    fill-opacity: 1;
+    transform: none;
+  }
+  to {
+    fill-opacity: 0;
+    transform: translateX(6px);
+  }
+}
+
 .gantt__link--critical {
   stroke: var(--blood);
   stroke-width: 1.4;
@@ -2002,11 +2132,54 @@ button.row__date:focus-visible {
   }
 }
 
+/* The same pass, for the moment the screen stops being about the same
+   thing: another project, or another view of this one. Both replace
+   everything below the HUD at once, and without a stroke across the
+   change the new contents simply appear — indistinguishable from a
+   refresh that lost your place.
+   It is an element rather than `.app::before` because that one is the
+   boot and has already run: an animation only replays from a fresh
+   node, which is what the `key` on it in `App.tsx` is for. Faster than
+   the boot, which is allowed to be ceremonial. */
+.wipe {
+  opacity: var(--glow);
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 45%,
+    rgba(34, 211, 238, 0.4) 50%,
+    transparent 55%
+  );
+  background-size: 300% 100%;
+  animation: boot 500ms ease-out forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app::before,
-  .row--cut::after {
+  .wipe,
+  .row--cut::after,
+  .row--slain::after,
+  .row--born::after,
+  .gantt__bar--cut::after,
+  .gantt__bar--slain::after,
+  .gantt__bar--born::after,
+  .gantt__link--severed,
+  .gantt__arrow--severed {
     animation: none;
     opacity: 0;
+  }
+
+  /* The row and the bar only carry the fall; with the stroke off there
+     is nothing to fall away from, so they stay where they are for the
+     moment they have left. Deliberately not `opacity: 0` — that would
+     make a delete this mode cannot see start with the row blinking
+     out and end 200ms later with it actually going. */
+  .row--slain,
+  .gantt__bar--slain {
+    animation: none;
   }
 }
 
@@ -2014,9 +2187,22 @@ button.row__date:focus-visible {
    the cut leaves behind is the part that carries information, and that
    stays. */
 :root[data-theme="light"] .app::before,
-:root[data-theme="light"] .row--cut::after {
+:root[data-theme="light"] .wipe,
+:root[data-theme="light"] .row--cut::after,
+:root[data-theme="light"] .row--slain::after,
+:root[data-theme="light"] .row--born::after,
+:root[data-theme="light"] .gantt__bar--cut::after,
+:root[data-theme="light"] .gantt__bar--slain::after,
+:root[data-theme="light"] .gantt__bar--born::after,
+:root[data-theme="light"] .gantt__link--severed,
+:root[data-theme="light"] .gantt__arrow--severed {
   animation: none;
   opacity: 0;
+}
+
+:root[data-theme="light"] .row--slain,
+:root[data-theme="light"] .gantt__bar--slain {
+  animation: none;
 }
 
 :root[data-theme="light"] body {

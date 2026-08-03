@@ -9,6 +9,7 @@ import {
   dateValue,
 } from "../dateColumns";
 import { diffDays, shortLabel } from "../dates";
+import type { FlashKind } from "../flash";
 import type { SortKey } from "../filter";
 import { t } from "../i18n";
 import type { Scheduled, Task } from "../types";
@@ -39,8 +40,8 @@ interface Props {
   onDraftChange: (value: string) => void;
   onDraftKey: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   searchTerm: string;
-  /** Rows currently playing the completion animation. */
-  cutting: Set<string>;
+  /** Rows mid-stroke, and which stroke each is playing — see `flash.ts`. */
+  flashes: Map<string, FlashKind>;
   linkAnchor: string | null;
   onlyPane: boolean;
   emptyHint: string;
@@ -103,7 +104,7 @@ export function TaskList({
   onDraftChange,
   onDraftKey,
   searchTerm,
-  cutting,
+  flashes,
   linkAnchor,
   onlyPane,
   emptyHint,
@@ -315,7 +316,7 @@ export function TaskList({
               isCursor && "row--cursor",
               rowSelected && spanAllCols && "row--selected",
               sched?.blocked && "row--blocked",
-              cutting.has(task.id) && "row--cut",
+              flashes.has(task.id) && `row--${flashes.get(task.id)}`,
               searchTerm &&
                 task.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
                 "row--match",
