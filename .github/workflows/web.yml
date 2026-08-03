@@ -8,6 +8,14 @@
 # `release.yml`, and only on a tag — so a type error merged green and
 # surfaced as a broken release.
 #
+# It runs the same `check-*` scripts as `cargo make web-build`, and the
+# two lists have to stay equal. They drifted once already: `web.yml`
+# calls `bun run build` — the package's own script, which is
+# `tsc -b && vite build` and nothing else — while the checks live in the
+# cargo-make task beside it, so three of them (cells, pin, row menu)
+# were gating releases and no PR. A check that only a tag runs is a
+# check that reports after the merge it should have refused.
+#
 # Lives in its own workflow rather than in `ci.yml` because `ci.yml` is
 # kata-managed (rendered from yukimemi/pj-rust) and a local edit there
 # is reverted by the next `kata apply`. A sibling workflow is the
@@ -87,6 +95,31 @@ jobs:
         # anything, and nothing was ever going to fail a check. `bun`, not
         # `node`, because this imports the app's TypeScript to execute it.
         run: bun scripts/check-folds.ts
+
+      - name: Check the cell grid
+        working-directory: crates/yaiba-server/web
+        # `cellStep` decides whether `h`/`l` walks a cell or folds a
+        # subtree, and `cellEdit` decides which field an edit key opens.
+        # Both are pure functions of state that only a real keyboard
+        # would otherwise exercise — #80 shipped a keymap rule that no
+        # check could see, which is the reason this file exists at all.
+        run: bun scripts/check-cells.ts
+
+      - name: Check the pin rules
+        working-directory: crates/yaiba-server/web
+        # `pinStartOps` is the one place the "a pin adjusts the lag it
+        # crosses" rule lives, and five gestures commit through it. A
+        # sixth that patches `start` directly is the one that goes stale,
+        # so the rule is asserted rather than restated.
+        run: bun scripts/check-pin.ts
+
+      - name: Check the row menu
+        working-directory: crates/yaiba-server/web
+        # The menu holds what the mouse cannot otherwise reach, and the
+        # failure that actually happens is nobody deleting the menu item
+        # a new direct gesture made redundant. Asserted against
+        # `DIRECT_GESTURES` so the build says which item to drop.
+        run: bun scripts/check-rowmenu.ts
 
       - name: Check the blade effects
         working-directory: crates/yaiba-server/web
