@@ -349,12 +349,56 @@ async function storyboard(page, beat, mouse) {
   await keys("zR", 1300);
   await beat("13-unfold");
 
+  // ---- the other button
+  //
+  // The menu holds what the mouse cannot otherwise reach — `dd`, `s`,
+  // `u` — and a one-action item is its whole row rather than the
+  // two-character key at the end of it, which is the whole of #123. It
+  // is opened on the row the rest of the take has been about.
+  await mouse.rowMenu("Layout");
+  await beat("14-menu");
+  // Put the pointer away before the keyboard takes over. It is hidden
+  // here rather than at the end of `rowMenu` because the beat above is
+  // *about* the pointer resting on a label — and left visible it sits
+  // over a closed menu through the next two beats, which are `space`
+  // and nothing to do with the mouse. `clickRow` ends the same way.
+  await mouse.hidePointer();
+  await k("Escape", 800);
+
+  // ---- the blade
+  //
+  // Completing is the stroke yaiba is named for, and it crosses the row
+  // and the bar at once. This row was the overdue one, so the amber
+  // goes with it — the take finishes the work it spent its middle
+  // measuring.
+  await k(" ", 1400);
+  await beat("15-done");
+
+  // The edge that made `Order boards` wait five days on it. Cutting one
+  // is the gesture the app is named after and the only one with its own
+  // pointer target, so it is done with the mouse: the arrow severs, and
+  // what waited on it closes up.
+  await mouse.cutEdge();
+  await beat("16-sever");
+
+  // ---- the layouts
+  //
+  // Three presses is the whole cycle — list, gantt, and back to the
+  // split. Each swap sweeps the shell, which is what says the panes
+  // changed rather than that the page reloaded.
+  await k("Tab", 1000);
+  await beat("17-list");
+  await k("Tab", 1400);
+  await beat("18-gantt");
+  await k("Tab", 900);
+  await beat("19-split");
+
   // ---- the modes
   await keys("gt", 1600);
-  await beat("14-office");
+  await beat("20-office");
 
   await cmd("lang ja", 1700);
-  await beat("15-japanese");
+  await beat("21-japanese");
 }
 
 /**
@@ -477,6 +521,90 @@ async function clickRow(page, pointer, title) {
   await wait(300);
 }
 
+/**
+ * Right-click a row for the menu.
+ *
+ * Aimed at the title, not at the row's middle: on a split this narrow
+ * the middle is somewhere in the marker columns, and the pointer should
+ * be seen resting on the thing the menu is about. The panel is left up
+ * for the beat and closed by the caller with `esc` — the key its own
+ * handler listens for, since the app declines every keystroke while it
+ * is open.
+ *
+ * The pointer stays visible when this returns, because a menu that
+ * appeared with no cursor next to it reads as the keyboard's doing and
+ * the beat is taken while it is still up. The storyboard hides it —
+ * `clickRow` can do its own cleanup because its beat comes after the
+ * gesture, and this one's comes during.
+ */
+async function rowMenu(page, pointer, title) {
+  const box = await page.getByText(title).first().boundingBox();
+  if (!box) throw new Error(`no row titled ${title} to right-click`);
+
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await pointer.to(x - 60, y + 30);
+  await pointer.show();
+  await wait(400);
+  await pointer.to(x, y);
+  await wait(500);
+  await page.mouse.click(x, y, { button: "right" });
+  await pointer.down();
+  await wait(160);
+  await pointer.up();
+  await wait(700);
+
+  // Then rest on a label, which is the whole of #123: a one-action item
+  // used to be clickable only on the two-character key at its right end,
+  // about 40px of a 250px row. The hover lighting the entire row is what
+  // says that changed, and a still of an open menu cannot say it.
+  const item = await page.getByText("yank the row").first().boundingBox();
+  if (item) {
+    await pointer.to(item.x + 12, item.y + item.height / 2);
+    await wait(900);
+  }
+}
+
+/**
+ * Cut a dependency by clicking its arrow.
+ *
+ * The clickable path is an L, so the centre of its bounding box is
+ * usually off the line entirely — `getPointAtLength` asks the geometry
+ * where the line actually is, which is the same trade the gantt already
+ * makes for hit-testing rather than a second copy of its layout maths.
+ *
+ * `which` indexes the edges in the order the server returns them, which
+ * is the order `seed.mjs` wrote them: 0 is `Layout → Order boards`, the
+ * five-day wait on the row this take has been about. A storyboard that
+ * picks the wrong one is visible in `demo-shots`.
+ */
+async function cutEdge(page, pointer, which = 0) {
+  const at = await page.evaluate((n) => {
+    const paths = document.querySelectorAll(".gantt__link-hit");
+    const path = paths[n];
+    if (!path) return null;
+    const point = path.getPointAtLength(path.getTotalLength() / 2);
+    const svg = path.ownerSVGElement.getBoundingClientRect();
+    return { x: svg.x + point.x, y: svg.y + point.y };
+  }, which);
+  if (!at) throw new Error(`no dependency arrow #${which} to cut`);
+
+  await pointer.to(at.x - 50, at.y + 40);
+  await pointer.show();
+  await wait(400);
+  await pointer.to(at.x, at.y);
+  // Long enough to see the hover state, which is the edge previewing its
+  // own absence — grey and dashed — before the blade does it for real.
+  await wait(900);
+  await page.mouse.click(at.x, at.y);
+  await pointer.down();
+  await wait(140);
+  await pointer.up();
+  await wait(700);
+  await pointer.hide();
+  await wait(400);
+}
+
 // ---------------------------------------------------------------------
 // The browser
 // ---------------------------------------------------------------------
@@ -560,6 +688,39 @@ async function startScreencast(page) {
     await cdp.detach().catch(() => {});
     return frames;
   };
+}
+
+/**
+ * The closest two frames may be, in seconds.
+ *
+ * The screencast emits on every paint, and until this file had effects
+ * in it that meant one frame per state change — a whole take was barely
+ * a hundred pictures. A CSS animation paints at the display's rate
+ * instead: the 500ms shell wipe arrives as 32 frames about 10ms apart,
+ * and there are six such bursts in the storyboard now. A gif carries a
+ * delay per frame and the format's own floor is 10ms, so all of them
+ * shipped, and the bursts were most of the file — 289 frames and 1.7MB,
+ * against 109 and 610KB before.
+ *
+ * Halving a burst is invisible at that speed and is most of the
+ * difference back. The still beats are untouched, because a frame is
+ * only ever dropped where the next one was already closer than this.
+ */
+const MIN_GAP = 0.022;
+
+/**
+ * Drop frames that arrive faster than the eye can use them.
+ *
+ * The last frame is kept whatever its spacing: it is what the gif rests
+ * on before it loops, and `writeFrames` gives it the tail delay.
+ */
+function thin(frames) {
+  const kept = [frames[0]];
+  for (const frame of frames.slice(1)) {
+    if (frame.at - kept.at(-1).at >= MIN_GAP) kept.push(frame);
+  }
+  if (kept.at(-1) !== frames.at(-1)) kept.push(frames.at(-1));
+  return kept;
 }
 
 /**
@@ -706,6 +867,14 @@ async function main() {
     await storyboard(page, beat, {
       dragDivider: () => dragDivider(page, pointer),
       clickRow: (title) => clickRow(page, pointer, title),
+      rowMenu: (title) => rowMenu(page, pointer, title),
+      cutEdge: (which) => cutEdge(page, pointer, which),
+      // The one beat that ends with the pointer still up, so the
+      // storyboard rather than the gesture decides when it goes.
+      hidePointer: async () => {
+        await pointer.hide();
+        await wait(300);
+      },
     });
 
     if (SHOTS) {
@@ -714,13 +883,14 @@ async function main() {
       return;
     }
 
-    const frames = await stop();
+    const captured = await stop();
+    const frames = thin(captured);
     await context.close();
     // The gif loops, so the last frame is also the pause before it starts
     // over. Long enough to read the frame it ends on, short enough that
     // nobody thinks it has stopped.
     const list = await writeFrames(frames, join(work, "frames"), 1.6);
-    log(`captured ${frames.length} frames`);
+    log(`captured ${captured.length} frames, encoding ${frames.length}`);
 
     const gif = join(ROOT, "assets", "demo.gif");
     await encode(list, gif);
