@@ -410,7 +410,25 @@ export function TaskList({
                   // Leaving the last row for the empty space below it
                   // must take the line with it, or the list keeps
                   // promising a drop the pointer has walked away from.
-                  onDragLeave={() => {
+                  //
+                  // Guarded on `relatedTarget`, because `dragleave` does
+                  // not only fire when the pointer leaves the row — it
+                  // fires crossing *into* the row's own children, and a
+                  // row is eight boxes wide. Unguarded, walking a drag
+                  // across one row clears `over` at every internal
+                  // boundary and the `dragover` bubbling up from the
+                  // child immediately puts it back: two renders and a
+                  // whole-tree `planDrop` per crossing, which is the
+                  // exact recompute the handler above is written to
+                  // avoid, and a line that can flicker while doing it.
+                  // `.row__drop` already takes `pointer-events: none`
+                  // for the same reason; this is that reason applied to
+                  // the seven boxes it does not cover. Same shape as the
+                  // guard `RowMenu` puts on its `onBlur`.
+                  onDragLeave={(e) => {
+                    if (e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                      return;
+                    }
                     setDrag((d) =>
                       d?.over?.id === task.id ? { ...d, over: null } : d,
                     );
