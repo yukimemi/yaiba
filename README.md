@@ -682,6 +682,39 @@ the case it is actually right for: deliberately fusing two replicas that
 should have been one all along. `:join` in the UI is the flag's
 behaviour, not the subcommand's — one running server has one database.
 
+## Letting an agent read and edit the plan
+
+`yaiba mcp` serves the plan over [MCP](https://modelcontextprotocol.io),
+so a coding agent can answer "what's blocking the release?" and break a
+task down without you retyping any of it. It talks to a yaiba that is
+**already running**, so leave one up and register the server once:
+
+```sh
+yaiba                              # in one window, and leave it
+claude mcp add yaiba -- yaiba mcp  # once
+```
+
+Point it elsewhere with `yaiba mcp --url http://127.0.0.1:9000`, or
+`YAIBA_MCP_URL`. It must be `http://` — this dials your own machine and
+is built without TLS.
+
+Eight tools: `plan` reads everything (computed dates, critical path,
+what's blocked, what's overdue); `add_task`, `update_task`,
+`delete_task`, `link` and `unlink` edit it; `projects` and
+`switch_project` move between plans. Tasks are named by title or by the
+short id `plan` prints — an ambiguous name is an error listing the
+candidates rather than a guess.
+
+**The agent is a client like any other.** It goes through the same HTTP
+API the UI does, so every rule holds without being restated: a
+dependency that would close a loop is refused, a summary's dates still
+come from its children, and a pinned start is still a floor. Every write
+answers with where the plan then stands, which is usually the point —
+cutting one dependency can move the finish date a week.
+
+There is no authentication on the API, and the MCP server is a local
+process talking to `127.0.0.1`. Keep it that way.
+
 ## How it works
 
 ### Edits merge instead of colliding
