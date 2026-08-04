@@ -75,3 +75,53 @@ export const SEVER_MS = 220;
  */
 export const depKey = (dep: Pick<Dep, "from" | "to">): string =>
   `${dep.from} ${dep.to}`;
+
+/**
+ * Super mode's answer to a stroke, at the scale of the whole screen.
+ *
+ * The three strokes above are drawn on the thing they happen to. In
+ * super mode the screen answers as well: a burst over everything
+ * (`.burst--${kind}`, one element keyed on a counter, exactly the way
+ * `.wipe` is) and, for a delete, a shake.
+ *
+ * Neither is rendered outside super mode — see the note on `burst` in
+ * `App.tsx`. The class names live here rather than inline for the same
+ * reason the kinds do: `check-flash.ts` holds `styles.css` to them, and
+ * a burst with no rule behind it is an element that costs a render and
+ * draws nothing.
+ */
+export const BURST_KINDS = FLASH_KINDS;
+
+/**
+ * How long the burst element stays mounted, in milliseconds.
+ *
+ * Longer than the CSS animation it triggers, exactly as `FLASH_MS` is —
+ * and `check-flash.ts` fails the build if a burst outlasts its window.
+ * The reason it is *taken down* at all is less obvious: the burst is
+ * rendered only in super mode, so one left standing is one that plays
+ * again the moment somebody presses `gs`, replaying a gesture that
+ * finished minutes ago. The shake rides the same state, so it would
+ * likewise keep its class on the shell long after the 240ms it moves
+ * for.
+ *
+ * Not `FLASH_MS`: two of the three bursts outlast the stroke on the row
+ * (the row's `slain` is 200ms against the screen's 240), and clearing on
+ * the row's timer would unmount them part-played.
+ */
+export const BURST_MS: Record<FlashKind, number> = {
+  born: 400,
+  cut: 420,
+  slain: 260,
+};
+
+/**
+ * The shake, spelled twice.
+ *
+ * An animation replays from a fresh node or from a different
+ * `animation-name`, and the first is not available here: `.app` holds
+ * the whole tree, so remounting it to shake it would take the focus, the
+ * scroll positions and any open editor with it. So two class names run
+ * the same keyframes and consecutive deletes alternate between them —
+ * the name changes, the animation restarts, the tree stays put.
+ */
+export const QUAKE_CLASSES: [string, string] = ["app--quake-a", "app--quake-b"];

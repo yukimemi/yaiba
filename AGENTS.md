@@ -540,6 +540,16 @@ stylesheet to them.
   to right), `cut` on complete (the signature, unchanged), `slain` on
   delete (the cut with the magenta taken out, and the row falls away from
   it). The other two are `sever` on an edge and `wipe` across the shell.
+- **An undo draws the stroke its ops describe, not one of its own.**
+  `u` was the last gesture that changed the plan and left no mark on it.
+  `runStep` reads the ops it is about to run — `restore` is a task born
+  again, `delete` is one cut down, `patch` is a row redrawn — so a `u`
+  over a forty-row paste draws forty, and the label is never consulted.
+  `reorder` and the dep ops stay silent on purpose: flashing a reorder
+  means flashing every row, which says nothing about which one moved,
+  and an edge has a `sever` for being cut and nothing for coming back.
+  The removals go first and wait `SLAIN_MS`, the same bargain
+  `deleteSelection` makes — a row already gone has nothing to draw on.
 - **Only `cut` spends magenta.** It predates the rule in the palette
   section above and is the one exception to it; the strokes added beside
   it are cyan, and a sixth should be too. A stroke is a moment, not a
@@ -582,6 +592,89 @@ stylesheet to them.
   encodes: under reduced motion `row--slain` keeps its `opacity`, because
   blanking the row and *then* deleting it 200ms later is two disappearing
   acts for one delete.
+
+### Super mode is a third theme, not a second switch
+
+`data-theme` holds `dark`, `light` or `super`, and the loud mode is a
+*value* of it. The alternative — a `data-super` toggle beside the theme —
+is the one to argue back at, because it looks tidier and is worse: it
+admits a fourth combination, office mode with the effects lit, which has
+no meaning and nothing sensible to draw, and it makes every rule in the
+section carry two attributes to say so. One attribute means the
+combination cannot be expressed.
+
+- **`gt` leaves super, and that is the rule rather than an accident.**
+  It was `prev === "dark" ? "light" : "dark"` and had to become
+  `prev === "light" ? "dark" : "light"`: the old spelling read super as
+  "not dark" and sent `gt` further *into* the neon end, from the loudest
+  screen in the app, at the moment somebody was reaching for the
+  quietest. `gs` / `:super` is the other switch and lands on plain neon,
+  deliberately not on "whatever you were in before" — a key that
+  remembered would mean two things.
+- **Every ambient effect rests at `opacity: 0` and draws itself out of
+  its keyframes.** `prefers-reduced-motion` turns the whole section off
+  with a single blanket `animation: none !important` rather than a list
+  of selectors — a list is the second list to keep in step, which is the
+  drift `check-flash.ts` exists to catch — and a blanket can only work
+  when stopping the clock leaves nothing behind. `check-flash.ts` asserts
+  both halves: the blanket is there, and every super rule that conjures
+  an element with `content: ""` also states `opacity: 0`.
+- **The palette rule survives being turned up.** Magenta is still the
+  critical path and nothing else: the completion stroke keeps its old
+  exception, the critical bars are what march and pulse in it, and
+  everything invented for this mode — aurora, sheens, roll, bursts — is
+  cyan and white. A decorative magenta would cost the most exactly here,
+  where there is the most light to compete with.
+- **The two screen-level effects are the one place the mode reaches the
+  render tree.** The burst is not left to the stylesheet the way `--glow`
+  is, because `.app` is a grid and an unstyled fourth child would take a
+  row of it. The shake is spelled twice — `QUAKE_CLASSES` — because an
+  animation replays from a fresh node or a different `animation-name`,
+  and remounting `.app` would take the focus, the scroll positions and
+  any open editor with it. Consecutive deletes alternate the two names;
+  `check-flash.ts` asserts they name different keyframes *and* that the
+  two keyframes are identical.
+- **The caret's strikes are imperative, and that is the point.**
+  `Strikes.tsx` makes its own nodes and takes them out on
+  `animationend`. Routing them through state would put an `App` render —
+  the component holding the task list, the schedule and the gantt —
+  behind every keystroke, to add three elements that describe nothing
+  and are gone in 400ms. Nothing there is state. For the same reason it
+  hangs off one `window` listener rather than the inputs' own handlers:
+  typing happens in a row title, the `:` line, search, the project
+  palette and the owner panel, and a decoration is not a reason for five
+  components to learn about each other.
+- **The caret is measured, not counted.** `column × character width`
+  looks right in a monospace app and is wrong the moment a title is in
+  Japanese — those glyphs are full-width in every font `--mono` names.
+  `measureText` on the actual prefix costs one call and is right in both
+  scripts.
+- **An IME sends `key: "Process"`, so the key path never sees Japanese
+  at all.** Not just the keydowns flagged `isComposing` — every one of
+  them, from the first, because with the IME on the keystroke goes to
+  the IME rather than to the field. A printable-character test drops the
+  lot. This shipped for review listening only for `compositionend`, and
+  the effect it produced was a whole word typed in silence and one puff
+  at 変換 — read from the outside as "Japanese isn't supported", which
+  is how it came back. `compositionupdate` is the keystroke and is what
+  had to be listened for; `compositionend` stays as the heavier commit.
+  Confirmed rather than assumed: a `key: "Process"` keydown dispatched
+  at the field draws nothing, before and after.
+- **`animationend` is the only thing that removes a strike, and a hidden
+  tab never sends one.** The document timeline stops advancing entirely
+  when the tab is not visible — `document.timeline.currentTime` sits at
+  0 — so nothing ends and nothing is removed. A person cannot type into
+  a tab they cannot see, so the case that matters is the harness's:
+  driving the app over CDP piles nodes up until `STRIKE_LIMIT` stops
+  them, and the same freeze makes any check that waits for an effect to
+  finish read as a broken effect. Confirm `document.visibilityState`
+  before believing one. The cap is what keeps that bounded, and is worth
+  keeping for that reason alone.
+- **A stripe that marches is drawn straight, not diagonally.** The
+  animation shifts `background-position-x`, and on a diagonal the loop is
+  seamless only when the offset equals the stripe period over the cosine
+  of its angle — an irrational number that will not survive anybody
+  editing the stripes. Straight stripes make the offset the period.
 
 ### Gantt interaction traps
 

@@ -28,11 +28,14 @@ import { RowMenu, type RowMenuAt } from "./components/RowMenu";
 import { isCmdline, type MenuAction } from "./rowMenu";
 import { SplitGrip } from "./components/SplitGrip";
 import { StatusLine, type Message } from "./components/StatusLine";
+import { Strikes } from "./components/Strikes";
 import { TaskList } from "./components/TaskList";
 import { addDays, diffDays, toISO } from "./dates";
 import {
+  BURST_MS,
   depKey,
   FLASH_MS,
+  QUAKE_CLASSES,
   SEVER_MS,
   SLAIN_MS,
   type FlashKind,
@@ -190,6 +193,26 @@ export function App() {
    * time, because an animation only restarts from a fresh one.
    */
   const [wipe, setWipe] = useState(0);
+  /**
+   * The screen's own answer to a stroke, in super mode — see `flash.ts`.
+   *
+   * Keyed like `wipe`, and for the same reason: a counter, because the
+   * same kind twice in a row still has to draw twice. It is *rendered*
+   * only in super mode rather than left to the stylesheet the way
+   * `--glow` is, because an unstyled `<div>` inside `.app` is not
+   * invisible — `.app` is a grid, and a fourth child would take a row of
+   * it. The one place the mode reaches the render tree, and that is why.
+   */
+  const [burst, setBurst] = useState<{ kind: FlashKind; n: number } | null>(null);
+  /**
+   * The burst counter, in a ref as well as in the state.
+   *
+   * The timer that takes a burst down has to know *which* burst it was
+   * cancelling, and reading `prev.n + 1` inside the updater does not
+   * tell the timer anything — the number has to exist before the state
+   * does.
+   */
+  const burstSeq = useRef(0);
   const [showHelp, setShowHelp] = useState(false);
 
   const [peers, setPeers] = useState<PeersInfo>({ ticket: null, peers: [] });
@@ -390,6 +413,8 @@ export function App() {
   const asofRef = useRef<string | null>(null);
   const listPane = useRef<HTMLDivElement>(null);
   const ganttPane = useRef<HTMLDivElement>(null);
+  /** The shell, for the recoil super mode's typing puts on it. */
+  const shellRef = useRef<HTMLDivElement>(null);
   /**
    * What the timeline is currently drawn against, for `T`.
    *
@@ -1012,6 +1037,32 @@ export function App() {
    */
   const flash = useCallback((ids: string[], kind: FlashKind) => {
     if (!ids.length) return;
+    // One burst per gesture, not per row: completing a block of five is
+    // one thing that happened, and five overlaid copies of one overlay
+    // would only be a brighter one anyway.
+    //
+    // Counted in every theme rather than only in super, deliberately.
+    // It lands in the same batch as the `setFlashes` below, so it costs
+    // no render that was not already happening, and the alternative is
+    // threading the theme into a callback that closes over nothing on
+    // purpose — a ref to save one integer. What the theme decides is
+    // whether the burst is *rendered*, which is where that question
+    // belongs.
+    //
+    // And it is taken down again on its own timer, because "rendered
+    // only in super mode" cuts both ways: a burst left standing is one
+    // that plays afresh the moment somebody presses `gs`, for a gesture
+    // that finished minutes ago. The quake class rides the same state
+    // and would sit on the shell just as long.
+    //
+    // The guard is the sequence number rather than the kind: two `cut`s
+    // in a row are two bursts, and a kind-matching guard would let the
+    // first one's timer take the second one down mid-play.
+    const n = (burstSeq.current += 1);
+    setBurst({ kind, n });
+    window.setTimeout(() => {
+      setBurst((prev) => (prev?.n === n ? null : prev));
+    }, BURST_MS[kind]);
     setFlashes((prev) => {
       const next = new Map(prev);
       for (const id of ids) next.set(id, kind);
@@ -1773,6 +1824,64 @@ export function App() {
     [data, liveOnly, projects, run, visible],
   );
 
+  /**
+   * Run a step's ops, drawing the blade over what they do.
+   *
+   * `u` was the one gesture that changed the plan and left no mark on
+   * it. Every other write has drawn since the strokes arrived — a row is
+   * born, cut, slain — and taking one of those back is exactly as much
+   * of an event, which is why it now draws the *inverse* stroke rather
+   * than a stroke of its own: a restored task is born, a task an undone
+   * `o` takes away is slain. Reading it off the ops rather than off the
+   * step's label is what keeps that true for a `u` that undoes a paste
+   * of forty rows as well as for one that undoes a `dd`.
+   *
+   * The removals go first and wait, the same bargain `deleteSelection`
+   * makes and for the same reason: a row that is already gone has
+   * nothing left to draw on. That wait is the only latency an undo
+   * spends on an effect, it is the shortest of the strokes, and it is
+   * only paid by a step that takes something away.
+   *
+   * `reorder` and the dep ops are deliberately silent. Flashing a
+   * reorder means flashing every row in the list, which says nothing
+   * about which one moved, and an edge has no `born` — the sever is a
+   * stroke for cutting one, and there is no drawing of it back.
+   */
+  const runStep = useCallback(
+    async (ops: Op[], label: string, kind: "undo" | "redo") => {
+      const born: string[] = [];
+      const slain: string[] = [];
+      for (const op of ops) {
+        if (op.kind === "restore") born.push(op.task.id);
+        else if (op.kind === "patch") born.push(op.id);
+        else if (op.kind === "delete") slain.push(op.id);
+      }
+      if (slain.length) {
+        flash(slain, "slain");
+        await new Promise((resolve) => window.setTimeout(resolve, SLAIN_MS));
+      }
+      try {
+        setData(await applyOps(ops));
+        // After the write, not before: the rows a restore brings back do
+        // not exist to carry a class until the state that holds them has
+        // landed.
+        if (born.length) flash(born, "born");
+        say(
+          kind === "undo"
+            ? t("undo: {label}", { label })
+            : t("redo: {label}", { label }),
+          "ok",
+        );
+        return true;
+      } catch (e) {
+        setMessage({ text: (e as Error).message, kind: "error" });
+        void load();
+        return false;
+      }
+    },
+    [flash, load],
+  );
+
   const undo = useCallback(async () => {
     if (!liveOnly()) return;
     const step = undoStack.current.pop();
@@ -1780,15 +1889,13 @@ export function App() {
       say(t("already at the oldest change"));
       return;
     }
-    try {
-      setData(await applyOps(step.undo));
+    // Only a step that landed is a step you can redo — the same rule as
+    // before the strokes were added, and `runStep` reports which it was
+    // rather than swallowing it.
+    if (await runStep(step.undo, step.label, "undo")) {
       redoStack.current.push(step);
-      say(t("undo: {label}", { label: step.label }), "ok");
-    } catch (e) {
-      setMessage({ text: (e as Error).message, kind: "error" });
-      void load();
     }
-  }, [load, liveOnly]);
+  }, [liveOnly, runStep]);
 
   const redo = useCallback(async () => {
     if (!liveOnly()) return;
@@ -1797,15 +1904,10 @@ export function App() {
       say(t("already at the newest change"));
       return;
     }
-    try {
-      setData(await applyOps(step.redo));
+    if (await runStep(step.redo, step.label, "redo")) {
       undoStack.current.push(step);
-      say(t("redo: {label}", { label: step.label }), "ok");
-    } catch (e) {
-      setMessage({ text: (e as Error).message, kind: "error" });
-      void load();
     }
-  }, [load, liveOnly]);
+  }, [liveOnly, runStep]);
 
   const jumpToMatch = useCallback(
     (term: string, from: number, direction: 1 | -1) => {
@@ -1843,10 +1945,32 @@ export function App() {
     if (ui.asof !== undefined) setReferenceDate(ui.asof);
     if (ui.theme) {
       setTheme((prev) => {
-        const next =
-          ui.theme === "toggle" ? (prev === "dark" ? "light" : "dark") : ui.theme!;
+        // Three values, two switches. `toggle` is office ⇄ everything
+        // else, so it comes back from super as well — spelled
+        // `prev === "light"` rather than `prev === "dark"` precisely for
+        // that: the old form read super as "not dark" and sent `gt`
+        // *deeper* into the neon end instead of out to the office.
+        // `super-toggle` is the other switch, and lands on neon rather
+        // than on whatever you were in before, because a mode that
+        // remembered would make `gs` mean two different things.
+        const next: Theme =
+          ui.theme === "toggle"
+            ? prev === "light"
+              ? "dark"
+              : "light"
+            : ui.theme === "super-toggle"
+              ? prev === "super"
+                ? "dark"
+                : "super"
+              : ui.theme!;
         applyTheme(next);
-        say(next === "light" ? t("office mode") : t("neon mode"));
+        say(
+          next === "light"
+            ? t("office mode")
+            : next === "super"
+              ? t("SUPER YAIBA 刃 — everything at maximum")
+              : t("neon mode"),
+        );
         return next;
       });
     }
@@ -2985,6 +3109,10 @@ export function App() {
         applyUi({ theme: "toggle" });
         break;
 
+      case "gs":
+        applyUi({ theme: "super-toggle" });
+        break;
+
       case "R":
         void load();
         say(t("reloaded"), "ok");
@@ -3358,12 +3486,35 @@ export function App() {
     ? (visible.find((t) => t.id === pickingOwner.id) ?? null)
     : null;
 
+  // Super mode's two screen-level effects. Both are decided here rather
+  // than in the stylesheet because both would cost something outside
+  // super mode: the burst is a grid child (see its state), and the
+  // shake's class would sit on `.app` claiming an animation that mode
+  // has no rule for.
+  const superOn = theme === "super";
+  const quake =
+    superOn && burst?.kind === "slain"
+      ? ` ${QUAKE_CLASSES[burst.n % 2]}`
+      : "";
+
   return (
-    <div className="app">
+    <div className={`app${quake}`} ref={shellRef}>
       {/* Keyed on the counter, so each bump mounts a new node and the
           animation runs again — restarting one in place needs a reflow
           poke, and this says what it means. */}
       {wipe > 0 && <div key={wipe} className="wipe" aria-hidden="true" />}
+      {superOn && burst && (
+        <div
+          key={burst.n}
+          className={`burst burst--${burst.kind}`}
+          aria-hidden="true"
+        />
+      )}
+      {/* Typing draws its own blade — see `strike.ts`. It takes the
+          shell rather than reaching for it, because the recoil is a
+          class on this element and a component that queried the document
+          for it would be one rename away from silently doing nothing. */}
+      <Strikes enabled={superOn} shell={shellRef} />
       <Hud
         mode={mode}
         tasks={data.tasks}
@@ -3396,6 +3547,7 @@ export function App() {
           setShowProjects(true);
         }}
         onToggleTheme={() => applyUi({ theme: "toggle" })}
+        onToggleSuper={() => applyUi({ theme: "super-toggle" })}
         lang={lang}
         onToggleLang={() => applyUi({ lang: "toggle" })}
         focusTitle={
