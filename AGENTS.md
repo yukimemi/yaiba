@@ -488,6 +488,46 @@ signal, as the overdue bar's is, office mode needs it re-stated
 stronger; the overdue rules at the end of the gantt block are the
 pattern to copy.
 
+### The MCP server is a client, not a second writer
+
+`yaiba mcp` (`mcp.rs`) serves the plan to an agent over stdio. It reaches
+yaiba through the **HTTP API**, never the database — opening `yaiba.db`
+here would make it a second writer, against the one-process rule in the
+projects section above, and would mean re-implementing every refusal the
+server already makes. As a client it gets them for free: a cycle is a 409
+carrying the server's own message, a summary's dates are still refused,
+and an agent cannot reach a state a person could not type. The cost is
+that yaiba has to be running, which `serve` checks up front rather than
+letting the first tool call be the thing that fails.
+
+Four things that were wrong first and are worth keeping right:
+
+- **stdout is the protocol.** `main` initialises tracing on stdout for
+  every other subcommand; the `Mcp` branch sends it to stderr instead.
+  Without that the first log line is a parse error at the client, and the
+  symptom — a server that connects and then dies on its first message —
+  points nowhere near the logging call that caused it.
+- **`Implementation::from_build_env()` reads the SDK's own
+  `CARGO_PKG_*`.** It is the documented way to fill in the server
+  identity, and on its own it made the client show the user
+  "rmcp 3.1.0". Name and version are overwritten with `env!`, which
+  expands in *this* crate. `Implementation` is `#[non_exhaustive]`, so
+  that has to be a mutation rather than `..` update syntax.
+- **A write reports the state it lands in, not a delta.** "The finish
+  moved a week earlier" is the better sentence and was the first version,
+  which read the state either side of the write. Three separate requests
+  means anything editing in between is attributed to this edit — driving
+  four writes at once, all four claimed the same change. A number that is
+  only true when nothing else is happening is worse than no number.
+- **The short id is the *last* UUID segment.** Ids are UUIDv7 and lead
+  with a timestamp, so three rows created in one loop all rendered as the
+  same eight characters — not a name. `resolve` matches the trailing
+  segment as well as a leading prefix.
+
+`#[tool_handler(router = self.tool_router)]` rather than a bare
+`#[tool_handler]`: the bare form works, but the field then reads as dead
+code and `clippy -D warnings` fails the build.
+
 ### Where the blade is drawn, and how it is put away
 
 Completion was the only effect for a long time: `x` swept a stroke across

@@ -5,12 +5,17 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::{Duration, NaiveDate};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::model::{Dep, Status, Task, TaskId, clamp_lag, default_lag};
 
 /// One task's computed placement on the timeline.
-#[derive(Debug, Clone, Serialize)]
+///
+/// `Deserialize` alongside `Serialize` because the MCP server reads this
+/// back off the HTTP API rather than computing it — the schedule is the
+/// server's answer, and a second implementation of it in the reader would
+/// be a second answer to keep in step. Nothing else deserialises it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scheduled {
     pub id: TaskId,
     pub start: NaiveDate,
@@ -39,7 +44,7 @@ pub struct Scheduled {
 }
 
 /// The full timeline plus its critical path.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schedule {
     pub tasks: Vec<Scheduled>,
     pub start: NaiveDate,

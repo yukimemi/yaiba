@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 use yaiba::projects::{self, Registry};
 use yaiba::updater::{self, UpdateMode};
-use yaiba::{api, app};
+use yaiba::{api, app, mcp};
 use yaiba_core::Store;
 use yaiba_sync::{Ticket, Transport};
 
@@ -184,6 +184,18 @@ enum Command {
         /// Project name, as shown by `yaiba list`.
         name: String,
     },
+
+    /// Serve the plan to an agent over MCP, on stdio.
+    ///
+    /// Register it with `claude mcp add yaiba -- yaiba mcp`. This talks to
+    /// a yaiba that is already running rather than starting one, so the
+    /// server stays the only writer — leave `yaiba` up in another window.
+    Mcp {
+        /// The running yaiba to talk to. Defaults to the local one on the
+        /// standard port.
+        #[arg(long, value_name = "URL", env = "YAIBA_MCP_URL")]
+        url: Option<String>,
+    },
 }
 
 /// What the resolved command says to open.
@@ -229,12 +241,25 @@ impl Peer {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_env("YAIBA_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .with_target(false)
-        .init();
+    let filter = EnvFilter::try_from_env("YAIBA_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+    if matches!(cli.command, Some(Command::Mcp { .. })) {
+        // stdout *is* the MCP protocol. A single log line written there is
+        // a parse error at the client, and the symptom is a server that
+        // connects and then fails on its first message — nowhere near the
+        // logging call that caused it. stderr is still read by the client
+        // and is where MCP servers are expected to talk.
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .init();
+    }
 
     // Subcommands that don't start a server run instead of it.
     match &cli.command {
@@ -246,6 +271,9 @@ async fn main() -> Result<()> {
         Some(Command::List) => return list_projects(),
         Some(Command::Rename { from, to }) => return rename_project(from, to),
         Some(Command::Forget { name }) => return forget_project(name),
+        // Serves an already-running yaiba, so it deliberately skips
+        // everything below: no registry, no database, no listener.
+        Some(Command::Mcp { url }) => return mcp::serve(url.clone()).await,
         _ => {}
     }
 
