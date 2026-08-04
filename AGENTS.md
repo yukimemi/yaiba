@@ -1348,7 +1348,10 @@ task, so keep it working:
   mode is on, and each of those frames differs over the *whole* screen
   rather than inside the box around a changed row. `diff_mode` has
   nothing to leave out: **about 48KB per frame, against 3KB for one in
-  the rest of the take.** Ten seconds of it at `MIN_GAP` is 9MB of gif.
+  the rest of the take.** The first cut of the section ran fourteen
+  seconds of super mode against a 55ms floor — 18 frames a second,
+  already well short of `MIN_GAP` — and that stretch alone came to 9MB
+  of a 10MB gif.
   That per-frame figure is a floor — a smaller palette, `hqdn3d`'s
   temporal denoise and posterising before `palettegen` were each tried
   and none of them moves it, because the drift is a level or two on

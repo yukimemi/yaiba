@@ -797,9 +797,11 @@ const MIN_GAP = 0.022;
  * rather than inside the box around a changed row, so `diff_mode` has
  * nothing to leave out and the gif carries a full picture for every one
  * of them. Measured: about 48KB each, against 3KB for a frame in the
- * rest of the take. At `MIN_GAP` a ten-second section is 9MB.
+ * rest of the take. The first cut of this section ran fourteen seconds
+ * of super mode against a 55ms floor — 18 frames a second, already well
+ * short of `MIN_GAP` — and that stretch alone was 9MB of a 10MB gif.
  *
- * That number is a hard floor per frame — colour count, temporal
+ * That 48KB is a hard floor per frame — colour count, temporal
  * denoising and posterising before the palette were all tried and none
  * of them touches it, because the drift is a level or two on nearly
  * every pixel rather than noise in a few. So the only knob is how many
