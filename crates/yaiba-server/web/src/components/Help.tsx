@@ -78,6 +78,7 @@ const groups = (): Group[] => [
       ["v / V", t("select cells / whole rows")],
       ["gd", t("date columns ⇄ compact")],
       ["gt", t("office mode ⇄ neon mode")],
+      ["gs", t("super mode ⇄ neon mode")],
     ],
   },
   {
@@ -228,8 +229,9 @@ const groups = (): Group[] => [
       [":level ⟨n⟩", t("show down to level n (bare = all)")],
       [":parent ⟨n⟩", t("move under row n (bare = top level)")],
       [":only / :all", t("focus this subtree / clear")],
-      [":theme ⟨t⟩", t("dark / light — bare toggles")],
+      [":theme ⟨t⟩", t("dark / light / super — bare toggles office")],
       [":office", t("straight to office mode")],
+      [":super", t("every effect at maximum — bare toggles")],
       [":lang ⟨l⟩", t("en / ja — bare toggles")],
     ],
   },

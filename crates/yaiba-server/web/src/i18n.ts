@@ -68,6 +68,11 @@ const JA: Record<string, string> = {
   now: "現在",
   "◐ neon": "◐ ネオン",
   "◑ office": "◑ オフィス",
+  // `SUPER` stays in the Latin alphabet in both languages, the way the
+  // mode names in the badge do: it is the word on the switch.
+  "◈ super": "◈ スーパー",
+  "◈ SUPER": "◈ SUPER",
+  "◇ super": "◇ スーパー",
   "◌ local": "◌ ローカル",
   "◉ solo": "◉ 単独",
   "◉ 1 peer": "◉ ピア 1",
@@ -81,6 +86,9 @@ const JA: Record<string, string> = {
   "office mode — light, no glow (gt)":
     "オフィスモード — 明るく、発光なし (gt)",
   "neon mode (gt)": "ネオンモード (gt)",
+  "super mode — every effect at maximum (gs)":
+    "スーパーモード — 演出を全部いちばん強く (gs)",
+  "back to neon mode (gs)": "ネオンモードに戻す (gs)",
   "node {id} · :ticket to share, :join <ticket> to connect":
     "ノード {id} · 共有は :ticket、接続は :join <ticket>",
   "started with --no-sync": "--no-sync で起動しています",
@@ -176,6 +184,8 @@ const JA: Record<string, string> = {
   "as of {d}": "{d} 時点",
   "office mode": "オフィスモード",
   "neon mode": "ネオンモード",
+  "SUPER YAIBA 刃 — everything at maximum":
+    "SUPER YAIBA 刃 — 演出全開",
   "dates — click a cell to pick one": "日付列 — セルをクリックで選べます",
   "split at {n}%": "分割 {n}%",
   "compact columns": "コンパクト表示",
@@ -281,8 +291,10 @@ const JA: Record<string, string> = {
   // The suggestion carries the fix, so the sentence only has to say
   // what the rule is — 空白は使えません would say it twice.
   "one word per name — try {joined}": "名前は1語です — {joined} はどうですか",
-  "usage: :theme dark|light  (bare :theme toggles)":
-    "使い方: :theme dark|light（引数なしで切替）",
+  "usage: :theme dark|light|super  (bare :theme toggles office)":
+    "使い方: :theme dark|light|super（引数なしでオフィスと切替）",
+  "usage: :super on|off  (bare :super toggles)":
+    "使い方: :super on|off（引数なしで切替）",
   "usage: :lang en|ja  (bare :lang toggles)":
     "使い方: :lang en|ja（引数なしで切替）",
   "usage: :level <0 or more>  (:level with no argument shows all)":
@@ -394,6 +406,7 @@ const JA: Record<string, string> = {
   "scroll the timeline to the reference date": "タイムラインを基準日へ",
   "date columns ⇄ compact": "日付列 ⇄ コンパクト",
   "office mode ⇄ neon mode": "オフィス ⇄ ネオン",
+  "super mode ⇄ neon mode": "スーパー ⇄ ネオン",
   "put the cursor on a row": "その行にカーソルを置く",
   "new task below, at this level": "同じ階層に下へ追加",
   // 担当欄 rather than just 担当: this row names the *thing you click*,
@@ -555,8 +568,10 @@ const JA: Record<string, string> = {
   "move under row n (bare = top level)":
     "n 行目の下へ移す（引数なしで最上位）",
   "focus this subtree / clear": "この部分木に絞る / 解除",
-  "dark / light — bare toggles": "dark / light（引数なしで切替）",
+  "dark / light / super — bare toggles office":
+    "dark / light / super（引数なしでオフィスと切替）",
   "straight to office mode": "そのままオフィスモードへ",
+  "every effect at maximum — bare toggles": "演出全開（引数なしで切替）",
   "en / ja — bare toggles": "en / ja（引数なしで切替）",
   "Edits save as they happen. Dates accept today / tom / mon / +3d / 8-14. On the : line, tab completes and s-tab walks back. Press ? or esc to close.":
     "編集はその場で保存されます。日付は today / tom / mon / +3d / 8-14 のように書けます。: の行では tab が補完し、s-tab が戻ります。? か esc で閉じます。",

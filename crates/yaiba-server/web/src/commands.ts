@@ -1,7 +1,7 @@
 import { diffDays, parseDateExpr } from "./dates";
 import { t } from "./i18n";
 import type { Lang } from "./lang";
-import type { Theme } from "./theme";
+import { THEMES, type Theme } from "./theme";
 import { SORT_KEYS, type SortKey } from "./filter";
 import { inversePatch, type Op } from "./ops";
 import {
@@ -53,8 +53,16 @@ export interface UiPatch {
   foldLevel?: number | null;
   /** Reference date; null means now. */
   asof?: string | null;
-  /** `"toggle"` flips to the other one — what bare `:theme` and `gt` do. */
-  theme?: Theme | "toggle";
+  /**
+   * The look, on one axis: neon, office, super.
+   *
+   * Two sentinels rather than one, because there are three values and
+   * two switches on them. `"toggle"` is office ⇄ neon — bare `:theme`
+   * and `gt` — and it leaves super the way it leaves neon, since office
+   * mode is somewhere you go *to*. `"super-toggle"` is super ⇄ neon,
+   * which is `:super` and `gs`.
+   */
+  theme?: Theme | "toggle" | "super-toggle";
   /** Weekday names only; `"toggle"` is what bare `:lang` does. */
   lang?: Lang | "toggle";
   zoom?: Zoom;
@@ -247,8 +255,9 @@ export const COMMANDS: CommandSpec[] = [
   },
   { name: "dep", aliases: ["link"] },
   { name: "undep", aliases: ["unlink"] },
-  { name: "theme", args: first(() => ["dark", "light"]) },
+  { name: "theme", args: first(() => THEMES) },
   { name: "office" },
+  { name: "super", args: first(() => ["on", "off"]) },
   { name: "lang", args: first(() => ["en", "ja"]) },
   { name: "asof", aliases: ["as"], args: first(() => DATE_WORDS) },
   { name: "only" },
@@ -851,12 +860,25 @@ export function runCommand(
       // No message: applyUi announces the resulting theme itself, and
       // its say() lands after this one, so anything set here is
       // overwritten before it can be read.
-      if (arg === "dark" || arg === "light") return { ui: { theme: arg } };
+      if (THEMES.includes(arg as Theme)) return { ui: { theme: arg as Theme } };
       if (!arg) return { ui: { theme: "toggle" } };
-      return { error: t("usage: :theme dark|light  (bare :theme toggles)") };
+      return {
+        error: t("usage: :theme dark|light|super  (bare :theme toggles office)"),
+      };
     }
     case "office":
       return { ui: { theme: "light" } };
+    // Bare `:super` toggles, unlike `:office`, which only ever goes one
+    // way. Office mode is where you go to be readable and `gt` is how
+    // you come back; super is a thing you turn on and off, and `:super`
+    // is the whole of that switch. `on` / `off` say it outright for
+    // anyone who would rather not think about which state they are in.
+    case "super": {
+      if (arg === "on") return { ui: { theme: "super" } };
+      if (arg === "off") return { ui: { theme: "dark" } };
+      if (!arg) return { ui: { theme: "super-toggle" } };
+      return { error: t("usage: :super on|off  (bare :super toggles)") };
+    }
     case "lang": {
       // Same as `:theme`: applyUi says what the setting became, in the
       // language it became.

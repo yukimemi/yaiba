@@ -131,12 +131,13 @@ yaiba self-update --check    # just tell me whether one exists
 | `cs` `ce` `ca` `cA` | calendar on the planned start / end, actual start / end |
 | `co` | hand the row over — the panel lists the names already in use |
 | `gt` | office mode ⇄ neon · `:theme` and `:lang` say it by name |
+| `gs` | super mode ⇄ neon — every effect at maximum · `:super` |
 | `h` `l` | out / in — a fold, or a cell once `gd` is up · `⏎` `i` `I` `a` `A` `cc` edit it |
 | `>>` `<<` | nest under the row above / move back out |
 | `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |
 | `za` | fold this row · `zf` focus its subtree, `zF` to come back |
 
-## Two modes, and a mouse
+## Three modes, and a mouse
 
 `yaiba` ships a second theme for the times a neon HUD is the wrong
 thing to have open — a meeting room, a shared screen, a status deck.
@@ -144,17 +145,45 @@ Office mode drops the glow, the scanlines and the completion sweep
 entirely, and swaps cyan/magenta for the blue/red/amber a reader already
 knows from every other planning tool. It prints.
 
-```
+```text
 gt              office mode <-> neon mode
 :theme light    or by name
 ```
+
+And a third for the opposite occasion. **Super mode** is the same HUD
+with nothing held back: the glow multiplier goes up, an aurora drifts
+behind the plan, a CRT band rolls down the screen, the wordmark flickers
+like a sign, the cursor row catches the light, the critical path marches,
+and every stroke the blade draws is answered by the whole screen — a
+shockwave on a completion, a shake on a delete.
+
+Typing draws too. Every character throws short strikes off the caret and
+puts a small recoil through the shell, a run of them keeps a count, and
+the count makes both louder — the power-mode gag with a blade in place
+of the sparks. It follows the caret through anything you can type into:
+a task title, the `:` line, search, the project palette. Japanese draws
+kana by kana as the reading is typed, and the 変換 that commits it lands
+heavier than a single key.
+
+```text
+gs              super mode <-> neon mode
+:super          bare toggles · :super on / :super off
+:theme super    or by name
+```
+
+It is one axis, not a switch beside the theme: `gt` takes you out of
+super the same way it takes you out of neon, because office mode is
+somewhere you go *to* and it wins. Two things survive being turned up
+this far — the palette rule, so magenta still means the critical path
+and nothing else, and `prefers-reduced-motion`, which turns the whole
+mode's motion off and leaves nothing frozen on screen.
 
 The choice is remembered, and a fresh install follows your OS
 preference.
 
 The UI has a language too, and that one starts in English:
 
-```
+```text
 :lang ja        日本語で表示します
 :lang en        back to English (bare :lang toggles)
 ```
@@ -234,8 +263,10 @@ already does. Nothing is behind a click that is not also behind a
 keystroke — that is the point, not an exception to it.
 
 Deleting from the menu asks nothing first. `dd` does not either, `u`
-brings the row back, and right-click → move → click is already two acts
-of intent; the status line says what went.
+brings the row back — drawing it back, since an undo now replays the
+stroke its own ops describe: a restored task is born again, and a task
+an undone `o` takes away is cut down first — and right-click → move →
+click is already two acts of intent; the status line says what went.
 
 `⇧` and right-click declines the event and you get the browser's menu,
 because there is no API that *opens* it — declining is the only offer a

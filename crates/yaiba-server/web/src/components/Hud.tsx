@@ -60,8 +60,10 @@ interface Props {
   foldLevel: number | null;
   focusTitle: string | null;
   theme: Theme;
-  /** Flip between the neon HUD and office mode. */
+  /** Flip between office mode and the neon HUD. */
   onToggleTheme: () => void;
+  /** Flip between super mode and the neon HUD. */
+  onToggleSuper: () => void;
   /** Which language the weekday beside the reference date is in. */
   lang: Lang;
   /** Flip the calendar between English and Japanese. */
@@ -97,6 +99,7 @@ export function Hud({
   focusTitle,
   theme,
   onToggleTheme,
+  onToggleSuper,
   lang,
   onToggleLang,
   project,
@@ -293,12 +296,33 @@ export function Hud({
         className="hud__theme"
         onClick={onToggleTheme}
         title={
-          theme === "dark"
-            ? t("office mode — light, no glow (gt)")
-            : t("neon mode (gt)")
+          theme === "light"
+            ? t("neon mode (gt)")
+            : t("office mode — light, no glow (gt)")
         }
       >
-        {theme === "dark" ? t("◐ neon") : t("◑ office")}
+        {theme === "light"
+          ? t("◑ office")
+          : theme === "super"
+            ? t("◈ super")
+            : t("◐ neon")}
+      </button>
+      {/* Its own button rather than a third stop on the one beside it:
+          office mode is a setting somebody needs in a hurry, in a
+          meeting, and a cycle would make them pass through the loudest
+          screen this app can draw to reach the quietest. `is-on` is what
+          lights it, so the switch reads as a switch. */}
+      <button
+        type="button"
+        className={`hud__super${theme === "super" ? " is-on" : ""}`}
+        onClick={onToggleSuper}
+        title={
+          theme === "super"
+            ? t("back to neon mode (gs)")
+            : t("super mode — every effect at maximum (gs)")
+        }
+      >
+        {theme === "super" ? t("◈ SUPER") : t("◇ super")}
       </button>
       {/* Beside the theme for the same reason: it is a setting about
           what the screen says, and the only sign it exists is here. */}

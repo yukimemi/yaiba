@@ -333,6 +333,7 @@ body::after {
 /* Reads as one more HUD readout that happens to be clickable, rather
    than a form control parked in the middle of the status bar. */
 .hud__theme,
+.hud__super,
 .hud__lang {
   padding: 0;
   border: none;
@@ -344,6 +345,7 @@ body::after {
 }
 
 .hud__theme:hover,
+.hud__super:hover,
 .hud__lang:hover {
   color: var(--edge);
 }
@@ -352,6 +354,20 @@ body::after {
    meeting, the calendar's language is set once and then forgotten. */
 .hud__lang {
   color: var(--ash-dim);
+}
+
+/* Off, it is the dimmest thing in the bar — a switch nobody needs to
+   notice until they want it. On, it is cyan and lit, because the one
+   thing this control must never be is ambiguous about which state you
+   are in. Cyan rather than magenta even here: the palette rule outranks
+   the joke, and magenta is the critical path. */
+.hud__super {
+  color: var(--ash-dim);
+}
+
+.hud__super.is-on {
+  color: var(--edge);
+  text-shadow: 0 0 calc(10px * var(--glow)) rgba(34, 211, 238, 0.6);
 }
 
 .hud__peers {
@@ -2215,6 +2231,22 @@ button.row__date:focus-visible {
   .gantt__bar--slain {
     animation: none;
   }
+
+  /* Super mode is a whole section of animations rather than a handful,
+     and a list of them here would be a second list to keep in step with
+     the first — exactly the drift `check-flash.ts` exists to catch. So
+     it is a blanket, and the section is written to survive one: every
+     ambient effect there rests at `opacity: 0` and draws itself out of
+     its keyframes, so stopping the clock leaves nothing on screen
+     rather than freezing a sweep half-way across it.
+
+     `!important` because the blanket is deliberately less specific than
+     anything it has to beat. */
+  :root[data-theme="super"] *,
+  :root[data-theme="super"] *::before,
+  :root[data-theme="super"] *::after {
+    animation: none !important;
+  }
 }
 
 /* Office mode: no sweep, no scanlines, no glow. The line-through that
@@ -2621,4 +2653,794 @@ button.row__date:focus-visible {
   font-size: 1.5em;
   line-height: 1;
   color: var(--fg);
+}
+
+/* ---- super mode --------------------------------------------------- */
+
+/*
+ * The third value on the theme axis: the neon HUD with nothing held
+ * back. Office mode exists because the HUD is sometimes too much. This
+ * exists because it is sometimes not enough.
+ *
+ * Two properties make it safe to be this loud, and `check-flash.ts`
+ * holds this section to both:
+ *
+ *  1. Every rule here is scoped `:root[data-theme="super"]`. Office mode
+ *     is a different *value* of the same attribute, so none of it can
+ *     reach a shared screen — there is no combination of settings that
+ *     lights the effects over a white background, which is exactly what
+ *     a second switch beside the theme would have allowed.
+ *  2. Every ambient effect rests at `opacity: 0` and draws itself out of
+ *     its keyframes. `prefers-reduced-motion` turns the whole section
+ *     off with one blanket `animation: none`, and an effect whose
+ *     resting state was visible would be left sitting on the screen with
+ *     nothing to take it away.
+ *
+ * The palette rule survives too, and that is the part that took the
+ * cutting. Magenta still means the critical path and nothing else: the
+ * completion stroke keeps its historical exception, the critical bars
+ * are what march and pulse in it, and everything invented here — the
+ * aurora, the sheens, the roll, the bursts — is cyan and white. A mode
+ * this bright is precisely where a decorative magenta would stop the
+ * real one being readable.
+ */
+
+:root[data-theme="super"] {
+  /* Every glow in the app is `calc(Npx * var(--glow))`, so this one
+     number lights the entire HUD before a single rule below runs — the
+     same lever office mode pulls the other way. Past about 3 the blurs
+     merge into a wash and the text under them stops being text. */
+  --glow: 2.4;
+}
+
+/* The room the HUD is in: slow cyan lights drifting behind the work.
+   `mix-blend-mode: screen` rather than a layer underneath, because
+   every pane with a background of its own would otherwise hide it —
+   screen only ever adds light, so the text below stays the brightest
+   thing on screen. */
+:root[data-theme="super"] .app::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 89;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(
+      38% 42% at 22% 28%,
+      rgba(34, 211, 238, 0.22),
+      transparent 70%
+    ),
+    radial-gradient(
+      42% 38% at 78% 72%,
+      rgba(34, 211, 238, 0.16),
+      transparent 70%
+    ),
+    radial-gradient(
+      30% 30% at 60% 10%,
+      rgba(255, 255, 255, 0.07),
+      transparent 70%
+    );
+  opacity: 0;
+  animation: super-aurora 15s ease-in-out infinite;
+}
+
+@keyframes super-aurora {
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: translate3d(-2%, 1%, 0) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translate3d(2%, -2%, 0) scale(1.12);
+  }
+}
+
+/* A CRT band rolling down the whole shell — the one effect here that is
+   pure costume. It sits under `.wipe` and `.burst` (z-index 90 and 92)
+   so a stroke is never drawn through it. */
+:root[data-theme="super"] .app::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 91;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0 40%,
+    rgba(34, 211, 238, 0.1) 47%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(34, 211, 238, 0.1) 53%,
+    transparent 60% 100%
+  );
+  background-size: 100% 55%;
+  background-repeat: no-repeat;
+  opacity: 0;
+  animation: super-roll 7s linear infinite;
+}
+
+@keyframes super-roll {
+  from {
+    background-position: 0 -55%;
+    opacity: 0.9;
+  }
+  to {
+    background-position: 0 155%;
+    opacity: 0.9;
+  }
+}
+
+/* The scanlines the neon theme keeps at 0.06 so they read as CRT
+   texture rather than as a costume. This is the mode where the costume
+   is the point, so they come up and start to drift. */
+:root[data-theme="super"] body::after {
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(34, 211, 238, 0.1) 0 1px,
+    transparent 1px 3px
+  );
+  animation: super-scanlines 6s linear infinite;
+}
+
+@keyframes super-scanlines {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 -18px;
+  }
+}
+
+/* ---- super mode: the HUD ------------------------------------------ */
+
+:root[data-theme="super"] .hud {
+  background: linear-gradient(180deg, #08202c, var(--void));
+  border-bottom-color: var(--edge-dim);
+  box-shadow: 0 0 26px rgba(34, 211, 238, 0.22);
+}
+
+/* The wordmark as the sign it always wanted to be, and the blade as the
+   tube behind it. A neon sign flickers, and this one does it on a
+   `steps()` timing so the flicker reads as a fault rather than a fade. */
+:root[data-theme="super"] .hud__mark {
+  animation: super-sign 3.4s ease-in-out infinite;
+}
+
+@keyframes super-sign {
+  0%,
+  100% {
+    text-shadow: 0 0 12px rgba(34, 211, 238, 0.55);
+  }
+  50% {
+    text-shadow:
+      0 0 26px rgba(34, 211, 238, 0.95),
+      0 0 48px rgba(34, 211, 238, 0.45);
+  }
+}
+
+:root[data-theme="super"] .hud__kanji {
+  animation: super-flicker 5s steps(1, end) infinite;
+}
+
+@keyframes super-flicker {
+  0%,
+  3%,
+  6%,
+  44%,
+  47%,
+  63%,
+  100% {
+    opacity: 1;
+  }
+  4% {
+    opacity: 0.3;
+  }
+  45% {
+    opacity: 0.45;
+  }
+  62% {
+    opacity: 0.6;
+  }
+}
+
+/* `currentcolor`, so the badge pulses in whatever the mode's own colour
+   is — green in insert, magenta in visual — rather than washing every
+   mode cyan. */
+:root[data-theme="super"] .hud__mode {
+  animation: super-badge 1.8s ease-in-out infinite;
+}
+
+@keyframes super-badge {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+  50% {
+    box-shadow: 0 0 16px currentcolor;
+  }
+}
+
+:root[data-theme="super"] .hud__bar {
+  text-shadow: 0 0 12px rgba(52, 211, 153, 0.7);
+}
+
+/* Overdue is the one readout allowed to nag, and this is the mode for
+   nagging. Amber, like every other overdue signal on screen. */
+:root[data-theme="super"] .hud__stat--overdue {
+  animation: super-alarm 1.2s ease-in-out infinite;
+}
+
+@keyframes super-alarm {
+  0%,
+  100% {
+    text-shadow: 0 0 6px rgba(251, 191, 36, 0.35);
+  }
+  50% {
+    text-shadow: 0 0 20px rgba(251, 191, 36, 0.9);
+  }
+}
+
+:root[data-theme="super"] .hud__super.is-on {
+  animation: super-switch 1.6s ease-in-out infinite;
+}
+
+@keyframes super-switch {
+  0%,
+  100% {
+    text-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+  }
+  50% {
+    text-shadow:
+      0 0 22px rgba(34, 211, 238, 1),
+      0 0 40px rgba(34, 211, 238, 0.5);
+  }
+}
+
+/* ---- super mode: the list ----------------------------------------- */
+
+/* The cursor row keeps its own gradient and gains a sheen running along
+   it — two background layers on one element, so only the second one's
+   position moves. */
+:root[data-theme="super"] .row--cursor {
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(34, 211, 238, 0.26),
+      rgba(34, 211, 238, 0.04) 60%,
+      transparent
+    ),
+    linear-gradient(
+      100deg,
+      transparent 42%,
+      rgba(255, 255, 255, 0.14) 50%,
+      transparent 58%
+    );
+  background-size:
+    100% 100%,
+    300% 100%;
+  background-repeat: no-repeat;
+  animation: super-sheen 2.8s linear infinite;
+}
+
+@keyframes super-sheen {
+  from {
+    background-position:
+      0 0,
+      130% 0;
+  }
+  to {
+    background-position:
+      0 0,
+      -70% 0;
+  }
+}
+
+:root[data-theme="super"] .row--cursor::before {
+  animation: super-edge 1.4s ease-in-out infinite;
+}
+
+@keyframes super-edge {
+  0%,
+  100% {
+    box-shadow: 0 0 10px 1px var(--edge);
+  }
+  50% {
+    box-shadow: 0 0 28px 2px var(--edge);
+  }
+}
+
+/* Visual mode: the selection breathes, so a block you are about to act
+   on is never mistaken for the rows around it. */
+:root[data-theme="super"] .row--selected {
+  animation: super-selected 1.3s ease-in-out infinite;
+}
+
+@keyframes super-selected {
+  0%,
+  100% {
+    background-color: rgba(244, 114, 182, 0.1);
+  }
+  50% {
+    background-color: rgba(244, 114, 182, 0.24);
+  }
+}
+
+:root[data-theme="super"] .row__crit {
+  animation: super-crit 1.5s ease-in-out infinite;
+}
+
+@keyframes super-crit {
+  0%,
+  100% {
+    text-shadow: 0 0 8px rgba(244, 114, 182, 0.5);
+  }
+  50% {
+    text-shadow: 0 0 24px rgba(244, 114, 182, 1);
+  }
+}
+
+/* ---- super mode: the chart ---------------------------------------- */
+
+/* A sheen across every bar at once. Synchronised on purpose: staggering
+   would need a per-row delay nothing here can compute, and a chart that
+   catches the light in one pass reads as deliberate where forty
+   independent glints would read as noise. */
+:root[data-theme="super"] .gantt__bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 60%
+  );
+  background-size: 320% 100%;
+  opacity: 0;
+  animation: super-glint 3.2s ease-in-out infinite;
+}
+
+@keyframes super-glint {
+  0% {
+    background-position: 150% 0;
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.9;
+  }
+  55%,
+  100% {
+    background-position: -70% 0;
+    opacity: 0;
+  }
+}
+
+/* The critical path marches. Vertical stripes rather than the diagonal a
+   hazard band would use, for a reason worth keeping: the shift is along
+   x, and on a diagonal the loop is seamless only when the offset equals
+   the stripe period divided by the cosine of its angle — an irrational
+   number nobody will maintain. Straight stripes make the offset the
+   period, and moving right along the timeline is the direction the
+   chart already means. */
+:root[data-theme="super"] .gantt__bar--critical {
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(244, 114, 182, 0.3) 0 12px,
+    transparent 12px 24px
+  );
+  animation: super-march 900ms linear infinite;
+}
+
+@keyframes super-march {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: 24px;
+  }
+}
+
+/* The progress fill takes the same march at twice the frequency — its
+   own period is 12px, so the 24px offset is two of them and the same
+   keyframes still loop. */
+:root[data-theme="super"] .gantt__fill {
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.16) 0 6px,
+    transparent 6px 12px
+  );
+  animation: super-march 1.4s linear infinite;
+}
+
+:root[data-theme="super"] .gantt__today {
+  animation: super-today 2.2s ease-in-out infinite;
+}
+
+@keyframes super-today {
+  0%,
+  100% {
+    opacity: 0.75;
+    box-shadow: 0 0 12px var(--edge);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 32px 2px var(--edge);
+  }
+}
+
+/* ---- super mode: the strokes -------------------------------------- */
+
+/*
+ * The blade's three strokes, wider and lit. Only the gradient and the
+ * drop-shadow change: the timings are the ones `flash.ts` holds the
+ * class on for, and `check-flash.ts` fails the build if a stroke here
+ * outlasts them. `background-image` rather than the `background`
+ * shorthand, so nothing else the base rule set is quietly reset.
+ */
+:root[data-theme="super"] .row--cut::after,
+:root[data-theme="super"] .gantt__bar--cut::after {
+  background-image: linear-gradient(
+    104deg,
+    transparent 0 30%,
+    rgba(34, 211, 238, 0.95) 42%,
+    #fff 50%,
+    rgba(244, 114, 182, 0.95) 58%,
+    transparent 70% 100%
+  );
+  filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.9));
+}
+
+/* The row takes the hit as well as showing it. Well inside the 400ms the
+   class is held for. */
+:root[data-theme="super"] .row--cut {
+  animation: super-hit 340ms ease-out;
+}
+
+@keyframes super-hit {
+  0% {
+    transform: none;
+  }
+  20% {
+    transform: translateX(4px);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+:root[data-theme="super"] .row--slain::after,
+:root[data-theme="super"] .gantt__bar--slain::after {
+  background-image: linear-gradient(
+    104deg,
+    transparent 0 30%,
+    rgba(34, 211, 238, 0.95) 42%,
+    #fff 50%,
+    rgba(34, 211, 238, 0.95) 58%,
+    transparent 70% 100%
+  );
+  filter: drop-shadow(0 0 16px rgba(34, 211, 238, 0.9));
+}
+
+:root[data-theme="super"] .row--born::after,
+:root[data-theme="super"] .gantt__bar--born::after {
+  background-image: linear-gradient(
+    76deg,
+    transparent 0 34%,
+    rgba(34, 211, 238, 0.9) 48%,
+    rgba(255, 255, 255, 0.8) 51%,
+    rgba(34, 211, 238, 0.35) 56%,
+    transparent 66% 100%
+  );
+  filter: drop-shadow(0 0 12px rgba(34, 211, 238, 0.8));
+}
+
+/* ---- super mode: the screen answers ------------------------------- */
+
+/*
+ * A stroke happens to a row; in this mode the screen says so too. One
+ * element per gesture, keyed on a counter and rendered only in super
+ * mode — see `burst` in `App.tsx` for why that decision sits in the
+ * render rather than here.
+ */
+:root[data-theme="super"] .burst {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* Two layers: a soft core, and a ring leaving it. The ring is what makes
+   this read as a shockwave rather than as the screen brightening for a
+   moment — the first version had the core alone, expanding from 0.92 to
+   1.08, and it was a flicker you could miss with the row right under it
+   drawing a stroke of its own. The scale range is wide enough that the
+   ring crosses most of the viewport in the 400ms it has. */
+:root[data-theme="super"] .burst--cut {
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      rgba(255, 255, 255, 0.4),
+      rgba(34, 211, 238, 0.22) 28%,
+      transparent 62%
+    ),
+    radial-gradient(
+      circle at 50% 45%,
+      transparent 40%,
+      rgba(34, 211, 238, 0.55) 46%,
+      rgba(255, 255, 255, 0.35) 48%,
+      transparent 55%
+    );
+  animation: super-burst 400ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+@keyframes super-burst {
+  from {
+    opacity: 1;
+    transform: scale(0.55);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+
+/* Born opens from the left, the way its stroke is drawn. */
+:root[data-theme="super"] .burst--born {
+  background: linear-gradient(
+    90deg,
+    rgba(34, 211, 238, 0.22),
+    transparent 55%
+  );
+  animation: super-burst-born 380ms ease-out forwards;
+}
+
+@keyframes super-burst-born {
+  from {
+    opacity: 0.9;
+    transform: translateX(-3%);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(0);
+  }
+}
+
+/* A delete closes in from the edges instead — the only one that darkens
+   rather than lights, because it is the only one that takes something
+   away. */
+:root[data-theme="super"] .burst--slain {
+  background: radial-gradient(
+    circle at 50% 50%,
+    transparent 30%,
+    rgba(5, 7, 13, 0.55) 100%
+  );
+  animation: super-burst-slain 240ms ease-out forwards;
+}
+
+@keyframes super-burst-slain {
+  from {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+/*
+ * The shake, spelled twice — see `QUAKE_CLASSES` in `flash.ts`. The two
+ * rules must run *different* animation names or the second delete in a
+ * row does nothing: swapping the class restarts an animation only when
+ * the name changes with it. `check-flash.ts` asserts the two keyframes
+ * are identical, which is what a copy-pasted pair silently loses.
+ */
+:root[data-theme="super"] .app--quake-a {
+  animation: super-quake-a 240ms ease-out;
+}
+
+:root[data-theme="super"] .app--quake-b {
+  animation: super-quake-b 240ms ease-out;
+}
+
+@keyframes super-quake-a {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  20% {
+    transform: translate3d(-5px, 3px, 0);
+  }
+  40% {
+    transform: translate3d(5px, -3px, 0);
+  }
+  60% {
+    transform: translate3d(-3px, -2px, 0);
+  }
+  80% {
+    transform: translate3d(3px, 2px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes super-quake-b {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  20% {
+    transform: translate3d(-5px, 3px, 0);
+  }
+  40% {
+    transform: translate3d(5px, -3px, 0);
+  }
+  60% {
+    transform: translate3d(-3px, -2px, 0);
+  }
+  80% {
+    transform: translate3d(3px, 2px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* ---- super mode: the blade under the caret ------------------------ */
+
+/*
+ * Typing, drawn — see `strike.ts` and `Strikes.tsx`. Every character
+ * cuts: short strikes fan off the caret, the shell takes the recoil, and
+ * a run of them keeps a count.
+ *
+ * The nodes are made in JavaScript and take themselves out on
+ * `animationend`, which is the one thing this section must not break.
+ * Silence a `.strike` here rather than in the component and the event
+ * never comes, so nothing is ever removed — which is why the component
+ * reads `prefers-reduced-motion` itself and declines to spawn, and why
+ * the blanket at the top of the reduced-motion block is not the whole
+ * answer for this one effect.
+ */
+
+:root[data-theme="super"] .strikes {
+  position: fixed;
+  inset: 0;
+  z-index: 93;
+  pointer-events: none;
+}
+
+/* Each one is a stroke, not a spark: a thin bar that *extends* as it
+   flies, so the shape says blade rather than confetti. `--x` / `--y` are
+   the caret, `--dx` / `--dy` where it lands, `--rot` its angle and
+   `--len` its length; all five come from the component. */
+:root[data-theme="super"] .strike {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--len);
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(34, 211, 238, 0.95) 38%,
+    #fff 52%,
+    rgba(34, 211, 238, 0.6) 66%,
+    transparent
+  );
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9));
+  opacity: 0;
+  animation: super-strike 420ms cubic-bezier(0.1, 0.75, 0.25, 1) forwards;
+}
+
+@keyframes super-strike {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--rot)) scaleX(0.15);
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy)))
+      rotate(var(--rot)) scaleX(1);
+  }
+}
+
+/* The count, which only appears once a run is a run. It sits above and
+   to the right of the caret — never on it, because the thing it is
+   celebrating is text somebody is reading as they type it. */
+:root[data-theme="super"] .combo {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  transform: translate(12px, -22px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--edge);
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.8);
+  animation: super-combo 260ms ease-out;
+}
+
+/* It climbs in heat, not in hue: still cyan at the top, just brighter
+   and heavier. A counter that went magenta at ×30 would be spending the
+   critical path's colour on a joke. */
+:root[data-theme="super"] .combo[data-tier="1"] {
+  font-size: 1.1em;
+  text-shadow: 0 0 18px rgba(34, 211, 238, 0.95);
+}
+
+:root[data-theme="super"] .combo[data-tier="2"] {
+  font-size: 1.25em;
+  color: #fff;
+  text-shadow:
+    0 0 20px rgba(34, 211, 238, 1),
+    0 0 40px rgba(34, 211, 238, 0.6);
+}
+
+:root[data-theme="super"] .combo[data-tier="3"] {
+  font-size: 1.4em;
+  color: #fff;
+  text-shadow:
+    0 0 24px rgba(34, 211, 238, 1),
+    0 0 48px rgba(34, 211, 238, 0.8),
+    0 0 80px rgba(34, 211, 238, 0.4);
+}
+
+@keyframes super-combo {
+  from {
+    transform: translate(12px, -22px) scale(1.35);
+  }
+  to {
+    transform: translate(12px, -22px) scale(1);
+  }
+}
+
+/*
+ * The recoil. Spelled twice — see `JOLT_CLASSES` in `strike.ts` — and
+ * kept to a fraction of the delete's shake, because this one fires under
+ * every character: a lurch the size of `super-quake` would move the text
+ * out from under the caret that is writing it. `--jolt` is set inline by
+ * the component and grows with the combo, so a burst of typing is felt
+ * and a single letter is barely there.
+ */
+:root[data-theme="super"] .app--jolt-a {
+  animation: super-jolt-a 90ms ease-out;
+}
+
+:root[data-theme="super"] .app--jolt-b {
+  animation: super-jolt-b 90ms ease-out;
+}
+
+@keyframes super-jolt-a {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  40% {
+    transform: translate3d(calc(var(--jolt, 1px) * -1), var(--jolt, 1px), 0);
+  }
+  70% {
+    transform: translate3d(var(--jolt, 1px), 0, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes super-jolt-b {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  40% {
+    transform: translate3d(calc(var(--jolt, 1px) * -1), var(--jolt, 1px), 0);
+  }
+  70% {
+    transform: translate3d(var(--jolt, 1px), 0, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
 }
