@@ -202,7 +202,7 @@ async function stopServer(child) {
  * stepped through: every hold below is somebody's reading time, not a
  * wait on the app. The app is faster than all of them.
  */
-async function storyboard(page, beat, mouse) {
+async function storyboard(page, beat, mouse, pace) {
   const k = async (key, hold = 240) => {
     await page.keyboard.press(key);
     await wait(hold);
@@ -393,12 +393,89 @@ async function storyboard(page, beat, mouse) {
   await k("Tab", 900);
   await beat("19-split");
 
+  // ---- the brakes off
+  //
+  // Everything up to here is one keystroke, one answer. Super mode is
+  // the first thing in the take that keeps moving with nobody touching
+  // it — an aurora behind the plan, a band rolling down the shell, the
+  // wordmark flickering, the critical path marching — so it opens on a
+  // beat that presses nothing, which is the only way an ambient effect
+  // is seen at all.
+  //
+  // The `pace` calls through this section are not about the picture:
+  // super mode paints on a clock rather than on a keystroke, and every
+  // frame of it costs a full screen in the gif. `stroke` buys back the
+  // half-seconds where something is actually being drawn; `drift` is
+  // the rest. See `DRIFT_GAP`.
+  pace.stroke();
+  await keys("gs", 400);
+  pace.drift();
+  await wait(1100);
+  await beat("20-super");
+
+  // ---- one row, all three strokes
+  //
+  // `flash.ts` draws a task at three moments — slain, born, cut — and
+  // super mode answers each of them with the whole screen. So this is
+  // one row's whole life: the one the take built is taken away, another
+  // is entered in its place, and that one is finished.
+  //
+  // In that order because of the ceiling in `seed.mjs`: twelve rows fill
+  // the frame, the take is already at twelve, and a thirteenth scrolls
+  // the pane — which then stays scrolled, with the top row cut in half,
+  // through every beat after it. Removing before adding never spends the
+  // thirteenth.
+  //
+  // The delete first, then. The row falls away from the stroke and the
+  // shell takes a shake — the one effect in the section that moves the
+  // plan rather than drawing over it.
+  await k("G", 400);
+  pace.stroke();
+  await keys("dd", 500);
+  pace.drift();
+  await wait(700);
+  await beat("21-quake");
+
+  // Then the blade at the scale of a keystroke. `o` and a title is the
+  // gesture the take opened with, and that is the point: the same row
+  // entry, except every character now throws strikes off the caret and
+  // puts a recoil through the shell, with a counter over the run. The
+  // title is long enough to reach it — the counter starts at five
+  // characters (`COMBO_FLOOR` in `strike.ts`), so "QA" would never show
+  // one — and short enough to fit the title column, which is about
+  // twelve here and ellipsises the rest the moment the edit commits.
+  //
+  // `G` again because a delete leaves the cursor on the first row, and
+  // `o` opens under the cursor: without it the new row is born near the
+  // top of the outline and the list re-orders itself under the caret.
+  await k("G", 400);
+  pace.stroke();
+  await k("o", 350);
+  await type("Cut the wire", 400);
+  pace.drift();
+  await k("Escape", 700);
+  await beat("22-strikes");
+
+  // And the signature stroke, answered by the whole screen: completing a
+  // row has always swept the row, and now a shockwave goes out over
+  // everything with it.
+  pace.stroke();
+  await k(" ", 500);
+  pace.drift();
+  await wait(900);
+  await beat("23-shockwave");
+
   // ---- the modes
+  //
+  // Out of super in one key, which is the rule worth showing: `gt`
+  // leaves it the same way it leaves neon, because office mode is
+  // somewhere you go *to* and it wins.
+  pace.calm();
   await keys("gt", 1600);
-  await beat("20-office");
+  await beat("24-office");
 
   await cmd("lang ja", 1700);
-  await beat("21-japanese");
+  await beat("25-japanese");
 }
 
 /**
@@ -709,15 +786,61 @@ async function startScreencast(page) {
 const MIN_GAP = 0.022;
 
 /**
+ * And the two floors for super mode, which is a different problem.
+ *
+ * Every effect above is a burst: it plays for a few hundred
+ * milliseconds and the screen goes still again, so the frames it costs
+ * are bounded by the gesture that asked for it. Super mode has no such
+ * end — the aurora drifts, the band rolls, the wordmark flickers — so
+ * the compositor paints at the display's rate for as long as the mode
+ * is on. Worse, each of those frames differs over the *whole* screen
+ * rather than inside the box around a changed row, so `diff_mode` has
+ * nothing to leave out and the gif carries a full picture for every one
+ * of them. Measured: about 48KB each, against 3KB for a frame in the
+ * rest of the take. At `MIN_GAP` a ten-second section is 9MB.
+ *
+ * That number is a hard floor per frame — colour count, temporal
+ * denoising and posterising before the palette were all tried and none
+ * of them touches it, because the drift is a level or two on nearly
+ * every pixel rather than noise in a few. So the only knob is how many
+ * frames the section gets, and the two rates below spend them where the
+ * motion is:
+ *
+ *   drift  — the mode at rest. The aurora crosses the pane over
+ *            seconds; five a second is the same movement.
+ *   stroke — a strike, a burst, the shake. All of them are under half a
+ *            second, and at the drift rate a shake would be a single
+ *            displaced frame, which reads as a dropped one.
+ *
+ * `pace` in `main` is what the storyboard marks them with.
+ */
+const DRIFT_GAP = 0.2;
+const STROKE_GAP = 0.06;
+
+/**
  * Drop frames that arrive faster than the eye can use them.
+ *
+ * `windows` is what the storyboard marked with `pace`: a floor, and the
+ * moment it took effect. Each one runs until the next mark, so the last
+ * one at or before a frame is the one that governs it — which is what
+ * lets the storyboard write `pace.stroke()` … `pace.drift()` as two
+ * statements in a row rather than as a pair that has to nest.
+ *
+ * The marks are in the same clock the frames carry — seconds since the
+ * epoch, from the compositor for a frame and from `Date.now()` for a
+ * mark. The two can disagree by a few milliseconds, which decides the
+ * spacing of one frame either side of a boundary.
  *
  * The last frame is kept whatever its spacing: it is what the gif rests
  * on before it loops, and `writeFrames` gives it the tail delay.
  */
-function thin(frames) {
+function thin(frames, windows = []) {
+  const gapAt = (at) =>
+    windows.findLast((w) => at >= w.from)?.gap ?? MIN_GAP;
+
   const kept = [frames[0]];
   for (const frame of frames.slice(1)) {
-    if (frame.at - kept.at(-1).at >= MIN_GAP) kept.push(frame);
+    if (frame.at - kept.at(-1).at >= gapAt(frame.at)) kept.push(frame);
   }
   if (kept.at(-1) !== frames.at(-1)) kept.push(frames.at(-1));
   return kept;
@@ -863,19 +986,39 @@ async function main() {
       log(`beat ${name}`);
     };
 
+    // The stretches the compositor paints on a clock rather than on a
+    // keystroke, and how finely each is worth keeping — see `DRIFT_GAP`.
+    // A window runs until the next mark, so a storyboard that forgets
+    // `pace.calm()` thins its tail rather than shipping it at 60fps.
+    const windows = [];
+    const mark = (gap) => windows.push({ from: Date.now() / 1000, gap });
+    const pace = {
+      /** Super mode with nothing playing on it. */
+      drift: () => mark(DRIFT_GAP),
+      /** A stroke, a burst, a shake, the strikes off the caret. */
+      stroke: () => mark(STROKE_GAP),
+      /** Out of super mode: the take pays for what changes again. */
+      calm: () => mark(MIN_GAP),
+    };
+
     const pointer = await installPointer(page);
-    await storyboard(page, beat, {
-      dragDivider: () => dragDivider(page, pointer),
-      clickRow: (title) => clickRow(page, pointer, title),
-      rowMenu: (title) => rowMenu(page, pointer, title),
-      cutEdge: (which) => cutEdge(page, pointer, which),
-      // The one beat that ends with the pointer still up, so the
-      // storyboard rather than the gesture decides when it goes.
-      hidePointer: async () => {
-        await pointer.hide();
-        await wait(300);
+    await storyboard(
+      page,
+      beat,
+      {
+        dragDivider: () => dragDivider(page, pointer),
+        clickRow: (title) => clickRow(page, pointer, title),
+        rowMenu: (title) => rowMenu(page, pointer, title),
+        cutEdge: (which) => cutEdge(page, pointer, which),
+        // The one beat that ends with the pointer still up, so the
+        // storyboard rather than the gesture decides when it goes.
+        hidePointer: async () => {
+          await pointer.hide();
+          await wait(300);
+        },
       },
-    });
+      pace,
+    );
 
     if (SHOTS) {
       await context.close();
@@ -884,7 +1027,7 @@ async function main() {
     }
 
     const captured = await stop();
-    const frames = thin(captured);
+    const frames = thin(captured, windows);
     await context.close();
     // The gif loops, so the last frame is also the pause before it starts
     // over. Long enough to read the frame it ends on, short enough that

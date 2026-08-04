@@ -1341,6 +1341,24 @@ task, so keep it working:
   back. It cannot touch a still beat, since those are one frame each
   already. Budget accordingly: a beat that *animates* costs frames on
   this scale, a beat that merely holds costs one.
+- **Super mode is a different order of expense again, and it is the
+  number to know before adding to that section.** Every other effect is
+  a burst that ends; super mode's ambient half — the aurora, the roll,
+  the flicker — never does, so the compositor paints for as long as the
+  mode is on, and each of those frames differs over the *whole* screen
+  rather than inside the box around a changed row. `diff_mode` has
+  nothing to leave out: **about 48KB per frame, against 3KB for one in
+  the rest of the take.** Ten seconds of it at `MIN_GAP` is 9MB of gif.
+  That per-frame figure is a floor — a smaller palette, `hqdn3d`'s
+  temporal denoise and posterising before `palettegen` were each tried
+  and none of them moves it, because the drift is a level or two on
+  nearly every pixel rather than noise in a few. The only knob is how
+  many frames the section gets, which is what `pace` is: the storyboard
+  marks `pace.stroke()` around the half-seconds where something is
+  actually being drawn and `pace.drift()` over the rest, and `thin`
+  reads the per-window floor. The take ships at about 4.9MB with ten
+  seconds of super in it; that was a deliberate call, and it is the
+  budget to spend against rather than one to quietly double.
 - **Neither capture path draws the cursor**, so a mouse beat needs a
   pointer drawn into the page. Without one the divider slides with
   nothing touching it, which reads as an animation rather than a drag.
