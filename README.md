@@ -11,7 +11,7 @@ scheduling with a critical path, and peer-to-peer replication over
 [iroh](https://iroh.computer). `cargo install yaiba`.**
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/yukimemi/yaiba/main/assets/demo.gif" alt="a row opened with o and made to wait for another with D, the date columns filled by walking them, a block of dates yanked onto the actuals, and the same plan in office mode and in Japanese" width="900">
+  <img src="https://raw.githubusercontent.com/yukimemi/yaiba/main/assets/demo.gif" alt="a row opened with o and made to wait for another with D, the date columns filled by walking them, a block of dates yanked onto the actuals, then super mode with strikes flying off the caret and a shockwave on a completion, and the same plan in office mode and in Japanese" width="900">
 </p>
 
 <p align="center">
@@ -21,8 +21,10 @@ scheduling with a critical path, and peer-to-peer replication over
   in columns, <code>h</code> <code>l</code> walk them and <code>⏎</code>
   edits one · <code>v</code> <code>y</code> <code>p</code> move a block
   of cells · <code>co</code> hands the row over ·
-  <code>zm</code> folds an altitude · <code>gt</code> is office mode ·
-  <code>:lang ja</code> is the whole UI</sub>
+  <code>zm</code> folds an altitude · <code>gs</code> is super mode —
+  the caret throws strikes as you type, a completion sets off a
+  shockwave and a delete shakes the screen · <code>gt</code> is office
+  mode · <code>:lang ja</code> is the whole UI</sub>
 </p>
 
 ## Why
