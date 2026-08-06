@@ -384,6 +384,71 @@ export function foldStep(
 }
 
 /**
+ * The fold state a focus is holding on to, as it is written to disk.
+ *
+ * A plain array and a number so it survives `JSON.stringify` into the
+ * project's `ui` blob — the same shape `ProjectUiState.collapsed`
+ * already has, and for the same reason: a `Set` serialises to `{}`.
+ */
+export interface FoldMemory {
+  collapsed: TaskId[];
+  foldLevel: number | null;
+}
+
+/** Everything `zf` and `zF` move between them. */
+export interface FoldView {
+  collapsed: Set<TaskId>;
+  /** The depth `zm` / `zr` step from — see `foldLevelRef` in `App`. */
+  foldLevel: number | null;
+  /** What an outer focus displaced, or null when none is up. */
+  saved: FoldMemory | null;
+}
+
+/**
+ * What focusing and unfocusing do to the folds.
+ *
+ * `zf` has always dropped every fold, and that part is right: focusing a
+ * project and being shown one closed row would be useless. What it did
+ * *not* do was put them back, so the view you had built was spent rather
+ * than borrowed — and since `collapsed` is persisted 500ms later, the
+ * empty set it installed is what landed in the project database and a
+ * reload recovered nothing (#135).
+ *
+ * Pure, and beside `foldStep` rather than inside the key handler, for
+ * the reason that file's own comment gives: this is client-side view
+ * state that type-checks perfectly while being wrong, so it belongs
+ * somewhere `check-folds.ts` can run it.
+ *
+ * Two rules are worth stating, because both are ways to lose the folds
+ * again:
+ *
+ *   - **Only the outermost `zf` remembers.** A second one from inside a
+ *     focus would otherwise overwrite the memory with the empty set the
+ *     first one just installed, and the `zF` that comes all the way back
+ *     out would restore nothing.
+ *   - **Leaving with nothing remembered still unfolds.** That is what
+ *     `:all` on an unfocused plan means, and it is the only thing it can
+ *     mean — there is no earlier view to go back to.
+ */
+export function focusStep(direction: "in" | "out", view: FoldView): FoldView {
+  if (direction === "in") {
+    return {
+      collapsed: new Set(),
+      foldLevel: null,
+      saved:
+        view.saved ??
+        { collapsed: [...view.collapsed], foldLevel: view.foldLevel },
+    };
+  }
+  if (!view.saved) return { collapsed: new Set(), foldLevel: null, saved: null };
+  return {
+    collapsed: new Set(view.saved.collapsed),
+    foldLevel: view.saved.foldLevel,
+    saved: null,
+  };
+}
+
+/**
  * The rows actually on screen.
  *
  * Order is the breakdown itself unless an explicit sort is active, in

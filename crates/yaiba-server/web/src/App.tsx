@@ -45,9 +45,11 @@ import {
   collapsedForDepth,
   dropOrder,
   effectiveParent,
+  focusStep,
   foldStep,
   stepOrder,
   visibleTasks,
+  type FoldMemory,
   type SortKey,
 } from "./filter";
 import {
@@ -375,6 +377,18 @@ export function App() {
    */
   const foldLevelRef = useRef<number | null>(null);
   /**
+   * What the fold state was before `zf` opened a subtree, so `zF` has
+   * something to put back — see `focusStep` in `filter.ts` for the rule.
+   *
+   * A ref for the same reason `foldLevelRef` is one: nothing renders from
+   * it, and it is written in the same breath as the `setFocus` beside it,
+   * so a handler must read its own last write rather than a render-old
+   * one. It rides along in the saved blob, because a reload taken while
+   * focused would otherwise be the same loss by a slower route — for as
+   * long as the focus is up, the `collapsed` on disk is the empty set.
+   */
+  const foldMemoryRef = useRef<FoldMemory | null>(null);
+  /**
    * Set once the active project's saved UI state has been applied (or
    * failed to load). Saves are gated on it: writing the mount-time
    * defaults over the saved blob before the GET answered would turn every
@@ -465,6 +479,13 @@ export function App() {
     (cmd: string, count?: number, counted?: boolean) => void
   >(() => {});
 
+  /**
+   * The fold half of a focus, for the same reason and by the same trick:
+   * `applyUi` is memoised with no dependencies, and this reads
+   * `collapsed`. See `stepFocus`, which fills it in on every render.
+   */
+  const stepFocusRef = useRef<(direction: "in" | "out") => void>(() => {});
+
   // ---- derived ----------------------------------------------------
 
   const bySchedule = useMemo(
@@ -550,6 +571,29 @@ export function App() {
     [data],
   );
 
+  /**
+   * Focusing and unfocusing, as far as the folds are concerned — the
+   * decision itself is `focusStep` in `filter.ts`, where it can be run
+   * without a keyboard.
+   *
+   * A plain function per render rather than a `useCallback`, because it
+   * reads `collapsed`: a memoised one would snapshot the fold state of
+   * the render that made it and put *that* back on `zF`. Published
+   * through `stepFocusRef` for `applyUi`, which is a stable callback and
+   * cannot see this binding — the same trick `runKeyRef` uses.
+   */
+  const stepFocus = (direction: "in" | "out") => {
+    const next = focusStep(direction, {
+      collapsed,
+      foldLevel: foldLevelRef.current,
+      saved: foldMemoryRef.current,
+    });
+    setCollapsed(next.collapsed);
+    foldLevelRef.current = next.foldLevel;
+    foldMemoryRef.current = next.saved;
+  };
+  stepFocusRef.current = stepFocus;
+
   const cursorAt = visible.findIndex((t) => t.id === cursorId);
   const cursor = cursorAt >= 0 ? cursorAt : 0;
   const current: Task | null = visible[cursor] ?? null;
@@ -625,6 +669,11 @@ export function App() {
     if (ui.collapsed) setCollapsed(new Set(ui.collapsed));
     if (ui.focus !== undefined) setFocus(ui.focus);
     if (ui.foldLevel !== undefined) foldLevelRef.current = ui.foldLevel;
+    // Set directly rather than through `stepFocus`: this is the state
+    // being restored, not a focus being entered, and the two would fight
+    // — a step "in" here would snapshot the empty set the saved focus
+    // already left behind and lose what it is holding.
+    if (ui.foldMemory !== undefined) foldMemoryRef.current = ui.foldMemory;
   }, []);
 
   /**
@@ -689,6 +738,7 @@ export function App() {
           focus,
           filter,
           foldLevel: foldLevelRef.current,
+          foldMemory: foldMemoryRef.current,
         })
         .catch(() => undefined);
     }, 500);
@@ -701,7 +751,14 @@ export function App() {
    * showing nothing, which reads as the app having lost the plan.
    */
   useEffect(() => {
-    if (focus && data && !data.tasks.some((t) => t.id === focus)) setFocus(null);
+    if (focus && data && !data.tasks.some((t) => t.id === focus)) {
+      // Through the same step `zF` takes, so being dropped out of a focus
+      // you did not leave still gives you back the view you had. The
+      // folds it is holding name rows in *this* project, so the delete of
+      // one row is no reason to discard them.
+      stepFocusRef.current("out");
+      setFocus(null);
+    }
   }, [focus, data]);
 
   // Peers merge in the background, so the local view has to re-read.
@@ -781,6 +838,10 @@ export function App() {
         // to prevent. Set directly rather than through `foldToDepth`,
         // which would read the *outgoing* project's schedule.
         foldLevelRef.current = null;
+        // And the folds a focus is holding are from that same outgoing
+        // tree, so they go with it rather than being handed to the next
+        // project's `zF`.
+        foldMemoryRef.current = null;
         setCollapsed(new Set());
         setFilter("");
         await load();
@@ -825,8 +886,10 @@ export function App() {
     setPicking(null);
     setFocus(null);
     // Same reasoning as `switchTo`: a folded set from another project
-    // names rows that are not here.
+    // names rows that are not here — including the one a focus is
+    // holding for `zF`.
     foldLevelRef.current = null;
+    foldMemoryRef.current = null;
     setCollapsed(new Set());
     setFilter("");
     uiLoadedRef.current = false;
@@ -1941,7 +2004,14 @@ export function App() {
       setListWidth(next);
       say(t("split at {n}%", { n: next }));
     }
-    if (ui.focus !== undefined) setFocus(ui.focus);
+    if (ui.focus !== undefined) {
+      // `:only` and `:all` are the mouse-free spelling of `zf` and `zF`,
+      // so they move the folds the same way — borrowed on the way in,
+      // handed back on the way out. They used to send `foldLevel: null`
+      // alongside instead, which is the half that spent them (#135).
+      stepFocusRef.current(ui.focus ? "in" : "out");
+      setFocus(ui.focus);
+    }
     if (ui.asof !== undefined) setReferenceDate(ui.asof);
     if (ui.theme) {
       setTheme((prev) => {
@@ -3082,13 +3152,18 @@ export function App() {
         // has to clear `collapsed`, not just the remembered depth — the
         // depth stopped hiding anything by itself when the two axes were
         // merged, so clearing the depth alone left this comment lying.
+        //
+        // `stepFocus` rather than `foldToDepth(null)`, because dropping
+        // them is only half of it: the folds are borrowed for as long as
+        // the focus is up and handed back by `zF` (#135).
         if (current) {
+          stepFocus("in");
           setFocus(current.id);
-          foldToDepth(null);
           say(t("focused “{title}” — zF to come back", { title: current.title }));
         }
         break;
       case "zF":
+        stepFocus("out");
         setFocus(null);
         say(t("showing everything"));
         break;

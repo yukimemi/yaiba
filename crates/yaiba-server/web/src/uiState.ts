@@ -12,7 +12,7 @@
  * log, so how one replica folds its plan never syncs to a peer.
  */
 import { COLUMNS, VIEWS, ZOOMS, type Columns, type View, type Zoom } from "./commands";
-import { SORT_KEYS, type SortKey } from "./filter";
+import { SORT_KEYS, type FoldMemory, type SortKey } from "./filter";
 
 export interface ViewState {
   view: View;
@@ -78,4 +78,14 @@ export interface ProjectUiState {
   filter?: string;
   /** The depth zm/zr step from — not the folds themselves. */
   foldLevel?: number | null;
+  /**
+   * What the folds were before the focus above opened the subtree, so
+   * `zF` has something to put back after a reload as well.
+   *
+   * On disk rather than in memory alone because for as long as a focus
+   * is up, the `collapsed` beside it *is* the empty set `zf` installed —
+   * so a reload taken while focused would be the same loss (#135) by a
+   * slower route. Absent, or null, when no focus is up.
+   */
+  foldMemory?: FoldMemory | null;
 }
