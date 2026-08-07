@@ -484,7 +484,9 @@ export function App() {
    * `applyUi` is memoised with no dependencies, and this reads
    * `collapsed`. See `stepFocus`, which fills it in on every render.
    */
-  const stepFocusRef = useRef<(direction: "in" | "out") => void>(() => {});
+  const stepFocusRef = useRef<
+    (direction: "in" | "out", fallback?: "unfold" | "keep") => void
+  >(() => {});
 
   // ---- derived ----------------------------------------------------
 
@@ -582,12 +584,19 @@ export function App() {
    * through `stepFocusRef` for `applyUi`, which is a stable callback and
    * cannot see this binding — the same trick `runKeyRef` uses.
    */
-  const stepFocus = (direction: "in" | "out") => {
-    const next = focusStep(direction, {
-      collapsed,
-      foldLevel: foldLevelRef.current,
-      saved: foldMemoryRef.current,
-    });
+  const stepFocus = (
+    direction: "in" | "out",
+    fallback: "unfold" | "keep" = "unfold",
+  ) => {
+    const next = focusStep(
+      direction,
+      {
+        collapsed,
+        foldLevel: foldLevelRef.current,
+        saved: foldMemoryRef.current,
+      },
+      fallback,
+    );
     setCollapsed(next.collapsed);
     foldLevelRef.current = next.foldLevel;
     foldMemoryRef.current = next.saved;
@@ -752,11 +761,13 @@ export function App() {
    */
   useEffect(() => {
     if (focus && data && !data.tasks.some((t) => t.id === focus)) {
-      // Through the same step `zF` takes, so being dropped out of a focus
-      // you did not leave still gives you back the view you had. The
-      // folds it is holding name rows in *this* project, so the delete of
-      // one row is no reason to discard them.
-      stepFocusRef.current("out");
+      // Through the same step `zF` takes, `keep` and all: being dropped
+      // out of a focus you did not leave should give you back the view
+      // you had, and where there is nothing to give back — a focus saved
+      // by a version before this one — it must not answer by unfolding
+      // the plan instead. The folds it holds name rows in *this*
+      // project, so one deleted row is no reason to discard them.
+      stepFocusRef.current("out", "keep");
       setFocus(null);
     }
   }, [focus, data]);
@@ -2009,7 +2020,11 @@ export function App() {
       // so they move the folds the same way — borrowed on the way in,
       // handed back on the way out. They used to send `foldLevel: null`
       // alongside instead, which is the half that spent them (#135).
-      stepFocusRef.current(ui.focus ? "in" : "out");
+      //
+      // The one place the two spellings part: `:all` says *show
+      // everything*, so with nothing to put back it unfolds, which is
+      // what it has always done. `zF` only says leave the focus.
+      stepFocusRef.current(ui.focus ? "in" : "out", "unfold");
       setFocus(ui.focus);
     }
     if (ui.asof !== undefined) setReferenceDate(ui.asof);
@@ -3163,7 +3178,11 @@ export function App() {
         }
         break;
       case "zF":
-        stepFocus("out");
+        // `keep`, unlike `:all` below: `zF` is "come back out of the
+        // focus", so with no focus to leave there is nothing for it to
+        // say about the folds. Unfolding here would open a plan somebody
+        // had hand-folded, which is this bug again by another door.
+        stepFocus("out", "keep");
         setFocus(null);
         say(t("showing everything"));
         break;

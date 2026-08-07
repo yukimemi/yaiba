@@ -241,12 +241,25 @@ check("and one zF still comes all the way back", view(focusStep("out", deeper)),
 const insideFocus: FoldView = { ...focused, collapsed: new Set(["A1"]) };
 check("folds made inside a focus do not survive zF", view(focusStep("out", insideFocus)), "A,A1,B,B1 | 0 | -");
 
-// `:all` on an unfocused plan has no earlier view to go back to, and
-// unfolding is the only thing it can mean.
+// With nothing to put back, the two ways out want opposite things — and
+// the wrong one is the bug arriving by another door, since a `zF` that
+// unfolded would take a hand-folded plan apart with no focus in sight.
 check(
-  "leaving with nothing remembered unfolds",
-  view(focusStep("out", folded)),
+  ":all with nothing remembered shows everything",
+  view(focusStep("out", folded, "unfold")),
   "- | null | -",
+);
+check(
+  "zF with nothing remembered leaves the folds alone",
+  view(focusStep("out", folded, "keep")),
+  "A,A1,B,B1 | 0 | -",
+);
+// And where there *is* something to put back the two agree, which is
+// what keeps `zF` and `:all` the same key in two spellings.
+check(
+  "the fallback does not reach a focus that borrowed",
+  view(focusStep("out", focused, "keep")),
+  view(focusStep("out", focused, "unfold")),
 );
 
 // Same argument as `foldStep` above: the handler sets state from the

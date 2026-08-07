@@ -426,11 +426,20 @@ export interface FoldView {
  *     focus would otherwise overwrite the memory with the empty set the
  *     first one just installed, and the `zF` that comes all the way back
  *     out would restore nothing.
- *   - **Leaving with nothing remembered still unfolds.** That is what
- *     `:all` on an unfocused plan means, and it is the only thing it can
- *     mean — there is no earlier view to go back to.
+ *   - **Leaving with nothing remembered does what the caller says**, and
+ *     the two callers want opposite things. `:all` says show everything,
+ *     so it unfolds — there is no earlier view to go back to and that is
+ *     the whole of the command. `zF` says come back out of the focus, so
+ *     with no focus to leave it touches nothing: hand-folding a plan,
+ *     pressing `zF` out of habit and watching it open is the same loss
+ *     this function exists to stop, arriving by another door.
  */
-export function focusStep(direction: "in" | "out", view: FoldView): FoldView {
+export function focusStep(
+  direction: "in" | "out",
+  view: FoldView,
+  /** What "out" does when there is nothing to put back. */
+  fallback: "unfold" | "keep" = "unfold",
+): FoldView {
   if (direction === "in") {
     return {
       collapsed: new Set(),
@@ -440,7 +449,11 @@ export function focusStep(direction: "in" | "out", view: FoldView): FoldView {
         { collapsed: [...view.collapsed], foldLevel: view.foldLevel },
     };
   }
-  if (!view.saved) return { collapsed: new Set(), foldLevel: null, saved: null };
+  if (!view.saved) {
+    return fallback === "keep"
+      ? { collapsed: view.collapsed, foldLevel: view.foldLevel, saved: null }
+      : { collapsed: new Set(), foldLevel: null, saved: null };
+  }
   return {
     collapsed: new Set(view.saved.collapsed),
     foldLevel: view.saved.foldLevel,
