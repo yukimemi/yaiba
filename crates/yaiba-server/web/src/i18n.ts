@@ -65,6 +65,15 @@ const JA: Record<string, string> = {
   level: "階層",
   filter: "絞込",
   overdue: "遅延",
+  // 予定超過, and neither of the two shorter words that suggest
+  // themselves. A second 遅延 would read as one number printed twice,
+  // since both readouts can be up at once. 未了 shipped for review and
+  // is worse than it looks: it means "not finished", so 未了 2 beside
+  // four open tasks reads as a count of what is unfinished rather than
+  // of what is behind. 予定(の日)を超過 is the whole flag in four
+  // characters — the planned finish has gone by — and it sits beside
+  // 完了予定 in the same line's vocabulary.
+  late: "予定超過",
   now: "現在",
   "◐ neon": "◐ ネオン",
   "◑ office": "◑ オフィス",

@@ -66,6 +66,7 @@ function sched(id: string, start: string, end: string): Scheduled {
     critical: true,
     blocked: false,
     overdue: false,
+    late: false,
     level: 0,
     summary: false,
     progress: 0,

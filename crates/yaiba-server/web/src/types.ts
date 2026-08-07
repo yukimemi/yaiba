@@ -80,7 +80,16 @@ export interface Scheduled {
   slack_days: number;
   critical: boolean;
   blocked: boolean;
+  /** The plan overruns a date somebody typed in — never true without a `due`. */
   overdue: boolean;
+  /**
+   * Still open, and its computed finish is already in the past.
+   *
+   * The other half of `overdue` and the one most rows are eligible for:
+   * measured against the reference date, so it moves with `:asof`, and
+   * needing no `due`. A summary carries it when anything inside it does.
+   */
+  late: boolean;
   /** Depth in the work breakdown: 0 = a root/project. Drives indent and folding. */
   level: number;
   /** Has children, so dates and progress are rolled up rather than entered. */

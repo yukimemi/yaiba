@@ -27,6 +27,13 @@ interface Props {
   criticalCount: number;
   /** Open tasks whose computed finish is past their due date. */
   overdueCount: number;
+  /**
+   * Open tasks whose computed finish is already behind the reference
+   * date — counted over leaves, since a summary carries `late` from its
+   * children and counting both would report one overrun once per
+   * ancestor standing over it.
+   */
+  lateCount: number;
   nodeId: string;
   filter: string;
   projectEnd: string;
@@ -83,6 +90,7 @@ export function Hud({
   visibleCount,
   criticalCount,
   overdueCount,
+  lateCount,
   nodeId,
   filter,
   projectEnd,
@@ -273,6 +281,17 @@ export function Hud({
       <span className="hud__stat">
         {t("crit")} <b>{criticalCount}</b>
       </span>
+      {/* Beside `crit` rather than inside the list, because the list is
+          the one thing a fold can hide: at `zM` a plan is one row, and
+          without a readout up here nothing on screen would say that
+          something inside it overran weeks ago (#134). Shown only when
+          non-zero, like `overdue` — a standing `late 0` is noise on a
+          plan that is fine. */}
+      {lateCount > 0 && (
+        <span className="hud__stat hud__stat--overdue">
+          {t("late")} <b>{lateCount}</b>
+        </span>
+      )}
       {overdueCount > 0 && (
         <span className="hud__stat hud__stat--overdue">
           {t("overdue")} <b>{overdueCount}</b>

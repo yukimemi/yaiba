@@ -348,6 +348,12 @@ export function Gantt({
                     task.status === "done" && "gantt__bar--done",
                     sched.blocked && "gantt__bar--blocked",
                     sched.overdue && "gantt__bar--overdue",
+                    // Drawn exactly as `--overdue` is, sharing its rules
+                    // rather than getting a set of its own: the two are
+                    // one trouble read at two moments, and a bar is a
+                    // span with nowhere to put a distinction the list
+                    // already makes on the title (#134).
+                    sched.late && "gantt__bar--late",
                     dragging && "gantt__bar--dragging",
                     dropTarget === task.id && "gantt__bar--drop",
                     flashes.has(task.id) &&

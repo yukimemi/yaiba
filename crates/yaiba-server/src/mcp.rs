@@ -325,7 +325,7 @@ pub struct NoArgs {}
 #[tool_router]
 impl Yaiba {
     #[tool(
-        description = "Read the whole plan: every task with its computed start and finish, who owns it, what is on the critical path, what is blocked, and what is overdue. The dates are the scheduler's, not stored values — a task with children takes its span from them."
+        description = "Read the whole plan: every task with its computed start and finish, who owns it, what is on the critical path, what is blocked, what is behind (its finish has passed and it is still open), and what is overdue (its finish lands after a due date somebody set). The dates are the scheduler's, not stored values — a task with children takes its span from them."
     )]
     async fn plan(&self, Parameters(NoArgs {}): Parameters<NoArgs>) -> String {
         let state = match self.state().await {
@@ -705,9 +705,19 @@ fn render_plan(state: &State) -> String {
 
     let overdue = state.schedule.tasks.iter().filter(|t| t.overdue).count();
     let blocked = state.schedule.tasks.iter().filter(|t| t.blocked).count();
+    // Leaves only, because `late` rolls up: a summary carries it from its
+    // children, and counting both would report one overrun once for every
+    // ancestor standing over it. The per-row marks below deliberately do
+    // keep it on the summary — that is what makes a branch say so.
+    let late = state
+        .schedule
+        .tasks
+        .iter()
+        .filter(|t| t.late && !t.summary)
+        .count();
     let _ = writeln!(
         out,
-        "{} on the critical path, {overdue} overdue, {blocked} blocked.\n",
+        "{} on the critical path, {late} behind, {overdue} overdue, {blocked} blocked.\n",
         state.schedule.critical_path.len()
     );
 
@@ -732,6 +742,13 @@ fn render_plan(state: &State) -> String {
         }
         if sched.overdue {
             marks.push("overdue");
+        }
+        // Distinct from `overdue` and worth both words: that one means
+        // the plan overruns a date somebody promised, this one means the
+        // work is behind now. A reader asking "what has slipped" wants
+        // this one, and until it existed the answer was not in here.
+        if sched.late {
+            marks.push("behind");
         }
         if sched.summary {
             marks.push("summary");

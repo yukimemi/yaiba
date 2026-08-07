@@ -27,7 +27,25 @@ pub struct Scheduled {
     /// At least one predecessor is not `done` yet.
     pub blocked: bool,
     /// The computed finish lands after the declared due date.
+    ///
+    /// Both operands are planned dates, so this says "the plan breaks a
+    /// date somebody typed in" — and says nothing at all about a task
+    /// with no `due`. For "this work is behind *now*", see `late`.
     pub overdue: bool,
+    /// Still open, and its computed finish is already in the past.
+    ///
+    /// The other half of `overdue`, and the ordinary case: the date has
+    /// gone by and the box is still unchecked. Measured against `today`
+    /// — the only flag here that is, which is what makes it the one that
+    /// moves when `:asof` does — and it needs no `due`, so it is the
+    /// signal most rows are eligible for.
+    ///
+    /// A summary is late when anything inside it is, the way `blocked`
+    /// rolls up. Its own span is the union of its children's, so an
+    /// overrun leaf can sit well inside a parent that still ends in the
+    /// future, and without the roll-up a folded parent would hide the
+    /// only row that would have said so.
+    pub late: bool,
     /// Depth in the work breakdown: 0 for a root (a "project"), 1 for
     /// its children, and so on. This is what the UI indents by and what
     /// fold levels count — **not** the dependency chain length.
@@ -558,6 +576,30 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
         })
         .collect();
 
+    // Behind schedule *now*, which is the question `overdue` cannot ask:
+    // it compares two planned dates, so a task with no `due` can never
+    // trip it and the reference date is not part of the comparison at
+    // all. The ordinary case — the finish has gone by and the box is
+    // still unchecked — was the one nothing on screen said (#134).
+    //
+    // Leaves only here. A summary has no dates of its own worth the name
+    // — the forward pass never gave it any, and the roll-up below is
+    // where it gets a span at all — so its `late` comes from its
+    // children a few lines down, the way `blocked` does.
+    //
+    // `today` rather than the wall clock, so `:asof` moves this with the
+    // rest of the view: asked about last month, a task finishing next
+    // week is not late, and reading a plan as it stood then is the whole
+    // point of that command.
+    let mut late: HashMap<TaskId, bool> = tasks
+        .iter()
+        .map(|task| {
+            let leaf = children.get(&task.id).filter(|k| !k.is_empty()).is_none();
+            let end = ef.get(&task.id).copied().unwrap_or(project_start);
+            (task.id, leaf && task.status != Status::Done && end < today)
+        })
+        .collect();
+
     // Roll summaries up, deepest first, so every child is resolved by
     // the time its parent is reached.
     let mut deepest_first: Vec<&Task> = tasks.iter().collect();
@@ -596,6 +638,14 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
         if any_blocked {
             blocked.insert(task.id, true);
         }
+        // And late the same way, for the reason on the field: the union
+        // span can end in the future while a child inside it overran
+        // weeks ago, and a folded parent must not be the thing that
+        // hides it.
+        let any_late = kids.iter().any(|k| late.get(k).copied().unwrap_or(false));
+        if any_late {
+            late.insert(task.id, true);
+        }
     }
 
     let project_end = ef.values().copied().max().unwrap_or(project_start);
@@ -615,6 +665,7 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
                 critical: slack_days <= 0,
                 blocked: blocked.get(&task.id).copied().unwrap_or(false),
                 overdue: task.due.is_some_and(|due| due < end),
+                late: late.get(&task.id).copied().unwrap_or(false),
                 level: level.get(&task.id).copied().unwrap_or(0),
                 summary: kids > 0,
                 progress: progress.get(&task.id).copied().unwrap_or(0),
@@ -894,6 +945,71 @@ mod tests {
         tasks[0].due = Some(day(3));
         let s = schedule(&tasks, &[], day(1));
         assert!(find(&s, 1).overdue);
+    }
+
+    #[test]
+    fn late_flag_is_an_unfinished_task_whose_end_has_passed() {
+        // The ordinary case, and the one nothing on screen used to say:
+        // no `due` anywhere here, so `overdue` cannot answer it.
+        let tasks = vec![task(1, 2, Some(day(1)))];
+
+        let s = schedule(&tasks, &[], day(10));
+        assert!(
+            find(&s, 1).late,
+            "finished on the 2nd, still open on the 10th"
+        );
+        assert!(!find(&s, 1).overdue, "and nobody ever typed a due date");
+
+        let s = schedule(&tasks, &[], day(2));
+        assert!(
+            !find(&s, 1).late,
+            "the last day of the work is not late yet"
+        );
+    }
+
+    #[test]
+    fn a_done_task_is_never_late() {
+        let mut tasks = vec![task(1, 2, Some(day(1)))];
+        tasks[0].status = Status::Done;
+        let s = schedule(&tasks, &[], day(10));
+        assert!(!find(&s, 1).late);
+    }
+
+    #[test]
+    fn a_summary_is_late_when_anything_inside_it_is() {
+        // The child overran a week ago; the parent's span runs to the
+        // end of the *other* child, which is still in the future. Without
+        // the roll-up, folding the parent hides the only row that says
+        // anything is wrong.
+        let mut tasks = vec![
+            task(1, 1, None),
+            task(2, 2, Some(day(1))),
+            task(3, 5, Some(day(20))),
+        ];
+        tasks[1].parent = Some(id(1));
+        tasks[2].parent = Some(id(1));
+
+        let s = schedule(&tasks, &[], day(10));
+        assert!(find(&s, 2).late, "the leaf that overran");
+        assert!(!find(&s, 3).late, "the one that has not started");
+        assert!(find(&s, 1).late, "so the summary says so too");
+        assert!(
+            find(&s, 1).end > day(10),
+            "even though it ends in the future"
+        );
+
+        tasks[1].status = Status::Done;
+        let s = schedule(&tasks, &[], day(10));
+        assert!(!find(&s, 1).late, "and stops when the work is finished");
+    }
+
+    #[test]
+    fn late_moves_with_the_reference_date() {
+        // The one flag here measured against `today`, so `:asof` carries
+        // it: read last month, work finishing next week is not late.
+        let tasks = vec![task(1, 2, Some(day(20)))];
+        assert!(!find(&schedule(&tasks, &[], day(1)), 1).late);
+        assert!(find(&schedule(&tasks, &[], day(28)), 1).late);
     }
 
     #[test]
