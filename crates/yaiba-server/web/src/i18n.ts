@@ -65,6 +65,11 @@ const JA: Record<string, string> = {
   level: "階層",
   filter: "絞込",
   overdue: "遅延",
+  // 未了 rather than a second 遅延: both readouts can be up at once, and
+  // two of them spelled the same would read as one number printed
+  // twice. 遅延 is the plan overrunning a date that was promised; this
+  // one is the date having gone by with the box still unchecked.
+  late: "未了",
   now: "現在",
   "◐ neon": "◐ ネオン",
   "◑ office": "◑ オフィス",

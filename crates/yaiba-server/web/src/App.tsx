@@ -3526,6 +3526,16 @@ export function App() {
               task.status !== "done" && bySchedule.get(task.id)?.overdue,
           ).length
         }
+        lateCount={
+          // Leaves only, because `late` rolls up: counting summaries as
+          // well would report one overrun once for every ancestor
+          // standing over it. And no status test beside it — unlike
+          // `overdue`, the flag is already false for a done task.
+          data.tasks.filter((task) => {
+            const sched = bySchedule.get(task.id);
+            return sched?.late && !sched.summary;
+          }).length
+        }
         nodeId={data.node_id}
         filter={filter}
         projectEnd={data.schedule.end}

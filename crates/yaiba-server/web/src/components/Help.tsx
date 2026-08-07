@@ -159,7 +159,7 @@ const groups = (): Group[] => [
       [":dep ⟨n⟩", t("wait for row n")],
       [":dep ⟨n⟩ +0", t("…and may start the same day")],
       [":undep ⟨n⟩", t("cut that dependency")],
-      [":f ⟨q⟩", "tag:dev, @yuki / owner:yuki, unassigned, open, crit"],
+      [":f ⟨q⟩", "tag:dev, @yuki / owner:yuki, unassigned, open, crit, late"],
       [":sort ⟨k⟩", "manual, due, prio, start, title, owner"],
       [":zoom ⟨z⟩", "day, week, month"],
       [":split ⟨n⟩", t("the list's percent of the width")],

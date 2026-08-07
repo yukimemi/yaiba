@@ -71,6 +71,7 @@ const scheduled: Scheduled[] = ROWS.map((r) => ({
   critical: false,
   blocked: false,
   overdue: false,
+  late: false,
   level: r.level,
   summary: r.summary,
   progress: 0,

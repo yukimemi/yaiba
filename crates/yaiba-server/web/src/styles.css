@@ -650,6 +650,43 @@ body::after {
   color: var(--ash);
 }
 
+/* Behind schedule, drawn on the title rather than on the due badge
+   alone. That badge is five characters at the right edge of the row and
+   a task with no due date never draws one at all, which is how the
+   ordinary case — the finish has gone by and the box is still unchecked
+   — managed to be invisible (#134).
+
+   Amber for both, and no third hue: `overdue` (the plan breaks a date
+   somebody promised) and `late` (this work is behind *now*) are two
+   readings of the same trouble, and the palette at the top of this file
+   is already spent. They are told apart by weight, which is what is
+   left — `late` is the one that has already happened, so `late` is the
+   one that glows.
+
+   After `--done` and `--blocked` so it wins on a row that is both, and
+   taken back by `--done` just below. Single class each, later wins:
+   the same discipline the date columns needed. */
+.row--overdue .row__title,
+.row--late .row__title {
+  color: var(--rust);
+}
+
+.row--late .row__title {
+  text-shadow: 0 0 calc(10px * var(--glow)) rgba(251, 191, 36, 0.4);
+}
+
+/* A finished row keeps neither, the same call
+   `.gantt__bar--overdue:not(.gantt__bar--done)` already makes: the
+   stroke and the grey say "done", and an amber title over them would be
+   the row arguing with itself. `late` is never true for a done task
+   anyway — this is what happens to the `overdue` one, whose plan did
+   overrun and is worth recording rather than alarming over. */
+.row--done.row--overdue .row__title,
+.row--done.row--late .row__title {
+  color: var(--ash);
+  text-shadow: none;
+}
+
 /* No hue of its own, on purpose. The palette at the top of this file is
    spent on things that mean trouble — cyan for structure, magenta for
    the critical path, amber for overdue — and an owner is not one of
@@ -1676,14 +1713,29 @@ button.row__date:focus-visible {
   border-style: none;
 }
 
-.gantt__bar--overdue {
+/* The two ways a bar is behind share every rule from here down, and
+   that is the decision rather than an economy: `overdue` and `late` are
+   one trouble read at two moments, the palette has no third hue to
+   spend on the difference (see the note at the top of this file), and a
+   bar is a span — it has nowhere to put a distinction the list does not
+   already make. The row's title is where they are told apart, by the
+   glow on `--late`.
+
+   Written as selector lists rather than a second block because the
+   combinations below — critical, summary, done, office mode — are
+   already four rules deep, and a parallel set would be four more to
+   keep in step. `--late` never coexists with `--done` (a finished task
+   is not behind), so it simply never reaches those exceptions. */
+.gantt__bar--overdue,
+.gantt__bar--late {
   border-color: var(--rust);
 }
 
 /* The full signal — tint, glow, an amber fill — is only for work still
    open. A done bar that ran late keeps the amber border as a record,
    but lighting it up would cry alarm over something already finished. */
-.gantt__bar--overdue:not(.gantt__bar--done) {
+.gantt__bar--overdue:not(.gantt__bar--done),
+.gantt__bar--late:not(.gantt__bar--done) {
   background: rgba(251, 191, 36, 0.14);
   box-shadow: 0 0 calc(12px * var(--glow)) rgba(251, 191, 36, 0.28);
 }
@@ -1702,7 +1754,8 @@ button.row__date:focus-visible {
   background: rgba(52, 211, 153, 0.3);
 }
 
-.gantt__bar--overdue:not(.gantt__bar--done) .gantt__fill {
+.gantt__bar--overdue:not(.gantt__bar--done) .gantt__fill,
+.gantt__bar--late:not(.gantt__bar--done) .gantt__fill {
   background: rgba(251, 191, 36, 0.34);
 }
 
@@ -1711,12 +1764,15 @@ button.row__date:focus-visible {
    so the border keeps carrying overdue and the body stays magenta —
    letting either rule win outright would hide one of the two things the
    bar has to say. */
-.gantt__bar--critical.gantt__bar--overdue:not(.gantt__bar--done) {
+.gantt__bar--critical.gantt__bar--overdue:not(.gantt__bar--done),
+.gantt__bar--critical.gantt__bar--late:not(.gantt__bar--done) {
   background: rgba(244, 114, 182, 0.14);
   box-shadow: 0 0 calc(12px * var(--glow)) rgba(244, 114, 182, 0.28);
 }
 
 .gantt__bar--critical.gantt__bar--overdue:not(.gantt__bar--done)
+  .gantt__fill,
+.gantt__bar--critical.gantt__bar--late:not(.gantt__bar--done)
   .gantt__fill {
   background: rgba(244, 114, 182, 0.34);
 }
@@ -1725,7 +1781,8 @@ button.row__date:focus-visible {
    summary's dates are its children's, so the tint-and-glow treatment
    above would only blur the one bar that is drawn as a marker rather
    than a span. The border still goes amber for overdue. */
-.gantt__bar--summary.gantt__bar--critical.gantt__bar--overdue {
+.gantt__bar--summary.gantt__bar--critical.gantt__bar--overdue,
+.gantt__bar--summary.gantt__bar--critical.gantt__bar--late {
   background: var(--blood);
   box-shadow: none;
 }
@@ -1741,12 +1798,17 @@ button.row__date:focus-visible {
    and paint the combo bar amber here, the same collision the compound
    rule exists to prevent. */
 :root[data-theme="light"]
-  .gantt__bar--overdue:not(.gantt__bar--done):not(.gantt__bar--critical) {
+  .gantt__bar--overdue:not(.gantt__bar--done):not(.gantt__bar--critical),
+:root[data-theme="light"]
+  .gantt__bar--late:not(.gantt__bar--done):not(.gantt__bar--critical) {
   background: rgba(251, 191, 36, 0.45);
 }
 
 :root[data-theme="light"]
   .gantt__bar--overdue:not(.gantt__bar--done):not(.gantt__bar--critical)
+  .gantt__fill,
+:root[data-theme="light"]
+  .gantt__bar--late:not(.gantt__bar--done):not(.gantt__bar--critical)
   .gantt__fill {
   background: rgba(251, 191, 36, 0.6);
 }

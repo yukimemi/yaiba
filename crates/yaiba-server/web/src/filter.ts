@@ -33,6 +33,7 @@ const STATUS_ORDER = { doing: 0, todo: 1, done: 2 } as const;
  *   `crit`         on the critical path
  *   `blocked`      waiting on an unfinished predecessor
  *   `overdue`      projected to finish past its due date
+ *   `late`         still open and its computed finish has already gone by
  *   `-<term>`      negates any of the above, or a text match
  *   anything else  case-insensitive substring of the title
  */
@@ -81,6 +82,12 @@ function matchTerm(
   if (term === "crit") return scheduled?.critical ?? false;
   if (term === "blocked") return scheduled?.blocked ?? false;
   if (term === "overdue") return scheduled?.overdue ?? false;
+  // Two terms rather than one that means both: `overdue` asks whether
+  // the plan breaks a date that was promised, `late` whether the work is
+  // behind now. A row can be either without being the other, and a
+  // filter that conflated them could not answer "what have we actually
+  // let slip" without also listing every plan that overruns next month.
+  if (term === "late") return scheduled?.late ?? false;
   return (
     task.title.toLowerCase().includes(term) ||
     task.notes.toLowerCase().includes(term) ||

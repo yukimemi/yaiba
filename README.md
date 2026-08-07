@@ -370,7 +370,10 @@ waiting on unfinished work should not stop saying so just because the
 scheduler placed it conveniently.
 
 Commands take dates the way you'd say them: `:due tom`, `:due mon`,
-`:due +3d`, `:due 8/14`. Filters compose: `:f tag:dev open crit`.
+`:due +3d`, `:due 8/14`. Filters compose: `:f tag:dev open crit`, and
+`:f late` is the one that answers "what has actually slipped" — every
+row whose finish has gone by with the box still unchecked, due date or
+no due date.
 
 `tab` completes on the `:` line, wildmenu and all: the command name
 first, then that command's own vocabulary — `:sort` its keys, `:tag` the
@@ -776,8 +779,18 @@ only the difference crosses the wire.
 Bar positions come from a forward pass over the dependency DAG (earliest
 start, honouring any pinned start date) and a backward pass (latest
 start, hence slack). Zero slack means critical path — drawn in magenta.
-Blocked, overdue and level are derived the same way, so they can't drift
-from the graph they describe.
+Blocked, overdue, late and level are derived the same way, so they can't
+drift from the graph they describe.
+
+The last two answer different questions and a plan usually has more of
+the second. **Overdue** is the plan overrunning a date somebody typed:
+it needs a due date, and it compares two *planned* dates. **Late** is
+the ordinary case — the computed finish has gone by and the box is
+still unchecked — so it needs no due date at all, it is measured
+against the reference date and moves with `:asof`, and a summary is
+late whenever anything inside it is, which is what keeps a folded
+branch from hiding it. Both draw amber, on the row's title and on its
+bar; `:f late` filters to them and the HUD counts them beside `crit`.
 
 Cycles are rejected when you create them, but the renderer still
 tolerates one: two peers can independently add edges that only close a

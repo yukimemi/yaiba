@@ -354,6 +354,15 @@ export function TaskList({
               isCursor && "row--cursor",
               rowSelected && spanAllCols && "row--selected",
               sched?.blocked && "row--blocked",
+              // The two ways a row is behind, as classes rather than as a
+              // colour on the due badge alone — that badge is five
+              // characters at the right edge of the row, and a task with
+              // no `due` never draws one at all, so the ordinary case had
+              // nothing to colour (#134). `late` is listed second because
+              // the stylesheet lets the later rule win where a row is
+              // both: "already behind" is the more urgent of the two.
+              sched?.overdue && "row--overdue",
+              sched?.late && "row--late",
               flashes.has(task.id) && `row--${flashes.get(task.id)}`,
               searchTerm &&
                 task.title.toLowerCase().includes(searchTerm.toLowerCase()) &&

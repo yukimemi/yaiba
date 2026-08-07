@@ -199,6 +199,7 @@ const FILTER_WORDS = [
   "crit",
   "blocked",
   "overdue",
+  "late",
   "unassigned",
   "status:todo",
   "status:doing",
