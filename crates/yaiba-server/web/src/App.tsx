@@ -3178,13 +3178,23 @@ export function App() {
         }
         break;
       case "zF":
-        // `keep`, unlike `:all` below: `zF` is "come back out of the
-        // focus", so with no focus to leave there is nothing for it to
-        // say about the folds. Unfolding here would open a plan somebody
-        // had hand-folded, which is this bug again by another door.
-        stepFocus("out", "keep");
-        setFocus(null);
-        say(t("showing everything"));
+        // Nothing at all when there is no focus to leave, message
+        // included: `zF` is "come back out", and answering a key that
+        // had nothing to do with a claim about the whole plan is how the
+        // old `say` came to be wrong. `keep` still matters underneath —
+        // a focus saved by a version before this one has no memory
+        // beside it, and unfolding *that* would be this bug arriving by
+        // another door.
+        if (focus) {
+          stepFocus("out", "keep");
+          setFocus(null);
+          // Not "showing everything", which is `:all`'s line and was
+          // this one's until the folds started coming back with it: what
+          // returns is the view you had, which may be folded to one row
+          // per project. The focus is what was lifted, and that is what
+          // this says.
+          say(t("back out of the focus"));
+        }
         break;
 
       // ---- the breakdown itself
