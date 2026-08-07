@@ -316,6 +316,7 @@ collapse a whole project, and one gantt spans all of them.
 zM              every project on one screen, each showing its own roll-up
 zr              open one level — the phases inside each project
 zf              zoom into just this subtree
+zF              back out to the folds you had before it
 :level 2        jump straight to an altitude
 ```
 

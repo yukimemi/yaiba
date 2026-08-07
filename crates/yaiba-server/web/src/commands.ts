@@ -899,14 +899,21 @@ export function runCommand(
     }
 
     // ---- the work breakdown ---------------------------------------
+    //
+    // Neither of these sends a `foldLevel` beside the focus, and that is
+    // the fix rather than an omission: focusing already opens the
+    // subtree, unfocusing puts back what it displaced (`focusStep` in
+    // `filter.ts`), and the `foldLevel: null` that used to ride along
+    // was what spent the folds on the way in and unfolded the whole plan
+    // on the way out (#135).
     case "only":
       if (!current) return { error: t("no task under the cursor") };
       return {
-        ui: { focus: current.id, foldLevel: null },
+        ui: { focus: current.id },
         message: t("focused “{title}” — :all to come back", { title: current.title }),
       };
     case "all":
-      return { ui: { focus: null, foldLevel: null }, message: t("showing everything") };
+      return { ui: { focus: null }, message: t("showing everything") };
     case "level":
     case "lv": {
       if (!arg) return { ui: { foldLevel: null }, message: t("all levels") };

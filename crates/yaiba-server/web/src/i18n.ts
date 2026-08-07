@@ -193,6 +193,9 @@ const JA: Record<string, string> = {
   "filter cleared": "絞込を解除しました",
   "sorted by {k}": "{k} 順に並べ替えました",
   "showing everything": "すべて表示しています",
+  // `zF` の方。`:all` と違って畳みは元に戻るだけなので「すべて表示」
+  // とは言えない — 解除したのはフォーカスだ、という言い方にしている。
+  "back out of the focus": "フォーカスを解除しました",
   "all levels": "すべての階層",
   "level {n}": "階層 {n}",
   "focused “{title}” — :all to come back":

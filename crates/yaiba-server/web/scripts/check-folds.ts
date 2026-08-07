@@ -16,7 +16,13 @@
  * whose name says what depending on it in CI would be worth.
  */
 
-import { collapsedForDepth, foldStep, visibleTasks } from "../src/filter.ts";
+import {
+  collapsedForDepth,
+  focusStep,
+  foldStep,
+  visibleTasks,
+  type FoldView,
+} from "../src/filter.ts";
 import type { Scheduled, Task } from "../src/types.ts";
 
 interface Row {
@@ -199,6 +205,72 @@ check("h at the top level does nothing", step("close", "A", new Set(["A"])), "-"
 const before = new Set(["A1"]);
 foldStep("close", rowOf("A1a"), before);
 check("foldStep does not mutate what it is given", [...before].join(","), "A1");
+
+// ---- what `zf` borrows and `zF` gives back (#135) -------------------
+//
+// The bug was that `zf` spent the fold state instead of borrowing it,
+// and — because `collapsed` is persisted — spent the copy on disk too.
+// Everything here is one `focusStep` chain, because the loss only shows
+// up as a *pair*: dropping the folds on the way in is correct, and is
+// indistinguishable from the bug until something comes back out.
+
+/** `<collapsed> | <foldLevel> | <what a focus is holding>`. */
+function view(v: FoldView): string {
+  const saved = v.saved
+    ? `${v.saved.collapsed.slice().sort().join(",") || "-"}@${v.saved.foldLevel}`
+    : "-";
+  return `${[...v.collapsed].sort().join(",") || "-"} | ${v.foldLevel} | ${saved}`;
+}
+
+/** A plan folded to its projects by `zM`, which is what `zf` displaces. */
+const folded: FoldView = { collapsed: zM, foldLevel: 0, saved: null };
+
+const focused = focusStep("in", folded);
+check("zf opens the subtree fully", view(focused), "- | null | A,A1,B,B1@0");
+check("zF puts the folds back", view(focusStep("out", focused)), "A,A1,B,B1 | 0 | -");
+
+// The rule that keeps one `zF` enough: a second `zf` from inside a focus
+// must not overwrite the memory with the empty set the first one just
+// installed, or coming back out restores nothing.
+const deeper = focusStep("in", focused);
+check("a second zf keeps the first one's memory", view(deeper), "- | null | A,A1,B,B1@0");
+check("and one zF still comes all the way back", view(focusStep("out", deeper)), "A,A1,B,B1 | 0 | -");
+
+// Folding *inside* a focus is view state for the focus, not something to
+// carry back out with it — `zF` restores, it does not merge.
+const insideFocus: FoldView = { ...focused, collapsed: new Set(["A1"]) };
+check("folds made inside a focus do not survive zF", view(focusStep("out", insideFocus)), "A,A1,B,B1 | 0 | -");
+
+// With nothing to put back, the two ways out want opposite things — and
+// the wrong one is the bug arriving by another door, since a `zF` that
+// unfolded would take a hand-folded plan apart with no focus in sight.
+check(
+  ":all with nothing remembered shows everything",
+  view(focusStep("out", folded, "unfold")),
+  "- | null | -",
+);
+check(
+  "zF with nothing remembered leaves the folds alone",
+  view(focusStep("out", folded, "keep")),
+  "A,A1,B,B1 | 0 | -",
+);
+// And where there *is* something to put back the two agree, which is
+// what keeps `zF` and `:all` the same key in two spellings.
+check(
+  "the fallback does not reach a focus that borrowed",
+  view(focusStep("out", focused, "keep")),
+  view(focusStep("out", focused, "unfold")),
+);
+
+// Same argument as `foldStep` above: the handler sets state from the
+// result, so a set carried through by reference would make React skip
+// the render — and a `saved.collapsed` aliasing the live set would go on
+// changing after the snapshot was taken.
+const live = new Set(["A"]);
+const borrowed = focusStep("in", { collapsed: live, foldLevel: 2, saved: null });
+live.add("B");
+check("the snapshot is a copy, not a view of the live set", borrowed.saved!.collapsed.join(","), "A");
+check("focusStep does not mutate what it is given", [...live].sort().join(","), "A,B");
 
 if (failures) {
   console.error(`\nfolds: ${failures} check(s) failed`);
