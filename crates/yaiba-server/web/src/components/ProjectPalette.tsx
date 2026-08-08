@@ -9,11 +9,23 @@ interface Props {
   onCreate: (name: string) => void;
   onRename: (from: string, to: string) => void;
   onForget: (name: string) => void;
+  /** Cut the *active* project loose from its peers. Always confirmed. */
+  onLeave: () => void;
   onClose: () => void;
   /** The last action that failed, or null. Shown next to the prompt. */
   error: string | null;
   /** Called when the user moves on, so a stale failure stops shouting. */
   onDismissError: () => void;
+  /**
+   * What the palette opens *in*, for a caller that already knows.
+   *
+   * `:leave` is the one that needs it: the command names the action, so
+   * dropping the user into the filter list would ask them to find the
+   * project they are already on and then say `leave` a second time. Read
+   * once, at mount — the palette owns its mode from then on, and a prop
+   * that kept re-seeding it would fight every `esc` back to the filter.
+   */
+  initialMode?: Mode;
 }
 
 /**
@@ -23,11 +35,19 @@ interface Props {
  * one-line input, and the list stays on screen behind every one, so you
  * can still see what you are acting on.
  */
-type Mode =
+export type Mode =
   | { kind: "filter" }
   | { kind: "rename"; from: string }
-  /** Forget reads as destructive even though it isn't, so it asks first. */
-  | { kind: "confirm"; target: string };
+  /**
+   * The two that ask before they act, told apart by their verb.
+   *
+   * `forget` reads as destructive even though it isn't — the database
+   * stays. `leave` reads as harmless and isn't: it cuts every replica
+   * holding the project's ticket, the user's own machines included, and
+   * there is no way back without a ticket from whoever they left. So
+   * they ask for opposite reasons, and the question has to say which.
+   */
+  | { kind: "confirm"; verb: "forget" | "leave"; target: string };
 
 /**
  * Score a subsequence match, or return null when `query` isn't one.
@@ -64,11 +84,13 @@ export function ProjectPalette({
   onCreate,
   onRename,
   onForget,
+  onLeave,
   onClose,
   error,
   onDismissError,
+  initialMode,
 }: Props) {
-  const [mode, setMode] = useState<Mode>({ kind: "filter" });
+  const [mode, setMode] = useState<Mode>(initialMode ?? { kind: "filter" });
   const [query, setQuery] = useState("");
   // Start on the project you are looking at, not on row 0. An empty query
   // scores every project the same, so the list arrives in server order and
@@ -142,7 +164,8 @@ export function ProjectPalette({
       return;
     }
     if (mode.kind === "confirm") {
-      onForget(mode.target);
+      if (mode.verb === "leave") onLeave();
+      else onForget(mode.target);
       return;
     }
     if (creatable) {
@@ -177,7 +200,7 @@ export function ProjectPalette({
     } else if (e.ctrlKey && key === "r" && current) {
       startRename(current.name);
     } else if (e.ctrlKey && key === "d" && current) {
-      setMode({ kind: "confirm", target: current.name });
+      setMode({ kind: "confirm", verb: "forget", target: current.name });
     } else {
       return;
     }
@@ -186,7 +209,11 @@ export function ProjectPalette({
   };
 
   const sigil =
-    mode.kind === "rename" ? "rename" : mode.kind === "confirm" ? "forget" : ":proj";
+    mode.kind === "rename"
+      ? "rename"
+      : mode.kind === "confirm"
+        ? mode.verb
+        : ":proj";
 
   // The sigil above stays as typed — `rename` and `forget` are the
   // words `:proj` takes, and the panel is showing you which one you are
@@ -208,8 +235,13 @@ export function ProjectPalette({
           <span className="palette__sigil">{sigil}</span>
           {mode.kind === "confirm" ? (
             <span className="palette__ask">
-              {t("forget")} <strong>{mode.target}</strong>
-              {t("? it leaves the list — the database stays on disk")}
+              {mode.verb === "leave" ? t("leave the group") : t("forget")}{" "}
+              <strong>{mode.target}</strong>
+              {mode.verb === "leave"
+                ? t(
+                    "? its ticket changes, so every replica holding the old one is cut off — your other machines too",
+                  )
+                : t("? it leaves the list — the database stays on disk")}
             </span>
           ) : (
             <input
@@ -308,7 +340,11 @@ export function ProjectPalette({
                       onMouseDown={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        setMode({ kind: "confirm", target: project.name });
+                        setMode({
+                          kind: "confirm",
+                          verb: "forget",
+                          target: project.name,
+                        });
                       }}
                     >
                       {t("forget")}
@@ -343,7 +379,10 @@ export function ProjectPalette({
             t(
               "enter rename · esc back — the database keeps the name it was made with",
             )}
-          {mode.kind === "confirm" && t("enter forget · esc back")}
+          {mode.kind === "confirm" &&
+            (mode.verb === "leave"
+              ? t("enter leave · esc back")
+              : t("enter forget · esc back"))}
           {mode.kind === "filter" &&
             (creatable
               ? t("enter creates it · esc cancel")

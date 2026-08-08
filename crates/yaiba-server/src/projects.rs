@@ -175,6 +175,21 @@ impl Registry {
         names
     }
 
+    /// Stop calling a project `(joined)`. Returns whether anything changed.
+    ///
+    /// `joined_from` is the ticket a project was adopted from, and it is
+    /// what the picker's `(joined)` marker reads. Once you have left, that
+    /// ticket names a room this replica is no longer in — keeping it would
+    /// have `yaiba list` claim a membership that has been given up, and
+    /// hand out a ticket that resolves to nobody. The tasks it brought are
+    /// yours to keep either way; the label is about the group, not them.
+    pub fn clear_joined_from(&mut self, db: &Path) -> bool {
+        match self.file.projects.iter_mut().find(|p| same_path(&p.db, db)) {
+            Some(project) => project.joined_from.take().is_some(),
+            None => false,
+        }
+    }
+
     /// Record that `db` is open, and return the name it is filed under.
     ///
     /// Identity is the database path, not the name: opening the same file
@@ -623,6 +638,36 @@ mod tests {
             Some("tick.et")
         );
         assert!(reloaded.find("work").unwrap().last_opened.is_some());
+    }
+
+    /// The asymmetry that made leaving need its own call, and the reason
+    /// it is right: `remember` sets `joined_from` and never clears it, so
+    /// merely re-opening a joined project cannot lose the label. Which
+    /// also means nothing in the open path will take it off after a
+    /// leave — both callers of `SyncNode::leave` have to say so.
+    #[test]
+    fn reopening_a_joined_project_keeps_its_ticket_but_leaving_clears_it() {
+        let mut reg = empty();
+        let db = Path::new("/tmp/joined.db");
+        reg.remember(db, Some("theirs"), Some("tick.et")).unwrap();
+
+        reg.remember(db, None, None).unwrap();
+        assert_eq!(
+            reg.find("theirs").unwrap().joined_from.as_deref(),
+            Some("tick.et"),
+            "opening it again is not leaving it"
+        );
+
+        assert!(reg.clear_joined_from(db), "it reports the change");
+        assert!(reg.find("theirs").unwrap().joined_from.is_none());
+        assert!(
+            !reg.clear_joined_from(db),
+            "and reports that a second call changed nothing"
+        );
+        assert!(
+            !reg.clear_joined_from(Path::new("/tmp/nowhere.db")),
+            "nor invents an entry for a database it has never heard of"
+        );
     }
 
     #[test]

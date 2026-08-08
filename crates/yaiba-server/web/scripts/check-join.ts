@@ -59,6 +59,7 @@ function run(line: string): string {
   if (r.project?.create) parts.push(`project.create=${r.project.create}`);
   if (r.project?.switch) parts.push(`project.switch=${r.project.switch}`);
   if (r.project?.pick) parts.push("project.pick");
+  if (r.peer?.leave) parts.push("peer.leave");
   return parts.length ? parts.join(" | ") : "nothing";
 }
 
@@ -113,5 +114,39 @@ check(
   "true",
 );
 
-console.log(`${ran - failures}/${ran} join/merge checks passed`);
+// ---- and the way back out ---------------------------------------------
+
+// `:leave` is the third of the set and the only one that names nobody —
+// you leave whoever you are with. It must reach neither of the other two:
+// routed to `merge` it would want a ticket, routed to `join` it would
+// make a project.
+
+check("':leave' cuts the peers", run("leave"), "peer.leave");
+
+check(
+  ":leave takes no argument, and says so rather than guessing",
+  run("leave abc.def"),
+  "error: usage: :leave  (it takes no argument)",
+);
+
+check(
+  ":leave never reaches merge or join",
+  String(
+    runCommand("leave", ctx)?.peer?.merge ??
+      runCommand("leave", ctx)?.project?.join ??
+      "none",
+  ),
+  "none",
+);
+
+// All three are distinct commands over one ticket-shaped world, so the
+// cheapest way for them to break is to collapse into each other.
+{
+  const seen = new Set(
+    ["join x.y", "merge x.y", "leave"].map((line) => run(line)),
+  );
+  check("the three stay three", String(seen.size), "3");
+}
+
+console.log(`${ran - failures}/${ran} join/merge/leave checks passed`);
 if (failures) process.exit(1);

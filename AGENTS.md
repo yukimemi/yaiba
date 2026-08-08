@@ -916,6 +916,41 @@ protocol would still ship every row of it.
   mapped onto either, because it *did* the merge (so routing it to
   `merge` preserves the accident) and people reached for it wanting
   `join` (so routing it there changes what a working command does).
+- **`leave` is the way back out, and it has to be both halves.**
+  `SyncNode::leave` forgets the peers *and* mints a room. Dropping the
+  peers alone stops this replica dialling out and nothing else — the
+  others still hold this endpoint's id and the room, and `serve` files a
+  peer that presents the room the moment it arrives, so the next inbound
+  sync would put the whole group back. The test does not check that we
+  stopped dialling; it makes the peer dial *us*, which is the direction a
+  half-done leave quietly restores.
+- **Giving up the room and admitting a peer are one critical section.**
+  `serve` runs on its own spawned task, so a `leave` that swapped the
+  in-memory room *after* its store write left a window where an inbound
+  peer passed `room_matches` against the old room and filed itself after
+  the clear — on disk as well as in memory, so a restart loaded it back.
+  Both take the store lock around the whole decision now. That fixes the
+  ordering to store → room/peers everywhere, which is why `sync_with`
+  binds the room to its own `let` before building `Hello`: inline in the
+  struct, the temporary guard lived to the end of the statement and held
+  room across `with_store`, the one inversion that could deadlock.
+  The two disk writes are one transaction for the same reason a grain
+  coarser — a crash between them is the half-done leave on disk.
+- **Leaving moves the ticket, and that is the surprise worth saying out
+  loud.** A ticket is the endpoint and the room together, so a new room
+  cuts off every replica holding the old one — the user's own second
+  laptop included. The secret key is deliberately kept, so the replica
+  stays itself and its history is untouched. What no version of this can
+  do is take anything back: whatever synced is on their disk for good,
+  and a message implying otherwise would be a lie about a CRDT.
+- **It runs through the server rather than as a side-door write.**
+  Clearing the peers and minting a room needs no endpoint at all, so a
+  standalone `yaiba leave` writing straight to the database is the
+  tempting shape — and it is a second writer against a running yaiba,
+  which holds the room and the peer set in memory as well as on disk, so
+  the next thing to touch either would undo it. Same one-writer rule
+  `mcp` follows, for the same reason; `Target::leave` carries it through
+  startup.
 - **`:join` in the UI is the safe one now, and that became possible
   rather than being an oversight.** It was the flag's behaviour because
   one server held one database. `AppState` holds every project with its

@@ -269,6 +269,10 @@ const JA: Record<string, string> = {
     "同期は無効です — --no-sync で起動しています",
   "ticket copied · {ticket}": "チケットをコピーしました · {ticket}",
   "merged · {n} peer(s)": "統合しました · ピア {n}",
+  "left · {n} peer(s) cut · new ticket, share it to pair up again":
+    "離脱しました · ピア {n} を切断 · チケットが変わったので、組み直すには配り直してください",
+  "left · there was nobody to cut · new ticket":
+    "離脱しました · 切断する相手はいませんでした · チケットが変わりました",
   "joined · {name}": "参加しました · {name}",
 
   // ---- undo labels, which the two lines above quote ---------------
@@ -314,6 +318,7 @@ const JA: Record<string, string> = {
     "使い方: :level <0以上>（引数なしですべて表示）",
   "usage: :join <ticket>": "使い方: :join <チケット>",
   "usage: :merge <ticket>": "使い方: :merge <チケット>",
+  "usage: :leave  (it takes no argument)": "使い方: :leave（引数はありません）",
   "usage: :proj {verb} ⟨name⟩": "使い方: :proj {verb} ⟨名前⟩",
   "not a command: {name}  (try :help)":
     "コマンドではありません: {name}（:help を参照）",
@@ -345,6 +350,9 @@ const JA: Record<string, string> = {
     "入力で絞り込み、存在しない名前ならそのまま作成",
   "? it leaves the list — the database stays on disk":
     " を一覧から外しますか？ データベースはディスクに残ります",
+  "leave the group": "グループから離脱",
+  "? its ticket changes, so every replica holding the old one is cut off — your other machines too":
+    " のチケットが変わります。古いチケットを持つ複製はすべて切断されます — 自分の他の端末も含めて。よろしいですか？",
   current: "現在",
   "no sync": "同期なし",
   "1 peer": "ピア 1",
@@ -356,6 +364,7 @@ const JA: Record<string, string> = {
   "enter rename · esc back — the database keeps the name it was made with":
     "enter 改名 · esc 戻る — データベース名は作成時のままです",
   "enter forget · esc back": "enter 実行 · esc 戻る",
+  "enter leave · esc back": "enter で離脱 · esc 戻る",
   "enter creates it · esc cancel": "enter で作成 · esc 取消",
   "^n / ^p move · enter switch · ^r rename · ^d forget · esc cancel":
     "^n / ^p 移動 · enter 切替 · ^r 改名 · ^d 一覧から外す · esc 取消",
@@ -569,6 +578,8 @@ const JA: Record<string, string> = {
     "相手のタスクを独立したプロジェクトとして開く",
   "mix both task sets together (not undoable)":
     "両方のタスクを混ぜて1つにする（取り消せません）",
+  "cut this project loose from its peers":
+    "このプロジェクトをピアから切り離す",
   "pick one — click the name in the bar too":
     "選ぶ — 上部バーの名前をクリックしても開きます",
   "switch straight to it": "そのまま切り替える",

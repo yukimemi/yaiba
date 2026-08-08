@@ -346,6 +346,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/deps/{from}/{to}", axum::routing::delete(remove_dep))
         .route("/api/peers", get(get_peers))
         .route("/api/peers/merge", post(merge_peer))
+        .route("/api/peers/leave", post(leave_peers))
         .route("/api/ui", get(get_ui).put(put_ui))
         .route("/api/projects", get(get_projects).post(switch_project))
         .route("/api/projects/new", post(create_project))
@@ -810,6 +811,66 @@ async fn merge_peer(
     Ok(Json(PeersResponse {
         ticket: Some(sync.ticket().to_string()),
         peers: sync.peer_ids().iter().map(|id| id.to_string()).collect(),
+    }))
+}
+
+#[derive(Serialize)]
+struct LeaveResponse {
+    /// How many peers were dropped, so the answer can say what it cut
+    /// rather than assert that there had been anything to cut.
+    dropped: usize,
+    #[serde(flatten)]
+    peers: PeersResponse,
+}
+
+/// Cut the active project loose: forget its peers, and mint a new room.
+///
+/// The way back out of both [`merge_peer`] and [`join_project`], and until
+/// this there was not one — leaving meant deleting rows from `peers` and
+/// `meta` by hand, which is a lot to ask of somebody who has just worked
+/// out they merged the wrong thing.
+///
+/// Not undoable, and not apologetic about it: the ticket changes, so every
+/// replica holding the old one is cut off — including the user's own other
+/// machines. What it cannot do is take anything back, since whatever
+/// already synced is on the other side's disk for good.
+async fn leave_peers(
+    State(state): State<AppState>,
+) -> std::result::Result<Json<LeaveResponse>, ApiError> {
+    let project = state.active();
+    let Some(sync) = project.sync.clone() else {
+        return Err(ApiError::message(
+            StatusCode::CONFLICT,
+            "this replica was started with --no-sync",
+        ));
+    };
+    let dropped = sync
+        .leave()
+        .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
+
+    // Under the lock, like every other read-modify-write of the file.
+    // Best-effort on purpose: the group has already been left by the time
+    // this runs, so failing the call over a stale label would leave the
+    // two disagreeing in the worse of the two directions — a replica that
+    // is out, reporting itself in.
+    let _registry = state.registry().await;
+    match crate::projects::Registry::load() {
+        Ok(mut registry) => {
+            if registry.clear_joined_from(&project.db)
+                && let Err(e) = registry.save()
+            {
+                tracing::warn!("left the group, but the registry still says joined: {e:#}");
+            }
+        }
+        Err(e) => tracing::warn!("left the group, but the registry could not be read: {e:#}"),
+    }
+
+    Ok(Json(LeaveResponse {
+        dropped,
+        peers: PeersResponse {
+            ticket: Some(sync.ticket().to_string()),
+            peers: sync.peer_ids().iter().map(|id| id.to_string()).collect(),
+        },
     }))
 }
 

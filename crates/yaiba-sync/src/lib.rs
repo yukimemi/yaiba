@@ -299,16 +299,64 @@ impl SyncNode {
         if ticket.endpoint == self.endpoint.id() {
             bail!("that ticket is this replica's own");
         }
+        // Everything under the store lock, in-memory included — see
+        // `leave`, which has the same shape for the same reason and the
+        // longer explanation.
         self.gate.with_store(|db| {
             db.set_meta(META_ROOM, &ticket.room)?;
-            db.upsert_peer(&ticket.endpoint.to_string(), &ticket.to_string(), "")
-        })?;
-        *self.room.lock().unwrap_or_else(|e| e.into_inner()) = ticket.room.clone();
-        self.peers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(ticket.endpoint);
-        Ok(())
+            db.upsert_peer(&ticket.endpoint.to_string(), &ticket.to_string(), "")?;
+            *self.room.lock().unwrap_or_else(|e| e.into_inner()) = ticket.room.clone();
+            self.peers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(ticket.endpoint);
+            Ok(())
+        })
+    }
+
+    /// Leave the group: forget every peer and move to a room of our own.
+    ///
+    /// The mirror of [`SyncNode::join`], and it has to be both halves for
+    /// the same reason that one is. Dropping the peers alone stops this
+    /// replica dialling out and nothing else — the others still hold this
+    /// endpoint's id, they still know the room, and `serve` files a peer
+    /// that presents the room the moment it arrives, so the next inbound
+    /// sync would put the whole group back. Minting a room is what
+    /// actually shuts the door: their dials then fail `room_matches`.
+    ///
+    /// Returns the number of peers dropped, so a caller can say what it
+    /// cut rather than guessing.
+    ///
+    /// The secret key is deliberately kept, so this replica stays the same
+    /// endpoint it was and its history is untouched. The *ticket* still
+    /// changes, because a ticket is the endpoint and the room together —
+    /// which is the point rather than a side effect: everyone holding the
+    /// old one is cut off, including your own other machines. There is no
+    /// undo, and none is possible: re-joining needs a ticket from whoever
+    /// you left.
+    ///
+    /// What it cannot do is take anything back. Whatever already synced is
+    /// on their disk for good.
+    /// All four writes — two on disk, two in memory — happen under the
+    /// store lock, because `serve` decides admission under that same lock.
+    /// Split, an inbound peer arriving mid-leave could pass the room check
+    /// against the *old* in-memory room, insert itself into `peers`, and
+    /// persist itself, all after the clear had run. It would be filed for
+    /// good: `peer_ids` would report a peer this replica has just left,
+    /// and a restart would reload it.
+    ///
+    /// The disk half is one transaction for the same reason at a coarser
+    /// grain — a crash between the two leaves peers cleared and the old
+    /// room stored, which is the half-done leave the group puts itself
+    /// back through.
+    pub fn leave(&self) -> Result<usize> {
+        let room = to_hex(&generate_secret().to_bytes());
+        self.gate.with_store(|db| {
+            let dropped = db.clear_peers_and_set_meta(META_ROOM, &room)?;
+            *self.room.lock().unwrap_or_else(|e| e.into_inner()) = room.clone();
+            self.peers.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            Ok(dropped)
+        })
     }
 
     fn load_peers(&self) -> Result<()> {
@@ -368,8 +416,14 @@ impl SyncNode {
             .with_context(|| format!("could not reach {peer}"))?;
         let (mut send, mut recv) = conn.open_bi().await?;
 
+        // Bound on its own line rather than inline in the struct: a
+        // temporary lives to the end of its statement, so the inline form
+        // held the room guard across `with_store` — room-then-store, the
+        // one ordering that would deadlock against the store-then-room the
+        // admission path and `leave` both take.
+        let room = self.room.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let hello = Hello {
-            room: self.room.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            room,
             vv: self.gate.with_store(|db| db.version_vector())?,
         };
         proto::write_frame(&mut send, &hello).await?;
@@ -436,12 +490,6 @@ impl SyncNode {
             bail!("refused an inbound peer: this node has been shut down");
         }
 
-        let room = self.room.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        if !proto::room_matches(&hello.room, &room) {
-            conn.close(1u32.into(), b"room mismatch");
-            bail!("rejected a peer presenting the wrong room key");
-        }
-
         // An inbound peer that knows the room is a peer worth keeping, so
         // the next sync can be initiated from this side too — and it is
         // filed *before* a single entry is handed over, not after the
@@ -457,16 +505,35 @@ impl SyncNode {
         // one-way for good. Filing them here means the driver's next tick
         // reaches them from this side and the exchange repairs itself,
         // whatever went wrong downstream.
+        //
+        // Checking the room and filing them is *one* step, taken under the
+        // store lock, because `leave` gives up the room under that same
+        // lock. Split, this task — which runs on its own `tokio::spawn` —
+        // could pass the check against a room that a concurrent `leave`
+        // was in the middle of replacing, and then file a peer after the
+        // clear had already run. It would be filed for good, on disk as
+        // well as in memory: `peer_ids` reporting somebody this replica
+        // had just left, and a restart loading them back.
         let id = conn.remote_id();
-        let is_new = self
-            .peers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id);
-        if is_new {
-            let ticket = Ticket { endpoint: id, room };
-            self.gate
-                .with_store(|db| db.upsert_peer(&id.to_string(), &ticket.to_string(), ""))?;
+        let admitted = self.gate.with_store(|db| {
+            let room = self.room.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            if !proto::room_matches(&hello.room, &room) {
+                return Ok(false);
+            }
+            let is_new = self
+                .peers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id);
+            if is_new {
+                let ticket = Ticket { endpoint: id, room };
+                db.upsert_peer(&id.to_string(), &ticket.to_string(), "")?;
+            }
+            Ok(true)
+        })?;
+        if !admitted {
+            conn.close(1u32.into(), b"room mismatch");
+            bail!("rejected a peer presenting the wrong room key");
         }
 
         let offer = Offer {
@@ -894,6 +961,54 @@ mod tests {
         assert!(
             node.peer_ids().is_empty(),
             "nor filed the replica as its own peer"
+        );
+    }
+
+    /// Leaving cuts it in both directions, which is two assertions
+    /// because it took two writes.
+    ///
+    /// The dial-out half is easy to believe and easy to test. The half
+    /// that matters is the second: dropping the peers *alone* would leave
+    /// the door open, since the others still hold this endpoint's id and
+    /// still know the room, and `serve` files whoever presents the room
+    /// the moment they arrive. So the test does not check that we stopped
+    /// dialling — it makes the peer dial *us*, which is the direction a
+    /// half-done leave would quietly restore.
+    #[tokio::test]
+    async fn leaving_shuts_the_door_in_both_directions() {
+        let lookup = MemoryLookup::new();
+        let (host, host_store) = loopback_node(&lookup).await;
+        let (joiner, joiner_store) = loopback_node(&lookup).await;
+
+        joiner.join(&host.ticket()).unwrap();
+        joiner.sync_with(host.endpoint.id()).await.unwrap();
+        assert_eq!(joiner.peer_ids().len(), 1, "joined, so there is one to cut");
+
+        let before = joiner.ticket().room;
+        assert_eq!(joiner.leave().unwrap(), 1, "it reports what it cut");
+
+        assert!(joiner.peer_ids().is_empty(), "nobody left to dial");
+        assert!(
+            joiner_store
+                .lock()
+                .unwrap()
+                .list_peers()
+                .unwrap()
+                .is_empty(),
+            "and none of them survive a restart"
+        );
+        assert_ne!(joiner.ticket().room, before, "the room has to move");
+
+        // The direction that a peers-only leave would leave wide open:
+        // they still know the endpoint and the old room.
+        let after = task_titled(&host_store, "written after they left");
+        assert!(
+            host.sync_with(joiner.endpoint.id()).await.is_err(),
+            "the old room key must no longer open the door"
+        );
+        assert!(
+            joiner_store.lock().unwrap().get_task(after).is_err(),
+            "so nothing of theirs arrives either"
         );
     }
 

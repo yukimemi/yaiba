@@ -204,6 +204,7 @@ const groups = (): Group[] => [
       [":ticket", t("copy this replica's invite")],
       [":join ⟨t⟩", t("open their tasks as a project of its own")],
       [":merge ⟨t⟩", t("mix both task sets together (not undoable)")],
+      [":leave", t("cut this project loose from its peers")],
     ],
   },
   {

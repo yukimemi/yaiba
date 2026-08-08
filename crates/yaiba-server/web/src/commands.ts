@@ -98,7 +98,7 @@ export interface CommandResult {
   error?: string;
   ui?: UiPatch;
   /** Peer-to-peer actions the app performs against /api/peers. */
-  peer?: { merge?: string; showTicket?: boolean };
+  peer?: { merge?: string; leave?: boolean; showTicket?: boolean };
   /** Project actions the app performs against /api/projects. */
   project?: {
     switch?: string;
@@ -270,6 +270,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "ticket", aliases: ["share"] },
   { name: "join" },
   { name: "merge" },
+  { name: "leave" },
   { name: "proj", aliases: ["project"], args: first((ctx) => ctx.projects) },
 ];
 
@@ -969,6 +970,15 @@ export function runCommand(
       if (!arg) return { error: t("usage: :merge <ticket>") };
       return { peer: { merge: arg } };
     }
+    // The way back out of both of those, and it takes no argument
+    // precisely because there is nothing to name: you leave whoever you
+    // are with. It confirms rather than acting, which the other two do
+    // not — they need a ticket somebody handed you, so typing one is
+    // already a deliberate act, where `:leave` is six letters away from
+    // cutting your own laptops off.
+    case "leave":
+      if (arg) return { error: t("usage: :leave  (it takes no argument)") };
+      return { peer: { leave: true } };
 
     // ---- projects ------------------------------------------------
     case "proj":
