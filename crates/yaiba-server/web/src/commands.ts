@@ -98,12 +98,14 @@ export interface CommandResult {
   error?: string;
   ui?: UiPatch;
   /** Peer-to-peer actions the app performs against /api/peers. */
-  peer?: { join?: string; showTicket?: boolean };
+  peer?: { merge?: string; showTicket?: boolean };
   /** Project actions the app performs against /api/projects. */
   project?: {
     switch?: string;
     pick?: boolean;
     create?: string;
+    /** A ticket to open as a project of its own — `:join`. */
+    join?: string;
     rename?: string;
     forget?: string;
   };
@@ -267,6 +269,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "parent" },
   { name: "ticket", aliases: ["share"] },
   { name: "join" },
+  { name: "merge" },
   { name: "proj", aliases: ["project"], args: first((ctx) => ctx.projects) },
 ];
 
@@ -953,9 +956,18 @@ export function runCommand(
     case "ticket":
     case "share":
       return { peer: { showTicket: true } };
+    // Two commands because they were one word for two opposite things,
+    // and the destructive one answered to the shorter, friendlier name.
+    // `:join` is the reading people expect — take their tasks, keep them
+    // apart — and the one that used to be unreachable from here, back
+    // when the server held a single database.
     case "join": {
       if (!arg) return { error: t("usage: :join <ticket>") };
-      return { peer: { join: arg } };
+      return { project: { join: arg } };
+    }
+    case "merge": {
+      if (!arg) return { error: t("usage: :merge <ticket>") };
+      return { peer: { merge: arg } };
     }
 
     // ---- projects ------------------------------------------------

@@ -61,13 +61,20 @@ struct Cli {
     #[arg(long, global = true)]
     no_open: bool,
 
-    /// Merge the *current* project into another replica's group.
+    /// Removed. Parsed only so it can say what to use instead.
     ///
-    /// This is not "open their project": both task sets end up in both
-    /// replicas, and this replica leaves its own sync room for theirs.
-    /// To keep them apart use the `yaiba join <ticket>` subcommand, which
-    /// files the peer as a separate project with its own database.
-    #[arg(long, global = true, value_name = "TICKET")]
+    /// This flag and the `join` subcommand were one word for two opposite
+    /// things — the flag merged your project into theirs, the subcommand
+    /// opened theirs beside yours — and since the merge cannot be undone,
+    /// guessing wrong cost people the separation they had set up. They
+    /// are `merge` and `join` now.
+    ///
+    /// Hidden from `--help`, because there is nothing to recommend about
+    /// it. Still *parsed*, because a flag that simply vanishes gets
+    /// clap's "unexpected argument" — which says nothing about which of
+    /// the two you meant, and this is exactly the flag whose users need
+    /// telling.
+    #[arg(long, global = true, hide = true, value_name = "TICKET")]
     join: Option<String>,
 
     /// Run fully local: no peer-to-peer endpoint is bound at all.
@@ -139,13 +146,31 @@ enum Command {
     /// Join another replica as a *separate* project, and open it.
     ///
     /// The peer's tasks land in a database of their own, so the projects
-    /// you already have are neither changed nor shared with them.
+    /// you already have are neither changed nor shared with them. This is
+    /// the one to reach for; `merge` is the one that mixes two task sets
+    /// together.
     Join {
         /// The ticket they printed on startup, or copied with `:ticket`.
         ticket: String,
         /// File it under this name. Defaults to a name from the ticket.
         #[arg(long = "as", value_name = "NAME")]
         name: Option<String>,
+    },
+
+    /// Merge a project of yours into another replica's group.
+    ///
+    /// The opposite of `join`, and the destructive one: both task sets
+    /// end up in *both* replicas, this project leaves its own sync room
+    /// for theirs, and none of it can be undone. Reach for it only when
+    /// two replicas are meant to become one plan — to work alongside
+    /// someone while keeping your projects apart, use `join`.
+    Merge {
+        /// The ticket they printed on startup, or copied with `:ticket`.
+        ticket: String,
+        /// Merge this project rather than the one that would open by
+        /// default. Names a registered project, as `yaiba list` shows it.
+        #[arg(long, value_name = "NAME")]
+        project: Option<String>,
     },
 
     /// Start a project of your own, and open it.
@@ -217,7 +242,8 @@ struct Target {
 enum Peer {
     /// `join` subcommand: their tasks arrive as this new project.
     Adopt(Ticket),
-    /// `--join` flag: the project being opened moves into their room.
+    /// `merge` subcommand: the project being opened moves into their
+    /// room, and both task sets end up on both sides.
     Merge(Ticket),
 }
 
@@ -437,46 +463,20 @@ async fn main() -> Result<()> {
 
 /// Work out which database to open, and what — if anything — to join.
 fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
-    if cli.join.is_some() {
-        // Both name a peer and they mean opposite things. Checked before
-        // either ticket is parsed, so a conflict reports as a conflict
-        // rather than as whichever ticket happens to be malformed.
-        if matches!(cli.command, Some(Command::Join { .. })) {
-            bail!(
-                "--join and the `join` subcommand both name a peer, and they do \
-                 opposite things; pass only one"
-            );
-        }
-        // `new` builds a project with no peer, so the ticket would be
-        // accepted, warned about, and then quietly dropped. Asking for an
-        // empty project that immediately merges into someone's room is
-        // spelled `yaiba join <ticket> --as <name>` — which does it
-        // properly rather than by accident.
-        if let Some(Command::New { name }) = &cli.command {
-            bail!(
-                "--join has nothing to merge into a project that does not exist yet. \
-                 To take a peer's tasks as a new project, use \
-                 `yaiba join <ticket> --as {name}`"
-            );
-        }
-        if cli.no_sync {
-            bail!("--no-sync and --join ask for opposite things");
-        }
-        // Warn every time. The surprising half is that the merge is
-        // mutual — this replica's tasks are pushed to them too — and no
-        // wording on the flag itself can undo that surprise.
-        tracing::warn!(
-            "--join merges this project with the peer: both task sets end up on both sides, \
-             and this replica leaves its own sync room. Use `yaiba join <ticket>` to open \
-             theirs as a separate project instead."
+    // One word for two opposite things, and the destructive one had the
+    // shorter spelling. Refused rather than mapped onto either: `--join`
+    // *did* the merge, so silently routing it to `merge` would keep the
+    // accident and silently routing it to `join` would change what a
+    // working command does. Only the person typing it knows which they
+    // meant, and after this message they can say so.
+    if let Some(ticket) = &cli.join {
+        bail!(
+            "--join has been split in two, because it and the `join` subcommand \
+             meant opposite things.\n  \
+             yaiba merge {ticket}   — mix both task sets together, in both replicas (not undoable)\n  \
+             yaiba join {ticket}    — open their tasks as a separate project of your own"
         );
     }
-    let legacy_join = cli
-        .join
-        .as_deref()
-        .map(parse_ticket)
-        .transpose()?
-        .map(Peer::Merge);
 
     match &cli.command {
         Some(Command::Join { ticket, name }) => {
@@ -502,6 +502,49 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 db,
                 peer: Some(Peer::Adopt(peer)),
                 name_hint: Some(name),
+            })
+        }
+
+        Some(Command::Merge { ticket, project }) => {
+            if cli.no_sync {
+                bail!("--no-sync and merging into a peer ask for opposite things");
+            }
+            if cli.db.is_some() && project.is_some() {
+                bail!("--db and --project both choose a database; pass only one");
+            }
+            let peer = parse_ticket(ticket)?;
+
+            // Named like `open` does, so "merge that one" and "open that
+            // one" cannot disagree about which project a name means.
+            let db = match (project, &cli.db) {
+                (Some(name), _) => {
+                    let registry = registry_ref(registry)?;
+                    registry
+                        .find(name)
+                        .ok_or_else(|| unknown_project(registry, name))?
+                        .db
+                        .clone()
+                }
+                (None, Some(path)) => path.clone(),
+                (None, None) => Registry::default_db()?,
+            };
+
+            // Said every time, and said before it happens. The half that
+            // surprises people is that it is mutual — their tasks arrive
+            // here *and* this project's tasks are pushed to them — which
+            // no amount of wording on the subcommand itself can convey to
+            // somebody who has already typed it.
+            tracing::warn!(
+                "merging {} into the peer's group: both task sets end up on both sides, \
+                 this replica leaves its own sync room, and none of it can be undone. \
+                 `yaiba join <ticket>` opens theirs as a separate project instead.",
+                db.display()
+            );
+
+            Ok(Target {
+                db,
+                peer: Some(Peer::Merge(peer)),
+                name_hint: None,
             })
         }
 
@@ -534,7 +577,7 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
             };
             Ok(Target {
                 db: project.db.clone(),
-                peer: legacy_join,
+                peer: None,
                 name_hint: None,
             })
         }
@@ -546,7 +589,7 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
             };
             Ok(Target {
                 db,
-                peer: legacy_join,
+                peer: None,
                 name_hint: None,
             })
         }
@@ -664,8 +707,8 @@ fn remember(registry: &mut Result<Registry>, target: &Target) -> Option<String> 
             return None;
         }
     };
-    // Only an adopted project carries a ticket. A `--join` merge did not
-    // come from a peer, so stamping it would make `yaiba list` claim it did.
+    // Only an adopted project carries a ticket. A `merge` did not come
+    // from a peer, so stamping it would make `yaiba list` claim it did.
     let joined_from = target
         .peer
         .as_ref()
@@ -921,11 +964,29 @@ mod tests {
         assert!(resolve_target(&cli, &Registry::load()).is_err());
     }
 
+    /// The old flag is gone, and saying so is the whole of its job now.
+    /// A bare "unexpected argument" would leave somebody holding a ticket
+    /// and two commands that do opposite things with it.
     #[test]
-    fn the_flag_and_the_subcommand_together_are_refused() {
-        let cli = Cli::parse_from(["yaiba", "--join", "a.b", "join", "c.d"]);
-        let err = resolve_target(&cli, &Registry::load()).unwrap_err();
-        assert!(err.to_string().contains("only one"), "{err}");
+    fn the_old_flag_names_both_of_its_replacements() {
+        let cli = Cli::parse_from(["yaiba", "--join", TICKET]);
+        let err = resolve_target(&cli, &Registry::load())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(&format!("yaiba merge {TICKET}")), "{err}");
+        assert!(err.contains(&format!("yaiba join {TICKET}")), "{err}");
+    }
+
+    /// Hidden, but still parsed — the point is the message above, and a
+    /// flag clap does not know about cannot produce one.
+    #[test]
+    fn the_old_flag_is_parsed_and_hidden() {
+        let cmd = Cli::command();
+        let arg = cmd
+            .get_arguments()
+            .find(|a| a.get_id() == "join")
+            .expect("--join still has to parse");
+        assert!(arg.is_hide_set(), "nothing to recommend about it");
     }
 
     /// Regression guard for the reason `relay_only()` exists: hand the
@@ -1048,16 +1109,17 @@ mod tests {
         assert!(open_others(None, &PathBuf::from("elsewhere.db"), false).is_empty());
     }
 
-    /// `new` builds a project with no peer, so a ticket handed to it was
-    /// warned about and then silently dropped — the user asked to join
-    /// someone and got a plain local project.
+    /// `merge` names a project that already exists, so an unknown name is
+    /// a usage error rather than a new database — the trap the old flag
+    /// fell into with `new`, where the ticket was warned about and then
+    /// silently dropped.
     #[test]
-    fn the_flag_and_new_together_are_refused() {
-        let cli = Cli::parse_from(["yaiba", "--join", TICKET, "new", "work"]);
-        let err = resolve_target(&cli, &scratch_registry()).unwrap_err();
-        assert!(err.to_string().contains("nothing to merge"), "{err}");
-        // The message has to name the command that does what they meant.
-        assert!(err.to_string().contains("join <ticket> --as work"), "{err}");
+    fn merging_into_an_unknown_project_is_refused() {
+        let cli = Cli::parse_from(["yaiba", "merge", TICKET, "--project", "nope"]);
+        let err = resolve_target(&cli, &scratch_registry())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("nope"), "{err}");
     }
 
     /// `escape` lands inside "or choose {escape}", so a bare flag name
@@ -1150,15 +1212,19 @@ mod tests {
     }
 
     #[test]
-    fn the_subcommand_adopts_and_the_flag_merges() {
+    fn join_adopts_and_merge_merges() {
         let cli = Cli::parse_from(["yaiba", "join", TICKET, "--as", "work"]);
         let target = resolve_target(&cli, &scratch_registry()).unwrap();
         assert!(matches!(target.peer, Some(Peer::Adopt(_))));
         assert_eq!(target.name_hint.as_deref(), Some("work"));
 
-        let cli = Cli::parse_from(["yaiba", "--db", "mine.db", "--join", TICKET]);
+        let cli = Cli::parse_from(["yaiba", "--db", "mine.db", "merge", TICKET]);
         let target = resolve_target(&cli, &scratch_registry()).unwrap();
         assert!(matches!(target.peer, Some(Peer::Merge(_))));
+        assert!(
+            target.name_hint.is_none(),
+            "a merge joins a project that already exists"
+        );
     }
 
     /// A merge is not an adoption, so it must not leave a ticket on the

@@ -641,7 +641,8 @@ yaiba new private              # start one of your own, and open it
 yaiba list                     # what's registered, most recent first
 yaiba open work                # open one by name
 yaiba open                     # fuzzy-pick one
-yaiba join <ticket> --as work  # join a peer as a new project, and open it
+yaiba join <ticket> --as work  # take a peer's tasks as a new project
+yaiba merge <ticket>           # fuse two replicas into one plan (no undo)
 yaiba forget work              # drop the name; the database stays on disk
 ```
 
@@ -705,19 +706,31 @@ than stopping the launch. If opening everything costs more than it is
 worth — a long registry, a slow disk, a metered link — `--only-active`
 opens just the one project.
 
-### `--join` is not `join`
+### `join` keeps them apart, `merge` mixes them together
 
-The `--join <ticket>` *flag* predates projects and still does what it
-always did: it **merges the project you are opening into the peer's
-group**. Both task sets end up on both sides, and this replica leaves its
-own sync room for theirs. That move has no undo — the old room key is
-overwritten, so anyone holding your previous ticket is dropped on their
-next sync.
+Two things you can do with somebody's ticket, and they are opposites:
 
-The `join` *subcommand* is what you almost always want. The flag stays for
-the case it is actually right for: deliberately fusing two replicas that
-should have been one all along. `:join` in the UI is the flag's
-behaviour, not the subcommand's — one running server has one database.
+```sh
+yaiba join <ticket> --as work   # their tasks, as a project of your own
+yaiba merge <ticket>            # both task sets, in both replicas
+```
+
+**`join` is the one you almost always want.** The peer's tasks land in a
+database of their own, so nothing you already have is changed and nothing
+of yours is shared with them. `:join <ticket>` in the UI does the same,
+without a restart.
+
+**`merge` fuses two replicas into one plan, and it cannot be undone.**
+Both task sets end up on both sides, and this project leaves its own sync
+room for theirs — the old room key is overwritten, so anyone holding your
+previous ticket is dropped on their next sync. It merges whichever
+project would open by default; `--project <name>` picks another.
+`:merge <ticket>` in the UI does the same.
+
+Both were spelled `join` until v0.21 — the `--join` *flag* merged, the
+`join` *subcommand* did not — and since only one of the two can be taken
+back, guessing wrong cost people the separation they had set up. The flag
+now refuses and names both replacements.
 
 ## Letting an agent read and edit the plan
 

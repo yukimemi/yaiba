@@ -871,6 +871,32 @@ mod tests {
         );
     }
 
+    /// `join` fails locally or not at all — it never waits on a peer.
+    ///
+    /// This is the premise its callers rest on. `POST /api/projects/join`
+    /// treats a failure here as fatal and unwinds the project it has just
+    /// created, while letting the *pull* that follows fail quietly, on
+    /// the grounds that only the pull can fail because somebody's laptop
+    /// is shut. If this ever became infallible, or started tolerating a
+    /// self-ticket, that refusal would quietly become unreachable.
+    #[tokio::test]
+    async fn joining_your_own_ticket_is_refused_and_changes_nothing() {
+        let lookup = MemoryLookup::new();
+        let (node, _store) = loopback_node(&lookup).await;
+
+        let before = node.ticket().room;
+        assert!(node.join(&node.ticket()).is_err());
+        assert_eq!(
+            node.ticket().room,
+            before,
+            "a refused join must not have moved the room key"
+        );
+        assert!(
+            node.peer_ids().is_empty(),
+            "nor filed the replica as its own peer"
+        );
+    }
+
     /// Moving the registration earlier must not move it past the only
     /// authorisation the protocol has. A peer that cannot present the
     /// room key is refused, and leaves nothing behind to dial.

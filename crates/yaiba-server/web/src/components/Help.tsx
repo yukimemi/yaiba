@@ -202,7 +202,8 @@ const groups = (): Group[] => [
     title: t("PEERS"),
     keys: [
       [":ticket", t("copy this replica's invite")],
-      [":join ⟨t⟩", t("merge this project with that peer")],
+      [":join ⟨t⟩", t("open their tasks as a project of its own")],
+      [":merge ⟨t⟩", t("mix both task sets together (not undoable)")],
     ],
   },
   {

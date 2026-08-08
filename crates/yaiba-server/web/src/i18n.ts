@@ -98,8 +98,8 @@ const JA: Record<string, string> = {
   "super mode — every effect at maximum (gs)":
     "スーパーモード — 演出を全部いちばん強く (gs)",
   "back to neon mode (gs)": "ネオンモードに戻す (gs)",
-  "node {id} · :ticket to share, :join <ticket> to connect":
-    "ノード {id} · 共有は :ticket、接続は :join <ticket>",
+  "node {id} · :ticket to share, :join <ticket> to open theirs beside yours":
+    "ノード {id} · 共有は :ticket、相手を別プロジェクトで開くのは :join <チケット>",
   "started with --no-sync": "--no-sync で起動しています",
   "{n} projects open — switch, rename, forget (or :proj)":
     "{n} 件を開いています — 切替・改名・一覧から外す (:proj でも)",
@@ -268,7 +268,8 @@ const JA: Record<string, string> = {
   "sync is off — started with --no-sync":
     "同期は無効です — --no-sync で起動しています",
   "ticket copied · {ticket}": "チケットをコピーしました · {ticket}",
-  "joined · {n} peer(s)": "接続しました · ピア {n}",
+  "merged · {n} peer(s)": "統合しました · ピア {n}",
+  "joined · {name}": "参加しました · {name}",
 
   // ---- undo labels, which the two lines above quote ---------------
   "new task": "新規タスク",
@@ -312,6 +313,7 @@ const JA: Record<string, string> = {
   "usage: :level <0 or more>  (:level with no argument shows all)":
     "使い方: :level <0以上>（引数なしですべて表示）",
   "usage: :join <ticket>": "使い方: :join <チケット>",
+  "usage: :merge <ticket>": "使い方: :merge <チケット>",
   "usage: :proj {verb} ⟨name⟩": "使い方: :proj {verb} ⟨名前⟩",
   "not a command: {name}  (try :help)":
     "コマンドではありません: {name}（:help を参照）",
@@ -563,8 +565,10 @@ const JA: Record<string, string> = {
   "clear it — not the planned end": "消去する — 計画の終了日は不可",
   "commit / close": "確定 / 閉じる",
   "copy this replica's invite": "この複製の招待をコピー",
-  "merge this project with that peer":
-    "このプロジェクトを相手のものと統合する",
+  "open their tasks as a project of its own":
+    "相手のタスクを独立したプロジェクトとして開く",
+  "mix both task sets together (not undoable)":
+    "両方のタスクを混ぜて1つにする（取り消せません）",
   "pick one — click the name in the bar too":
     "選ぶ — 上部バーの名前をクリックしても開きます",
   "switch straight to it": "そのまま切り替える",

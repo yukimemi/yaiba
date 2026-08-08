@@ -902,10 +902,28 @@ protocol would still ship every row of it.
   defeated the collision check above until a manual run caught it — the
   unit tests all built their paths the same way, so they agreed with each
   other and with the bug.
-- **`--join` and `join` are different things** and both are correct.
-  The flag merges the current replica into the peer's room (mutual, no
-  undo); the subcommand opens theirs as a separate project. `:join` in
-  the UI is the flag's behaviour — one server, one database.
+- **`join` and `merge` are opposites, and one word used to mean both.**
+  `join` opens the peer's tasks as a project of their own; `merge` puts
+  both task sets in both replicas and leaves this one's sync room, which
+  has no undo. Until v0.21 the second of those was spelled `--join` — a
+  flag, beside a `join` subcommand doing the opposite, plus a `:join` in
+  the UI that was the *flag's* reading. That cost a real separation, and
+  the person it cost had read the docs. The lesson to keep: a
+  destructive operation must not share a name with its safe counterpart,
+  and if it must differ, it should be the destructive one that is longer
+  to type. Every path in and out of `join`/`merge` is now one word for
+  one meaning, and `--join` refuses with both replacements named — never
+  mapped onto either, because it *did* the merge (so routing it to
+  `merge` preserves the accident) and people reached for it wanting
+  `join` (so routing it there changes what a working command does).
+- **`:join` in the UI is the safe one now, and that became possible
+  rather than being an oversight.** It was the flag's behaviour because
+  one server held one database. `AppState` holds every project with its
+  own `SyncNode`, so `POST /api/projects/join` can create a database,
+  register it, bind an endpoint and adopt the ticket without a restart —
+  it is `create_project` plus a ticket, which is why both routes go
+  through one `open_new_project`. When a doc comment explains a UI
+  limitation by a constraint, check the constraint still holds.
 - **A `bool` flag's clap `env` is parsed, not sensed.** `#[arg(long,
   env = "…")]` on a `bool` runs the environment value through clap's
   bool parser, so `=1`, `=0` and `=` (empty) all make yaiba *exit* with
@@ -1075,8 +1093,19 @@ deliberately does not bump `notify`).
   mount-time defaults before `GET /api/ui` answered would turn every
   reload into the reset this exists to fix, and a debounced write armed
   just before a switch would land the outgoing project's state in the
-  incoming one's database — so the gate is closed in `switchTo` *before*
-  the server moves, and re-checked inside the timer callback too.
+  incoming one's database — so the gate is closed *before* the server
+  moves, and re-checked inside the timer callback too.
+- **Every path that changes which database is served closes it, not just
+  `switchTo`.** Create, forget and join all land you on a different
+  project, and all three closed it on the way *back*, inside
+  `adoptProjects` — by which time the server had already moved and a
+  debounce firing mid-request had already written the outgoing project's
+  folds into the incoming one. `landOnProject` is the one place that
+  closes it now, and it exists because the rule was written down for
+  `switchTo` specifically and the three siblings were read as exempt.
+  Note the window is not a formality: `joinProject` pulls from the peer
+  before it answers, so it can be seconds wide. On failure nothing moved,
+  so the gate reopens — after `failProject`, not before it.
 - **A restored focus is validated against the task list.** A peer may
   have deleted its root since the state was saved; showing the subtree of
   a task that no longer exists renders an empty list, which reads as the
