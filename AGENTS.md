@@ -724,6 +724,22 @@ combination cannot be expressed.
   other. Same rule as the tail above — anything that pins itself over
   either pane's rows has to be paid for in the scroll padding, or
   `scrollIntoView` will hide rows behind it.
+- **Following the cursor is two axes, and the panes own one each.**
+  `Gantt` has always chased it horizontally — a bar scheduled months out
+  is otherwise something to go hunting for — and left the vertical to
+  `TaskList`, which is right while the list is mounted, because the two
+  panes mirror `scrollTop` and a second pane scrolling itself would be
+  two answers to one question. In the gantt-only view there is no list
+  to ask, so there was nobody: `G` moved the cursor to the last task and
+  the pane stayed at the top, with the cursor rows below the fold. The
+  vertical follow lives in `Gantt` now behind `if (!onlyPane) return`,
+  which is the same shape as the flashes drawing in both panes — either
+  pane can be the only one on screen, so whatever a row needs has to be
+  reachable from both. It is a `scrollIntoView` rather than arithmetic
+  on `ROW_H` so the head's height stays the stylesheet's to know, and it
+  cannot disturb the horizontal axis: `.gantt__row` is `left: 0;
+  right: 0` over the whole timeline, so it always overlaps the
+  scrollport and `inline: "nearest"` has nothing left to do.
 
 ### The date columns, and the picker over them
 

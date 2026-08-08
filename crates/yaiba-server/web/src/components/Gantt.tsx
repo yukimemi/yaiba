@@ -137,6 +137,33 @@ export function Gantt({
       ? linking.over
       : null;
 
+  /**
+   * The vertical half of the same follow, and the list's job whenever
+   * the list is there to do it.
+   *
+   * Alongside the list the two panes mirror each other's `scrollTop`, so
+   * `TaskList`'s own `scrollIntoView` already carries the bar with the
+   * title — a second pane scrolling itself would be two answers to one
+   * question, arriving in whichever order the effects happened to run.
+   * In the gantt-only view there is no list to ask, which is how `G`
+   * came to move the cursor to the last task and leave the pane sitting
+   * at the top with the cursor eighty rows below the fold.
+   *
+   * `scrollIntoView` rather than arithmetic on `ROW_H`, for the same
+   * reason the hit-testing reads the box out of the DOM: the head's
+   * height is the stylesheet's to know, and `.pane` already spends
+   * `scroll-padding-top` so a row lands below it rather than under it.
+   * The horizontal axis is left alone by it — `.gantt__row` is `left: 0;
+   * right: 0` over the whole timeline, so it always overlaps the
+   * scrollport and `inline: "nearest"` has nothing to do. The effect
+   * above owns that axis.
+   */
+  const cursorRowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!onlyPane) return;
+    cursorRowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [cursor, tasks.length, onlyPane]);
+
   // Follow the cursor horizontally so a task scheduled months out
   // doesn't require hunting for its bar.
   useEffect(() => {
@@ -325,6 +352,7 @@ export function Gantt({
               <div
                 key={task.id}
                 data-task-id={task.id}
+                ref={index === cursor ? cursorRowRef : undefined}
                 className={`gantt__row${index === cursor ? " gantt__row--cursor" : ""}`}
                 style={{ top: index * ROW_H }}
                 onMouseDown={() => onPick(task.id)}
