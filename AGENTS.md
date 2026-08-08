@@ -709,6 +709,21 @@ combination cannot be expressed.
   the target can reach for what CSS cannot equalise — the gantt's
   horizontal scrollbar, which eats into its visible height. Anything
   added below either pane's rows has to be added to both.
+- **`scrollIntoView` cannot see the sticky head, so the panes have to
+  tell it.** `TaskList` keeps the cursor on screen with
+  `scrollIntoView({ block: "nearest" })`, which measures against the
+  scrollport and knows nothing about an element pinned inside it — so a
+  jump *upwards* to a row above the viewport parked it flush against the
+  top edge, with the two rows the header covers left invisible. `G` then
+  `gg` on a long list was the way to see it: `scrollTop` landed on the
+  head's own height rather than 0, and tasks 1 and 2 were simply gone.
+  `.pane` spends `scroll-padding-top: var(--pane-head)` for it, and the
+  head heights are that same variable so the two cannot drift apart. It
+  is on `.pane` rather than `.pane--list` because the gantt mirrors the
+  list's `scrollTop`: a row parked under one head is parked under the
+  other. Same rule as the tail above — anything that pins itself over
+  either pane's rows has to be paid for in the scroll padding, or
+  `scrollIntoView` will hide rows behind it.
 
 ### The date columns, and the picker over them
 

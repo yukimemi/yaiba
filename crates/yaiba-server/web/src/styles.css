@@ -31,6 +31,14 @@
      `.rows` and `.gantt`. */
   --pane-tail: 40vh;
 
+  /* The sticky head both panes wear, two rows tall — the month + day
+     header on the timeline, the summary + column labels on the list.
+     Named because a third place has to agree with it: a pane's
+     `scroll-padding-top`. `scrollIntoView` cannot see a sticky element,
+     so without that padding it parks a row flush against the
+     scrollport's top edge and two rows underneath the header. */
+  --pane-head: calc(var(--row-h) * 2);
+
   --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SFMono-Regular",
     Consolas, "Noto Sans Mono CJK JP", "Yu Gothic UI", monospace;
 
@@ -387,9 +395,20 @@ body::after {
   overflow: hidden;
 }
 
+/* `scroll-padding-top` is what keeps the cursor row out from under the
+   sticky head. `TaskList` puts the row on screen with
+   `scrollIntoView({ block: "nearest" })`, which measures against the
+   scrollport and knows nothing about an element pinned inside it — so a
+   `gg` from the bottom of a long list scrolled row 1 to the very top and
+   left the two rows the header covers invisible. The padding moves the
+   region it scrolls into down past the head. It belongs on `.pane`
+   rather than on `.pane--list`: the gantt mirrors the list's
+   `scrollTop`, so a row parked under one head is parked under the other
+   as well, and either pane can be the only one on screen. */
 .pane {
   min-width: 0;
   overflow: auto;
+  scroll-padding-top: var(--pane-head);
   scrollbar-width: thin;
   scrollbar-color: var(--grid-strong) transparent;
 }
@@ -456,7 +475,7 @@ body::after {
   position: sticky;
   top: 0;
   z-index: 3;
-  height: calc(var(--row-h) * 2);
+  height: var(--pane-head);
   background: var(--panel);
   border-bottom: 1px solid var(--grid-strong);
 }
@@ -1510,7 +1529,7 @@ button.row__date:focus-visible {
   z-index: 3;
   background: var(--panel);
   border-bottom: 1px solid var(--grid-strong);
-  height: calc(var(--row-h) * 2);
+  height: var(--pane-head);
 }
 
 .gantt__month {
