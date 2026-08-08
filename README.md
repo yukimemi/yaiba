@@ -732,6 +732,32 @@ Both were spelled `join` until v0.21 — the `--join` *flag* merged, the
 back, guessing wrong cost people the separation they had set up. The flag
 now refuses and names both replacements.
 
+### `leave` is the way back out
+
+```sh
+yaiba leave [--project <name>]   # forget its peers, move to a room of your own
+```
+
+`:leave` in the UI does the same, and asks first.
+
+It works after either verb. The project forgets its peers and moves to a
+new sync room: it stops dialling them, and anyone still holding the old
+ticket can reach the endpoint but is turned away, because the room no
+longer matches. The tasks stay exactly as they are — **including the ones
+that arrived from the group**, which are yours to keep or to delete now
+that you are out. Delete them *after* leaving; before, the deletions
+replicate.
+
+Two things it does not do:
+
+- **It cannot take back what already reached them.** Their replica is as
+  complete as yours, and nothing here reaches across to remove it.
+  Leaving stops the future, not the past.
+- **It changes this project's ticket**, because a ticket is the endpoint
+  and the room together. So every replica holding the old one is cut off
+  — your own other machines included. Share the new `:ticket` to pair up
+  again.
+
 ## Letting an agent read and edit the plan
 
 `yaiba mcp` serves the plan over [MCP](https://modelcontextprotocol.io),

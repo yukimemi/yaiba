@@ -147,6 +147,27 @@ export const api = {
       { method: "POST", body: JSON.stringify({ ticket }) },
       "/api/peers/merge",
     ),
+  /**
+   * Cut the active project loose: forget its peers, mint a new room.
+   *
+   * Answers with the peer list *and* how many were dropped, because "you
+   * left" and "you left a group of three" are different sentences and
+   * only the server knows which one is true.
+   */
+  leavePeers: () =>
+    fetch("/api/peers/leave", { method: "POST" }).then(async (res) => {
+      if (!res.ok) {
+        let message = `${res.status} ${res.statusText}`;
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body.error) message = body.error;
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new ApiError(message, res.status);
+      }
+      return (await res.json()) as PeersInfo & { dropped: number };
+    }),
   getProjects: () => projectsRequest(),
   /**
    * Point the server at another open project.

@@ -21,7 +21,10 @@ import { DATE_COLUMNS, dateHead, dateLocked, dateValue } from "./dateColumns";
 import { DAY_W, Gantt } from "./components/Gantt";
 import { DatePicker, type Anchor } from "./components/DatePicker";
 import { Help } from "./components/Help";
-import { ProjectPalette } from "./components/ProjectPalette";
+import {
+  ProjectPalette,
+  type Mode as PaletteMode,
+} from "./components/ProjectPalette";
 import { Hud } from "./components/Hud";
 import { OwnerPicker } from "./components/OwnerPicker";
 import { RowMenu, type RowMenuAt } from "./components/RowMenu";
@@ -221,6 +224,16 @@ export function App() {
 
   const [projects, setProjects] = useState<ProjectsInfo>({ projects: [], active: "" });
   const [showProjects, setShowProjects] = useState(false);
+  /**
+   * What the palette opens in, when a command already knows.
+   *
+   * Only `:leave` sets it. Cleared whenever the palette closes, so the
+   * next `:proj` opens on the filter rather than on the question you
+   * escaped out of.
+   */
+  const [paletteMode, setPaletteMode] = useState<PaletteMode | undefined>(
+    undefined,
+  );
   /**
    * The last project action to fail, shown *inside* the palette.
    *
@@ -957,6 +970,37 @@ export function App() {
     landOnProject(api.joinProject(ticket), (info) =>
       t("joined · {name}", { name: info.active }),
     );
+
+  /**
+   * Leave the group the active project is in.
+   *
+   * Not `landOnProject`: the project itself does not change, so the
+   * cursor, folds and filter all still name rows that are there. What
+   * changes is who it syncs with — and `load()` runs because the roster
+   * on screen is now wrong, not because the tasks are.
+   */
+  const leavePeers = () => {
+    setShowProjects(false);
+    setPaletteMode(undefined);
+    void api
+      .leavePeers()
+      .then((info) => {
+        setPeers({ ticket: info.ticket, peers: info.peers });
+        // Says what it cut rather than that it did something. Leaving a
+        // group of nobody is a real outcome — the ticket moved either
+        // way — and a flat "left" would hide which one happened.
+        say(
+          info.dropped
+            ? t("left · {n} peer(s) cut · new ticket, share it to pair up again", {
+                n: info.dropped,
+              })
+            : t("left · there was nobody to cut · new ticket"),
+          "ok",
+        );
+        void load();
+      })
+      .catch((e: Error) => say(e.message, "error"));
+  };
 
   const renameProject = (from: string, to: string) => {
     void api
@@ -3538,6 +3582,16 @@ export function App() {
         .catch((e: Error) => say(e.message, "error"));
     }
     if (result.project?.join) joinProject(result.project.join);
+    if (result.peer?.leave) {
+      // Straight into the question, on the project you are looking at.
+      setProjectError(null);
+      setPaletteMode({
+        kind: "confirm",
+        verb: "leave",
+        target: projects.active,
+      });
+      setShowProjects(true);
+    }
     if (result.project?.pick) {
       // Opens however few projects there are. Switching is only one of the
       // things in here — create, rename and forget all live on the list
@@ -3871,10 +3925,13 @@ export function App() {
           onCreate={createProject}
           onRename={renameProject}
           onForget={forgetProject}
+          onLeave={leavePeers}
+          initialMode={paletteMode}
           error={projectError}
           onDismissError={() => setProjectError(null)}
           onClose={() => {
             setShowProjects(false);
+            setPaletteMode(undefined);
             setProjectError(null);
           }}
         />

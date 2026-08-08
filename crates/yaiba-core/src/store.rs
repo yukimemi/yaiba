@@ -738,6 +738,33 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// Forget every peer and write one meta key, in a single transaction.
+    ///
+    /// The two writes leaving a group is made of, and it is only correct
+    /// as both. Dropping the peers stops this replica dialling out and
+    /// nothing else: a peer that presents the room is filed on arrival, so
+    /// while the old room key is still stored, the next inbound sync puts
+    /// the whole group back. A crash between two separate writes would
+    /// leave exactly that state on disk — which is why this is one
+    /// transaction rather than a caller doing both in order.
+    ///
+    /// Returns how many peers were dropped.
+    ///
+    /// Deliberately not offered as a bare `clear_peers`: on its own that
+    /// is the half-measure above, and a public method for it is an
+    /// invitation to reach for it.
+    pub fn clear_peers_and_set_meta(&mut self, key: &str, value: &str) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let dropped = tx.execute("DELETE FROM peers", [])?;
+        tx.execute(
+            "INSERT INTO meta (k, v) VALUES (?1, ?2)
+             ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+            params![key, value],
+        )?;
+        tx.commit()?;
+        Ok(dropped)
+    }
 }
 
 /// Insert or overwrite one entry, keeping the higher HLC. Returns

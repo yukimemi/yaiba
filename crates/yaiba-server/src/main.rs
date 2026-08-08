@@ -173,6 +173,27 @@ enum Command {
         project: Option<String>,
     },
 
+    /// Leave the group a project is in, and go back to syncing with
+    /// nobody.
+    ///
+    /// The way out of both `join` and `merge`: the project's peers are
+    /// forgotten and it moves to a room of its own. Its tasks are
+    /// untouched — including the ones that arrived from the group, which
+    /// are yours to keep or delete once you are out. Delete them *after*
+    /// leaving; before, the deletions replicate.
+    ///
+    /// Two things it does not do. It cannot take back what already
+    /// reached them, since their replica is as complete as yours. And it
+    /// changes this project's ticket, so *every* replica holding the old
+    /// one is cut off — your own other machines included. Share the new
+    /// ticket to pair up again.
+    Leave {
+        /// Leave this project rather than the one that would open by
+        /// default. Names a registered project, as `yaiba list` shows it.
+        #[arg(long, value_name = "NAME")]
+        project: Option<String>,
+    },
+
     /// Start a project of your own, and open it.
     ///
     /// For keeping things apart that should be apart — a backlog you
@@ -232,6 +253,15 @@ struct Target {
     /// Name to file a *new* database under. An already-registered
     /// database keeps the name it has.
     name_hint: Option<String>,
+    /// Cut this project loose once the endpoint is up.
+    ///
+    /// Runs through the server rather than editing the database from a
+    /// second process, even though clearing the peers and minting a room
+    /// needs no endpoint at all. A running yaiba holds the room and the
+    /// peer set in memory as well as on disk, so a side-door write would
+    /// be undone by the next thing that touched either — the same
+    /// one-writer rule `mcp` follows for the same reason.
+    leave: bool,
 }
 
 /// Why a ticket is being joined. `SyncNode::join` does the same thing
@@ -389,6 +419,40 @@ async fn main() -> Result<()> {
         }
 
         if let Some(sync) = &projects[0].sync {
+            if target.leave {
+                let dropped = sync.leave().context("could not leave the group")?;
+
+                // The label has to come off too, and it will not come off
+                // by itself: `remember` above only ever *sets*
+                // `joined_from`, so a project adopted from a ticket keeps
+                // saying `(joined)` in `yaiba list` and in the picker
+                // until something clears it. Left alone it would name a
+                // room this replica has just walked out of — and hand out
+                // a ticket that now resolves to nobody.
+                //
+                // Best-effort, and after the leave rather than before:
+                // the group is already gone by here, so failing the whole
+                // command over a stale label would leave the two
+                // disagreeing in the worse direction — out, but reporting
+                // itself in.
+                if let Ok(registry) = &mut registry
+                    && registry.clear_joined_from(&target.db)
+                    && let Err(e) = registry.save()
+                {
+                    tracing::warn!("left the group, but the registry still says joined: {e:#}");
+                }
+
+                // Said rather than logged quietly, because the surprising
+                // half is what it did to *other* machines: the ticket has
+                // moved, so anything holding the old one — including the
+                // user's own second laptop — is out until they are handed
+                // the new one.
+                tracing::info!(
+                    "left the group: {dropped} peer(s) dropped, and this project has a new \
+                     ticket. Anyone holding the old one is cut off; share the new one to \
+                     pair up again. Nothing already synced to them has been taken back."
+                );
+            }
             if let Some(peer) = &target.peer {
                 sync.join(peer.ticket())
                     .context("could not join the peer from that ticket")?;
@@ -502,6 +566,7 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 db,
                 peer: Some(Peer::Adopt(peer)),
                 name_hint: Some(name),
+                leave: false,
             })
         }
 
@@ -545,6 +610,52 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 db,
                 peer: Some(Peer::Merge(peer)),
                 name_hint: None,
+                leave: false,
+            })
+        }
+
+        Some(Command::Leave { project }) => {
+            if cli.no_sync {
+                bail!(
+                    "--no-sync and leaving a group ask for opposite things: leaving writes to \
+                     the project through its replication, and --no-sync starts none"
+                );
+            }
+            if cli.db.is_some() && project.is_some() {
+                bail!("--db and --project both choose a database; pass only one");
+            }
+            // Resolved exactly as `merge` resolves it, so "leave that one"
+            // and "merge that one" cannot disagree about which project a
+            // name means.
+            let db = match (project, &cli.db) {
+                (Some(name), _) => {
+                    let registry = registry_ref(registry)?;
+                    registry
+                        .find(name)
+                        .ok_or_else(|| unknown_project(registry, name))?
+                        .db
+                        .clone()
+                }
+                (None, Some(path)) => path.clone(),
+                (None, None) => Registry::default_db()?,
+            };
+
+            // Before it happens, like `merge`'s. The half people do not
+            // expect is not that they stop syncing — they asked for that —
+            // it is that the ticket moves, so their *own* other machines
+            // go with the peers.
+            tracing::warn!(
+                "leaving the group {} is in: its peers are forgotten and it moves to a room \
+                 of its own, so every replica holding its current ticket is cut off — your \
+                 other machines too. Nothing already synced to them is taken back.",
+                db.display()
+            );
+
+            Ok(Target {
+                db,
+                peer: None,
+                name_hint: None,
+                leave: true,
             })
         }
 
@@ -561,6 +672,7 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 db,
                 peer: None,
                 name_hint: Some(name),
+                leave: false,
             })
         }
 
@@ -579,6 +691,7 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 db: project.db.clone(),
                 peer: None,
                 name_hint: None,
+                leave: false,
             })
         }
 
@@ -591,6 +704,7 @@ fn resolve_target(cli: &Cli, registry: &Result<Registry>) -> Result<Target> {
                 db,
                 peer: None,
                 name_hint: None,
+                leave: false,
             })
         }
     }
@@ -1225,6 +1339,40 @@ mod tests {
             target.name_hint.is_none(),
             "a merge joins a project that already exists"
         );
+    }
+
+    /// `leave` names no peer, which is the whole of what makes it the way
+    /// back out — every other path here needs a ticket from somebody.
+    #[test]
+    fn leave_names_a_project_and_no_peer() {
+        let cli = Cli::parse_from(["yaiba", "--db", "mine.db", "leave"]);
+        let target = resolve_target(&cli, &scratch_registry()).unwrap();
+        assert!(target.leave);
+        assert!(
+            target.peer.is_none(),
+            "there is nobody to dial on the way out"
+        );
+        assert!(target.name_hint.is_none(), "and no project to invent");
+        assert_eq!(target.db, PathBuf::from("mine.db"));
+    }
+
+    /// Resolved the same way `merge` resolves it: "leave that one" and
+    /// "merge that one" must not disagree about which project a name is.
+    #[test]
+    fn leaving_an_unknown_project_is_refused() {
+        let cli = Cli::parse_from(["yaiba", "leave", "--project", "nope"]);
+        let err = resolve_target(&cli, &scratch_registry())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("nope"), "{err}");
+    }
+
+    /// Leaving is a write, and `--no-sync` starts nothing to write it
+    /// with — so the pair would silently do nothing at all.
+    #[test]
+    fn leaving_with_no_sync_is_refused() {
+        let cli = Cli::parse_from(["yaiba", "--no-sync", "leave"]);
+        assert!(resolve_target(&cli, &scratch_registry()).is_err());
     }
 
     /// A merge is not an adoption, so it must not leave a ticket on the
