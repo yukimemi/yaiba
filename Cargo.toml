@@ -62,7 +62,7 @@ rustls-pki-types    = "1.15.1"
 schemars            = "1.2.2"
 serde               = { version = "1.0.229", features = ["derive"] }
 serde_json          = "1.0.151"
-thiserror           = "2.0.19"
+thiserror           = "2.0.20"
 tokio               = { version = "1.53.1", features = ["full"] }
 # Dev-only: `ServiceExt::oneshot`, for driving handlers without a socket.
 tower               = { version = "0.5.3", features = ["util"] }
