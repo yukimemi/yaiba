@@ -361,9 +361,10 @@ export function Hud({
         data-live={peerCount > 0}
         title={
           syncOn
-            ? t("node {id} · :ticket to share, :join <ticket> to connect", {
-                id: nodeId,
-              })
+            ? t(
+                "node {id} · :ticket to share, :join <ticket> to open theirs beside yours",
+                { id: nodeId },
+              )
             : t("started with --no-sync")
         }
       >

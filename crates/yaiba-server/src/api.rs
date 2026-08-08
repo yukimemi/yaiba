@@ -344,10 +344,12 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/deps", post(add_dep))
         .route("/api/deps/{from}/{to}", axum::routing::delete(remove_dep))
-        .route("/api/peers", get(get_peers).post(join_peer))
+        .route("/api/peers", get(get_peers))
+        .route("/api/peers/merge", post(merge_peer))
         .route("/api/ui", get(get_ui).put(put_ui))
         .route("/api/projects", get(get_projects).post(switch_project))
         .route("/api/projects/new", post(create_project))
+        .route("/api/projects/join", post(join_project))
         .route(
             "/api/projects/{name}",
             axum::routing::delete(forget_project).patch(rename_project),
@@ -396,23 +398,71 @@ struct SwitchRequest {
     name: String,
 }
 
-/// Start a project and open it, without restarting.
-///
-/// Goes through the same registry rules the CLI's `yaiba new` does — a
-/// name already registered, a name whose slug lands on another project's
-/// database, a database left behind by an earlier `forget` — because a
-/// second way in must not be a way around them.
+/// Start a project of your own and open it, without restarting.
 async fn create_project(
     State(state): State<AppState>,
     Json(req): Json<SwitchRequest>,
+) -> ApiResult<Json<ProjectsResponse>> {
+    open_new_project(&state, &req.name, None).await
+}
+
+#[derive(Deserialize)]
+struct JoinProjectRequest {
+    ticket: String,
+    /// File it under this name. Defaults to a name from the ticket, the
+    /// same way `yaiba join` without `--as` does.
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Take a peer's tasks as a *separate* project, and open it.
+///
+/// The UI's counterpart to `yaiba join <ticket>`, and the reason `:join`
+/// there is no longer the merge: this used to be impossible from a
+/// running server, because one process held one database. It holds every
+/// project now, each with its own [`SyncNode`], so the safe reading of
+/// "join" is reachable from the UI — and it is the one people expect.
+///
+/// [`SyncNode`]: yaiba_sync::SyncNode
+async fn join_project(
+    State(state): State<AppState>,
+    Json(req): Json<JoinProjectRequest>,
+) -> ApiResult<Json<ProjectsResponse>> {
+    // Parsed before anything is created, as the CLI does: a mistyped
+    // ticket should not cost a database and a registry entry.
+    let ticket: yaiba_sync::Ticket =
+        req.ticket.trim().parse().map_err(|e: anyhow::Error| {
+            ApiError::message(StatusCode::BAD_REQUEST, format!("{e:#}"))
+        })?;
+    let name = match &req.name {
+        Some(given) => given.clone(),
+        None => crate::projects::name_from_ticket(req.ticket.trim()),
+    };
+    open_new_project(&state, &name, Some(ticket)).await
+}
+
+/// Create a database, register it, open it, and — given a ticket — join
+/// its replica to that peer.
+///
+/// Goes through the same registry rules the CLI's `yaiba new` and
+/// `yaiba join` do — a name already registered, a name whose slug lands
+/// on another project's database, a database left behind by an earlier
+/// `forget` — because a second way in must not be a way around them. For
+/// the same reason there is one function behind both HTTP routes: "start
+/// a project" and "start a project holding someone else's tasks" differ
+/// by a ticket and nothing else.
+async fn open_new_project(
+    state: &AppState,
+    requested: &str,
+    ticket: Option<yaiba_sync::Ticket>,
 ) -> ApiResult<Json<ProjectsResponse>> {
     // Held across the whole check-create-insert, which spans an await.
     // Two requests for the same name would otherwise both pass the checks
     // and the loser would 409 having already left a database, a registry
     // entry and a sync task behind.
-    let _registry = state.registry().await;
+    let registry_guard = state.registry().await;
 
-    let name = crate::projects::validate_name(&req.name)
+    let name = crate::projects::validate_name(requested)
         .map_err(|e| ApiError::message(StatusCode::BAD_REQUEST, e.to_string()))?
         .to_string();
 
@@ -442,7 +492,11 @@ async fn create_project(
     // Register before replicating, for the reason `main` does: the project
     // exists the moment its database does, and an endpoint that fails to
     // bind must not cost the name.
-    if let Err(e) = registry.remember(&db, Some(&name), None) {
+    //
+    // Only an adopted project carries a ticket, matching what `yaiba list`
+    // means by `(joined)` — a project started here came from nobody.
+    let joined_from = ticket.as_ref().map(ToString::to_string);
+    if let Err(e) = registry.remember(&db, Some(&name), joined_from.as_deref()) {
         tracing::warn!("could not register {name:?}: {e:#}");
     } else if let Err(e) = registry.save() {
         tracing::warn!("could not save the project registry: {e:#}");
@@ -455,6 +509,51 @@ async fn create_project(
             // far better answer than refusing to create it at all.
             Err(e) => tracing::warn!("{name:?} starts without replication: {e:#}"),
         }
+    }
+
+    // Refuse rather than half-deliver: a project asked for by ticket whose
+    // endpoint never bound is an empty database wearing the peer's name,
+    // and it would sit there filling with nothing while looking joined.
+    // Nothing has been inserted yet, so the undo is the same one the
+    // conflict path below performs.
+    if ticket.is_some() && project.sync.is_none() {
+        project.stop_replicating();
+        drop(project);
+        forget_by_db(&db);
+        return Err(ApiError::message(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "cannot join a peer without replication — this server was started with --no-sync, \
+             or its endpoint could not bind",
+        ));
+    }
+
+    // Taken before the move, so the pull below needs no lookup — and so
+    // it cannot accidentally reach a *different* project that claimed the
+    // name in between.
+    let sync = project.sync.clone();
+
+    // Adopting the ticket and pulling from the peer read as one step and
+    // are not one: `join` is a local, synchronous write of the room key
+    // and the peer row, so it fails on a ticket naming this very replica
+    // or on a store error, and *never* on the peer being unreachable.
+    // Fatal, therefore, and fatal here — the registry entry already
+    // carries `joined_from`, so a project that survived this would be
+    // listed `(joined)` and report success having joined nobody, which is
+    // exactly the half-delivery the branch above refuses. Before the
+    // insert, so the undo is the same two lines that branch uses rather
+    // than also having to take the project back out of the open set.
+    //
+    // `merge_peer` and the CLI both treat the identical call as fatal.
+    if let (Some(ticket), Some(sync)) = (ticket.as_ref(), sync.as_ref())
+        && let Err(e) = sync.join(ticket)
+    {
+        project.stop_replicating();
+        drop(project);
+        forget_by_db(&db);
+        return Err(ApiError::message(
+            StatusCode::BAD_REQUEST,
+            format!("could not adopt that ticket: {e:#}"),
+        ));
     }
 
     if let Err(rejected) = state.insert(project) {
@@ -470,7 +569,27 @@ async fn create_project(
             format!("a project named {name:?} is already open"),
         ));
     }
-    Ok(Json(projects_response(&state)))
+
+    // Released before the pull, which is the one await here that waits on
+    // somebody else's machine — up to `EXCHANGE` per peer. What the lock
+    // protects is the check-create-insert above, and all three are done:
+    // the registry file is written and the open set holds the project.
+    // Kept any longer it would stall every other create, rename and forget
+    // on a peer that is merely switched off.
+    drop(registry_guard);
+
+    // The pull is the half that talks to the network, and this is where a
+    // peer that is simply switched off is the ordinary case rather than an
+    // error: the ticket is already stored, the driver retries on its own
+    // timer, and none of that is worth undoing a project over. Run at all
+    // so joining has a visible effect rather than waiting out the first
+    // idle tick, and after the insert so what it merges lands in a project
+    // the server is holding.
+    if let (true, Some(sync)) = (ticket.is_some(), sync) {
+        sync.sync_all().await;
+    }
+
+    Ok(Json(projects_response(state)))
 }
 
 /// Drop whatever registry entry points at `db`.
@@ -658,15 +777,21 @@ async fn get_peers(State(state): State<AppState>) -> Json<PeersResponse> {
 }
 
 #[derive(Deserialize)]
-struct JoinRequest {
+struct MergeRequest {
     ticket: String,
 }
 
-/// Adopt someone else's ticket, then sync immediately so the join has a
-/// visible effect rather than waiting for the next tick.
-async fn join_peer(
+/// Merge the active project into the peer's group, then sync immediately
+/// so it has a visible effect rather than waiting for the next tick.
+///
+/// Mutual and not undoable — both task sets end up in both replicas, and
+/// this project leaves its own sync room. It was called `join` and shared
+/// that name with the CLI subcommand that does the *opposite*; splitting
+/// them is the whole point of this route's name. [`join_project`] is the
+/// other reading, and the one the UI's `:join` now reaches.
+async fn merge_peer(
     State(state): State<AppState>,
-    Json(req): Json<JoinRequest>,
+    Json(req): Json<MergeRequest>,
 ) -> std::result::Result<Json<PeersResponse>, ApiError> {
     let Some(sync) = state.active().sync.clone() else {
         return Err(ApiError::message(
@@ -1164,6 +1289,26 @@ mod handler_tests {
             "PATCH",
             "/api/projects/work",
             Some(r#"{"to":"a/b"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+
+    /// A bad ticket has to be caught before anything is created, the way
+    /// the CLI's `join` catches it: past this point there is a database
+    /// on disk and a registry entry naming it, and the name is then taken
+    /// by a project that never joined anybody.
+    ///
+    /// Reaching a 400 at all is the assertion — this server holds no
+    /// registry lock and no data directory, so any answer other than a
+    /// refusal means the handler went looking for one.
+    #[tokio::test]
+    async fn joining_with_a_malformed_ticket_creates_nothing() {
+        let (status, body) = send(
+            server(&["work"]),
+            "POST",
+            "/api/projects/join",
+            Some(r#"{"ticket":"not-a-ticket"}"#),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");

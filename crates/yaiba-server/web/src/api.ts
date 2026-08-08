@@ -46,8 +46,11 @@ export interface PeersInfo {
   peers: string[];
 }
 
-async function peersRequest(init?: RequestInit): Promise<PeersInfo> {
-  const res = await fetch("/api/peers", {
+async function peersRequest(
+  init?: RequestInit,
+  path = "/api/peers",
+): Promise<PeersInfo> {
+  const res = await fetch(path, {
     ...init,
     headers: init?.body ? { "content-type": "application/json" } : undefined,
   });
@@ -133,9 +136,17 @@ export const api = {
   removeDep: (dep: Dep) =>
     request(`/api/deps/${dep.from}/${dep.to}`, { method: "DELETE" }),
   getPeers: () => peersRequest(),
-  /** Adopt a peer's ticket; the server syncs before answering. */
-  joinPeer: (ticket: string) =>
-    peersRequest({ method: "POST", body: JSON.stringify({ ticket }) }),
+  /**
+   * Merge the active project into that peer's group. Mutual, and not
+   * undoable — see `joinProject` for the reading that keeps them apart.
+   *
+   * The server syncs before answering, so the tasks are already here.
+   */
+  mergePeer: (ticket: string) =>
+    peersRequest(
+      { method: "POST", body: JSON.stringify({ ticket }) },
+      "/api/peers/merge",
+    ),
   getProjects: () => projectsRequest(),
   /**
    * Point the server at another open project.
@@ -156,6 +167,18 @@ export const api = {
     projectsRequest(
       { method: "POST", body: JSON.stringify({ name }) },
       "/api/projects/new",
+    ),
+  /**
+   * Take a peer's tasks as a project of their own, and open it.
+   *
+   * The safe half of what `:join` used to be: nothing you already have is
+   * changed, and nothing of yours is shared with them. The server pulls
+   * before answering, so the project comes back already populated.
+   */
+  joinProject: (ticket: string) =>
+    projectsRequest(
+      { method: "POST", body: JSON.stringify({ ticket }) },
+      "/api/projects/join",
     ),
   /** Rename a project. Only the name moves; its database keeps its path. */
   renameProject: (from: string, to: string) =>

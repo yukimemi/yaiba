@@ -909,12 +909,54 @@ export function App() {
       .then(() => say(note, "ok"));
   };
 
-  const createProject = (name: string) => {
-    void api
-      .createProject(name)
-      .then((info) => adoptProjects(info, `project · ${info.active} (new)`))
-      .catch((e: Error) => failProject(e));
+  /**
+   * Run a project request that lands us on a *different* project.
+   *
+   * The save gate closes before the request goes out, not on the way back
+   * through `adoptProjects`: the server changes which database it serves
+   * while the request is in flight, so a debounce firing in that window
+   * writes the outgoing project's folds and filter into the incoming
+   * project's database — the exact failure `switchTo` closes the gate
+   * early to avoid, and these three paths land you somewhere else just as
+   * surely as it does. The window is widest for `joinProject`, which
+   * pulls from the peer before it answers.
+   *
+   * On a failure nothing moved, so the state in hand still belongs to the
+   * project on screen and may go on being saved. Reconciled first, then
+   * reopened, so a `failProject` that changes the view is not racing the
+   * gate it re-opens.
+   */
+  const landOnProject = (
+    request: Promise<ProjectsInfo>,
+    note: (info: ProjectsInfo) => string,
+  ) => {
+    uiLoadedRef.current = false;
+    void request
+      .then((info) => adoptProjects(info, note(info)))
+      .catch((e: Error) => {
+        failProject(e);
+        uiLoadedRef.current = true;
+      });
   };
+
+  const createProject = (name: string) =>
+    landOnProject(
+      api.createProject(name),
+      (info) => `project · ${info.active} (new)`,
+    );
+
+  /**
+   * Take a peer's tasks as a project of their own, and land on it.
+   *
+   * `adoptProjects` because this *is* a switch — a different project with
+   * different task ids — so the cursor, folds, focus and filter all have
+   * to go, exactly as they do for create. The server has already pulled
+   * by the time this resolves, so the tasks are there to look at.
+   */
+  const joinProject = (ticket: string) =>
+    landOnProject(api.joinProject(ticket), (info) =>
+      t("joined · {name}", { name: info.active }),
+    );
 
   const renameProject = (from: string, to: string) => {
     void api
@@ -931,17 +973,12 @@ export function App() {
       .catch((e: Error) => failProject(e));
   };
 
-  const forgetProject = (name: string) => {
-    void api
-      .forgetProject(name)
-      .then((info) =>
-        adoptProjects(
-          info,
-          `forgot ${name} · database still on disk · now on ${info.active}`,
-        ),
-      )
-      .catch((e: Error) => failProject(e));
-  };
+  const forgetProject = (name: string) =>
+    landOnProject(
+      api.forgetProject(name),
+      (info) =>
+        `forgot ${name} · database still on disk · now on ${info.active}`,
+    );
 
   const say = (text: string, kind: Message["kind"] = "info") =>
     setMessage({ text, kind });
@@ -3490,16 +3527,17 @@ export function App() {
           .catch(() => say(peers.ticket ?? "", "ok"));
       }
     }
-    if (result.peer?.join) {
+    if (result.peer?.merge) {
       void api
-        .joinPeer(result.peer.join)
+        .mergePeer(result.peer.merge)
         .then((info) => {
           setPeers(info);
-          say(t("joined · {n} peer(s)", { n: info.peers.length }), "ok");
+          say(t("merged · {n} peer(s)", { n: info.peers.length }), "ok");
           void load();
         })
         .catch((e: Error) => say(e.message, "error"));
     }
+    if (result.project?.join) joinProject(result.project.join);
     if (result.project?.pick) {
       // Opens however few projects there are. Switching is only one of the
       // things in here — create, rename and forget all live on the list

@@ -221,6 +221,7 @@ bun scripts/check-cells.ts
 bun scripts/check-pin.ts
 bun scripts/check-rowmenu.ts
 bun scripts/check-flash.ts
+bun scripts/check-join.ts
 node node_modules/vite/bin/vite.js build
 '''
 
