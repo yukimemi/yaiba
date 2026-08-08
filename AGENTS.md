@@ -916,6 +916,64 @@ protocol would still ship every row of it.
   that precedent and what clearing a variable means anywhere else. Only
   `YAIBA_UPDATE` can afford clap's `env`: its values are the enum's.
 
+### Neither side of the exchange may slam the door
+
+`sync_with` and `serve` are one round trip — hello, offer, push — and
+both sides used to hang up the moment they had written their last frame.
+That cost the push, every time, in the direction nobody watches.
+
+- **`finish()` is not "sent", and closing is not free.** `finish()` says
+  only that this side will write no more. `conn.close()` puts a
+  CONNECTION_CLOSE on the wire immediately, and a peer still reassembling
+  a stream is entitled to drop it when that frame lands — so the frame
+  written one line earlier never arrives. **Dropping a `Connection` does
+  the same thing**: it closes with code 0, which is how `serve` was doing
+  it without a `close()` call anywhere in it. Both ends had this and each
+  hid the other while the tests were single-sided.
+- **What it looked like from the outside** is the reason it survived a
+  release: the dialler received the offer, so the other replica's edits
+  kept turning up within the 30s tick and sync read as working. Only the
+  push was lost, so the dialler's *own* edits went nowhere — and the 30s
+  retry re-ran the identical exchange rather than repairing anything. The
+  HUD agreed with the wrong side, because `peer_ids()` on a joiner is
+  filled by `join()` from the ticket alone, with no contact of any kind.
+  "1 peer" there means "I wrote their id down".
+- **The waits are deliberately different.** The dialler reads its peer's
+  stream to EOF, because `serve` finishes only after merging the push:
+  the EOF is proof the push was *acted on*, which `stopped()` would not
+  give — it says bytes were acknowledged. The listener uses `stopped()`,
+  because all it needs is its own FIN out of the door. Neither is a wire
+  change, so replicas either side of the upgrade still pair up.
+- **A peer is filed before a single entry is handed over**, right after
+  the room check, not at the end of the exchange. The room key is the
+  whole authorisation and they have just presented it. Filing at the end
+  meant any failure in the tail left this replica having given away its
+  entire dataset to a peer it kept no record of — and with no record it
+  never dials back, so one dropped frame became a permanently one-way
+  pairing instead of something the next tick fixed. `serve` must never
+  register *before* `room_matches`, which is what
+  `a_stranger_is_refused_and_filed_nowhere` is there to hold.
+- **The tests bind loopback only** — `presets::Minimal`,
+  `clear_ip_transports()`, then an explicit `127.0.0.1:0`, with a shared
+  `MemoryLookup` standing in for discovery. That keeps them off CI's
+  network and away from the firewall prompt in the section below, which
+  on the machine this bug was found on cannot be answered at all.
+  `SyncNode::serve_on` exists for that and for nothing else.
+- **Assert both directions from one exchange.** One direction working is
+  exactly what this bug looked like. The tests need no sleep: after the
+  fix, `sync_with` returning *is* the proof the far side merged.
+- **Every wait on a peer needs a ceiling, and the QUIC idle timeout is
+  not one.** A peer whose endpoint driver still answers while its
+  application is wedged — blocked on a slow store write inside `merge` —
+  keeps the connection healthy while never writing the frame this side
+  waits for, so the transport sees nothing wrong. `sync_all` walks its
+  peers *in sequence* and `POST /api/peers` awaits it directly, which
+  makes one unbounded wait the whole replica's problem plus an HTTP
+  request that never answers. `EXCHANGE` bounds one exchange; only the
+  startup pull was bounded before, by `FIRST_SYNC` in the binary. Cheap
+  to abandon: the driver retries every `IDLE_SYNC` and a CRDT exchange
+  is idempotent, so a ceiling costs a delay and never data.
+
 ### The firewall prompt on startup is the sync endpoint's
 
 The HTTP listener defaults to loopback, which no desktop firewall asks
