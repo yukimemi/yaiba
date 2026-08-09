@@ -277,6 +277,10 @@ pub struct UpdateTask {
     pub task: String,
     #[schemars(description = "New title.")]
     pub title: Option<String>,
+    #[schemars(
+        description = "Enclosing task — id, id prefix, or title. Pass \"none\", \"root\", or empty string to move to the top level."
+    )]
+    pub parent: Option<String>,
     #[schemars(description = "todo, doing, or done.")]
     pub status: Option<String>,
     #[schemars(description = "Who it belongs to.")]
@@ -291,6 +295,14 @@ pub struct UpdateTask {
     pub duration_days: Option<i64>,
     #[schemars(description = "Due date, YYYY-MM-DD.")]
     pub due: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct Reorder {
+    #[schemars(
+        description = "Task ids, id prefixes, or titles in the new desired sequence. You may pass all tasks or a subset."
+    )]
+    pub tasks: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -445,7 +457,7 @@ impl Yaiba {
     }
 
     #[tool(
-        description = "Change a task: its title, status, owner, progress, pinned start, duration, or due date. Only the fields you pass are touched."
+        description = "Change a task: its title, parent, status, owner, progress, pinned start, duration, or due date. Only the fields you pass are touched."
     )]
     async fn update_task(&self, Parameters(args): Parameters<UpdateTask>) -> String {
         let state = match self.state().await {
@@ -460,6 +472,20 @@ impl Yaiba {
         let mut body = json!({});
         if let Some(title) = args.title {
             body["title"] = json!(title);
+        }
+        if let Some(parent) = args.parent {
+            if parent.trim().is_empty()
+                || parent.eq_ignore_ascii_case("none")
+                || parent.eq_ignore_ascii_case("root")
+            {
+                body["parent"] = json!(null);
+            } else {
+                let parent_id = match Self::resolve(&state, &parent) {
+                    Ok(id) => id,
+                    Err(e) => return e,
+                };
+                body["parent"] = json!(parent_id);
+            }
         }
         if let Some(status) = args.status {
             let status = status.to_lowercase();
@@ -503,6 +529,36 @@ impl Yaiba {
                 .patch(format!("{}/api/tasks/{id}", self.base))
                 .json(&body),
             &format!("Updated \"{title}\""),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Rewrite the manual ordering of tasks. Pass task ids, id prefixes, or titles in the new desired sequence."
+    )]
+    async fn reorder(&self, Parameters(args): Parameters<Reorder>) -> String {
+        let state = match self.state().await {
+            Ok(state) => state,
+            Err(e) => return format!("{e:#}"),
+        };
+
+        if args.tasks.is_empty() {
+            return "pass at least one task to reorder".to_string();
+        }
+
+        let mut ids = Vec::new();
+        for needle in &args.tasks {
+            match Self::resolve(&state, needle) {
+                Ok(id) => ids.push(id),
+                Err(e) => return e,
+            }
+        }
+
+        self.write(
+            self.http
+                .post(format!("{}/api/tasks/reorder", self.base))
+                .json(&json!({ "ids": ids })),
+            "Reordered tasks",
         )
         .await
     }
@@ -678,6 +734,8 @@ impl ServerHandler for Yaiba {
                    leaves, so linking a task to its own parent is a cycle.\n\
                  - A pinned start is a floor, not an override: a task never \
                    starts before what it waits for has finished.\n\n\
+                  To change manual task order, use `reorder`. To move a task in or out of a parent, \
+                  use `update_task` with `parent` (or pass empty/\"none\"/\"root\" for top level).\n\n\
                  Every write answers with where the plan then stands — its \
                  finish date and critical path. That is the measure of whether \
                  an edit mattered; the task you touched usually is not.",
@@ -955,5 +1013,26 @@ mod tests {
 
         let err = Yaiba::resolve(&state, "nothing like this").unwrap_err();
         assert!(err.contains("no task matches"), "{err}");
+    }
+
+    #[test]
+    fn resolves_multiple_tasks_for_reorder() {
+        let id1 = "019fcc35-aacb-7300-bb59-dbe6f7e323a4";
+        let id2 = "019fcc35-aacb-7301-9c2a-79e7fa68fea9";
+        let state = state(vec![task(id1, "task one"), task(id2, "task two")]);
+
+        let resolved1 = Yaiba::resolve(&state, "task one").unwrap();
+        let resolved2 = Yaiba::resolve(&state, "task two").unwrap();
+        assert_eq!(resolved1, id1);
+        assert_eq!(resolved2, id2);
+    }
+
+    #[test]
+    fn parent_sentinel_values_resolve_or_clear() {
+        let parent_id = "019fcc35-aacb-7300-bb59-dbe6f7e323a4";
+        let state = state(vec![task(parent_id, "parent task")]);
+
+        assert_eq!(Yaiba::resolve(&state, "parent task").unwrap(), parent_id);
+        assert!(Yaiba::resolve(&state, "unknown parent").is_err());
     }
 }
