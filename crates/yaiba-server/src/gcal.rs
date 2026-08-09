@@ -410,6 +410,54 @@ mod tests {
     }
 
     #[test]
+    fn a_copy_carrying_somebody_elses_stamp_is_cleaned_up() {
+        // yaiba never writes this pair — the id is a function of the task
+        // stamped beside it. It is reachable from outside: an event
+        // duplicated in the calendar takes the stamp with it and gets a
+        // fresh id, so its stamp names a task that is very much still in
+        // the plan while its id names nothing.
+        //
+        // Requiring the two to agree before touching an event would read
+        // as the safer rule and would leave this copy on the calendar
+        // forever, unmatched by every future run — the silent skip this
+        // repo argues against wherever a partial result looks like a
+        // whole one. The id is the key Google enforces, so it is the half
+        // the reconcile trusts.
+        let want = event("write it");
+        let copy = RemoteEvent {
+            id: event_id(TaskId::now_v7()),
+            task: Some(want.task),
+            summary: want.summary.clone(),
+            start: want.start,
+            end: want.end,
+        };
+        assert_eq!(
+            reconcile(std::slice::from_ref(&want), std::slice::from_ref(&copy)),
+            vec![Action::Insert(want.clone()), Action::Delete(copy.id)]
+        );
+    }
+
+    #[test]
+    fn an_event_holding_a_wanted_id_is_patched_into_agreement() {
+        // The other half of the same disagreement, and the reason it
+        // costs nothing: whatever the stamp claims, an event sitting on
+        // this id *is* this task's event as far as Google is concerned —
+        // an insert would 409 against it. Patching is the repair.
+        let want = event("write it");
+        let forged = RemoteEvent {
+            id: want.id.clone(),
+            task: Some(TaskId::now_v7()),
+            summary: "something else".to_string(),
+            start: day("2026-09-01"),
+            end: day("2026-09-02"),
+        };
+        assert_eq!(
+            reconcile(std::slice::from_ref(&want), std::slice::from_ref(&forged)),
+            vec![Action::Patch(want)]
+        );
+    }
+
+    #[test]
     fn a_summary_gets_no_event_of_its_own() {
         use yaiba_core::graph::schedule;
         use yaiba_core::model::Dep;
