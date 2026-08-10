@@ -39,7 +39,7 @@ mime_guess          = "2.0.5"
 # Dev-only: generates the throwaway CA that stands in for a proxy's.
 # The test reads DER straight out of it, so the default `pem` feature is
 # dead weight; `ring` is the backend iroh already builds.
-rcgen               = { version = "0.14.8", default-features = false, features = ["ring"] }
+rcgen               = { version = "0.14.9", default-features = false, features = ["ring"] }
 # The MCP server reaches the running yaiba through its own HTTP API rather
 # than opening the database — see the header of `mcp.rs` for why. TLS is
 # dropped because the only host it ever dials is loopback, and reqwest is
