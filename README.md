@@ -866,10 +866,11 @@ the one window you happened to be in.
   it yourself on the Google side and it keeps the name you chose.
 
 `yaiba gcal push` acts on the **active project** — the one `:proj` is
-looking at — and each project gets its own calendar. The credential is
-currently stored per project too, so a second project needs its own
-`yaiba gcal login`; that is [#168](https://github.com/yukimemi/yaiba/issues/168)
-and it is the token's scope that is wrong, not yours for asking.
+looking at — and each project gets its own calendar. You log in once per
+machine, not once per project: the credential is yours, so it lives in
+`credentials.toml` beside the project registry in your data directory,
+while the calendar each project writes to is the project's own business
+and stays with it.
 
 Nothing is read back. Google's events carry no dependencies and no
 breakdown, and a start dragged in a calendar would fight the forward

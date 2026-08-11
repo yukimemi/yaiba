@@ -968,7 +968,10 @@ async fn put_gcal_token(
     let project = state.active();
     {
         let store = lock(&project);
-        crate::gcal::oauth::store(&store, body.refresh_token.trim())?;
+        // The credential now lands in a file rather than the database,
+        // so this reads as an internal failure rather than a domain one.
+        crate::gcal::oauth::store(&store, body.refresh_token.trim())
+            .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
     }
     Ok(Json(serde_json::json!({ "project": project.name })))
 }
@@ -984,12 +987,14 @@ async fn push_gcal(State(state): State<AppState>) -> ApiResult<Json<crate::gcal:
     // put every other request behind Google's rate limiter.
     let (token, calendar, tasks, deps) = {
         let store = lock(&project);
-        let token = crate::gcal::oauth::stored(&store)?.ok_or_else(|| {
-            ApiError::message(
-                StatusCode::PRECONDITION_FAILED,
-                "this project has no Google credential yet — run `yaiba gcal login`",
-            )
-        })?;
+        let token = crate::gcal::oauth::stored(&store)
+            .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?
+            .ok_or_else(|| {
+                ApiError::message(
+                    StatusCode::PRECONDITION_FAILED,
+                    "this project has no Google credential yet — run `yaiba gcal login`",
+                )
+            })?;
         let calendar = store.meta(crate::gcal::oauth::KEY_CALENDAR)?;
         let snapshot = store.snapshot()?;
         (token, calendar, snapshot.tasks, snapshot.deps)

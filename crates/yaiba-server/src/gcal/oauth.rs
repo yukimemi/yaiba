@@ -53,7 +53,11 @@ const TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 /// rather than trusting yaiba to tidy up after itself.
 const SCOPE: &str = "https://www.googleapis.com/auth/calendar";
 
-/// The `meta` key the refresh token is filed under.
+/// The `meta` key the refresh token *used* to be filed under.
+///
+/// Read for as long as anybody might still have one there, never
+/// written. See `stored` for the migration and #168 for why the scope
+/// was wrong.
 const KEY_REFRESH: &str = "gcal_refresh_token";
 /// The `meta` key holding the calendar this project writes to.
 pub const KEY_CALENDAR: &str = "gcal_calendar_id";
@@ -369,19 +373,73 @@ async fn exchange(creds: &Credentials, form: &[(&str, &str)]) -> Result<TokenRes
     serde_json::from_str(&body).context("Google's token response was not the shape expected")
 }
 
-/// The refresh token this project has stored, if it has one.
+/// The refresh token to use, from wherever this machine keeps it.
 ///
-/// Both of these speak the store's own error type rather than
-/// `anyhow`'s, so a handler can `?` them beside every other store call.
-/// They are store operations that happen to be about a credential, not
-/// network ones.
-pub fn stored(store: &yaiba_core::store::Store) -> yaiba_core::Result<Option<String>> {
-    Ok(store.meta(KEY_REFRESH)?.filter(|t| !t.is_empty()))
+/// Machine-level first, then the per-project `meta` row that #168 moved
+/// away from — and a legacy row found that way is migrated on the spot
+/// rather than merely read. Doing it here is what makes the change cost
+/// nobody a re-login: the first push after upgrading moves the token and
+/// clears the old row, and no release note has to ask for anything.
+///
+/// The write is best-effort on purpose. Failing a push because a
+/// *successful* read could not be tidied away afterwards would turn a
+/// silent improvement into a visible regression; the fallback still
+/// works, and the next run tries again.
+pub fn stored(store: &yaiba_core::store::Store) -> Result<Option<String>> {
+    if let Some(token) = crate::credentials::load()?
+        .gcal_refresh_token
+        .filter(|t| !t.is_empty())
+    {
+        return Ok(Some(token));
+    }
+
+    let Some(legacy) = store.meta(KEY_REFRESH)?.filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    match store_machine_wide(&legacy) {
+        Ok(()) => {
+            // Only after the new copy is safely on disk. The other order
+            // loses the token outright if the write fails.
+            if let Err(e) = store.set_meta(KEY_REFRESH, "") {
+                tracing::warn!(
+                    "moved the Google credential out of the project, but the old copy is still there: {e}"
+                );
+            } else {
+                tracing::info!(
+                    "moved this machine's Google credential out of the project and into {}",
+                    crate::credentials::default_path()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default()
+                );
+            }
+        }
+        Err(e) => tracing::warn!(
+            "could not move the Google credential to this machine's credentials file, using the project's copy: {e:#}"
+        ),
+    }
+    Ok(Some(legacy))
 }
 
-/// File a refresh token against this project.
-pub fn store(store: &yaiba_core::store::Store, token: &str) -> yaiba_core::Result<()> {
-    store.set_meta(KEY_REFRESH, token)
+/// File a refresh token for this machine.
+///
+/// `store` is still taken, and not to write the token: a login that
+/// leaves the superseded per-project row in place would keep a working
+/// credential in a second location, which is exactly the state #168 is
+/// about ending.
+pub fn store(store: &yaiba_core::store::Store, token: &str) -> Result<()> {
+    store_machine_wide(token)?;
+    if let Err(e) = store.set_meta(KEY_REFRESH, "") {
+        tracing::warn!(
+            "stored the Google credential, but could not clear the project's old copy: {e}"
+        );
+    }
+    Ok(())
+}
+
+fn store_machine_wide(token: &str) -> Result<()> {
+    let mut credentials = crate::credentials::load()?;
+    credentials.gcal_refresh_token = Some(token.to_string());
+    crate::credentials::save(&credentials)
 }
 
 #[cfg(test)]
