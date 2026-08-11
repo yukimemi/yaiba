@@ -1384,6 +1384,48 @@ mod handler_tests {
     /// the no-op shortcut in front of it, so renaming a project that was
     /// never open *to its own name* answered 200 instead of 404.
     #[tokio::test]
+    async fn a_gcal_token_that_is_blank_is_refused_rather_than_stored() {
+        // The handler is what stands between an empty string and a
+        // credential that looks present and fails on every push with a
+        // message about publishing status.
+        for body in [r#"{"refresh_token":""}"#, r#"{"refresh_token":"   "}"#] {
+            let (status, _) = send(server(&["work"]), "POST", "/api/gcal/token", Some(body)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body} was accepted");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_gcal_token_is_filed_against_the_project_being_looked_at() {
+        let app = server(&["work", "home"]);
+        let (status, body) = send(
+            app,
+            "POST",
+            "/api/gcal/token",
+            Some(r#"{"refresh_token":"1//abc"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        // Named in the response rather than assumed, because "which
+        // project did that go to" is the question #168 exists about.
+        assert!(body.contains("work"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn pushing_before_there_is_anything_to_push_with_is_a_412() {
+        // Two preconditions, both 412 and either can be the one that
+        // fires: the client credentials come from the environment, and
+        // this suite runs on developer machines where they may well be
+        // set. What must never happen is a 500, or a push that reaches
+        // the network with nothing to authenticate as.
+        let (status, body) = send(server(&["work"]), "POST", "/api/gcal/push", None).await;
+        assert_eq!(status, StatusCode::PRECONDITION_FAILED, "{body}");
+        assert!(
+            body.contains("YAIBA_GCAL_CLIENT_ID") || body.contains("yaiba gcal login"),
+            "the refusal should name what to do about it: {body}"
+        );
+    }
+
+    #[tokio::test]
     async fn renaming_a_project_that_is_not_open_to_itself_is_still_a_404() {
         let (status, body) = send(
             server(&["work"]),

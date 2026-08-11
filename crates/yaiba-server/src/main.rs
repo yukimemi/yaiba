@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
+use yaiba::browser;
 use yaiba::gcal;
 use yaiba::projects::{self, Registry};
 use yaiba::updater::{self, UpdateMode};
@@ -30,14 +31,29 @@ const FIRST_SYNC: Duration = Duration::from_secs(10);
 /// the honest failure is the same one: if nothing is running there is
 /// nothing to talk to, and starting a server from in here would mean
 /// guessing a port and a project.
-async fn gcal_command(action: GcalAction, url: Option<String>) -> Result<()> {
+async fn gcal_command(action: GcalAction, url: Option<String>, open: bool) -> Result<()> {
     let base = url.unwrap_or_else(|| format!("http://127.0.0.1:{DEFAULT_PORT}"));
     let http = gcal::http();
 
     match action {
         GcalAction::Login => {
             let creds = gcal::oauth::Credentials::from_env()?;
-            let token = gcal::oauth::consent(&creds).await?;
+            // Before the consent flow, not after. Consent costs five
+            // minutes, a browser and clicking through Google's
+            // unverified-app warning, and the token it yields is written
+            // by the *server* — so discovering there is no server at the
+            // end of all that throws the whole thing away, and the token
+            // cannot simply be printed instead: a refresh token in a
+            // terminal's scrollback is a long-lived credential somewhere
+            // nobody will remember it is.
+            http.get(format!("{base}/api/state"))
+                .send()
+                .await
+                .with_context(|| unreachable_yaiba(&base))?
+                .error_for_status()
+                .with_context(|| unreachable_yaiba(&base))?;
+
+            let token = gcal::oauth::consent(&creds, open).await?;
             let response = http
                 .post(format!("{base}/api/gcal/token"))
                 .json(&serde_json::json!({ "refresh_token": token }))
@@ -134,7 +150,9 @@ struct Cli {
     #[arg(long, global = true, env = "YAIBA_DB")]
     db: Option<PathBuf>,
 
-    /// Don't launch a browser on startup.
+    /// Don't launch a browser — on startup, or for the `gcal login`
+    /// consent screen. Both print the URL either way, which is what makes
+    /// this usable over SSH rather than a way to lose the address.
     #[arg(long, global = true)]
     no_open: bool,
 
@@ -449,7 +467,7 @@ async fn main() -> Result<()> {
         // everything below: no registry, no database, no listener.
         Some(Command::Mcp { url }) => return mcp::serve(url.clone()).await,
         Some(Command::Gcal { action, url }) => {
-            return gcal_command(action.clone(), url.clone()).await;
+            return gcal_command(action.clone(), url.clone(), !cli.no_open).await;
         }
         _ => {}
     }
@@ -637,7 +655,7 @@ async fn main() -> Result<()> {
         relay_only: cli.relay_only(),
     });
     if !cli.no_open {
-        open_browser(&url);
+        browser::open(&url);
     }
 
     axum::serve(listener, router)
@@ -1128,25 +1146,6 @@ fn banner(
             None => format!("  {DIM}▸ sync  off (--no-sync){RESET}"),
         }
     );
-}
-
-/// Best-effort browser launch. A failure here is cosmetic — the URL is
-/// already on screen — so it warns instead of aborting startup.
-fn open_browser(url: &str) {
-    #[cfg(target_os = "windows")]
-    // The empty string is `start`'s title argument; without it a quoted
-    // URL would be consumed as the window title and nothing opens.
-    let spawned = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .spawn();
-    #[cfg(target_os = "macos")]
-    let spawned = std::process::Command::new("open").arg(url).spawn();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let spawned = std::process::Command::new("xdg-open").arg(url).spawn();
-
-    if let Err(e) = spawned {
-        tracing::warn!("could not open a browser automatically: {e}");
-    }
 }
 
 #[cfg(test)]

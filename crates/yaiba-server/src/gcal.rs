@@ -85,6 +85,27 @@ pub fn http() -> reqwest::Client {
         .clone()
 }
 
+/// Percent-encode everything outside RFC 3986's unreserved set.
+///
+/// One encoder for the query values in `oauth` and the path segments in
+/// `client`, which were byte-for-byte the same function in two files.
+/// Deliberately not a general URL encoder: what goes through it is a
+/// redirect URI, a scope, a nonce, a calendar id and an event id, so the
+/// reserved set is small and known. Encoding *more* than necessary is
+/// always safe here; a general encoder that gets a class wrong is not.
+pub fn escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(char::from(byte))
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 /// What a project's calendar is called.
 const TITLE_PREFIX: &str = "yaiba: ";
 

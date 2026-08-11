@@ -828,13 +828,17 @@ export YAIBA_GCAL_CLIENT_ID=....apps.googleusercontent.com
 export YAIBA_GCAL_CLIENT_SECRET=GOCSPX-...
 
 yaiba                 # in one window, and leave it
-yaiba gcal login      # prints a URL; visit it and grant access
+yaiba gcal login      # opens your browser; grant access
 yaiba gcal push
 ```
 
 Google will say the app is unverified. It is — it is a client you made
 for yourself five minutes ago, and nobody reviews those. *Advanced* →
 *Go to … (unsafe)*.
+
+The URL is printed as well as opened, so this works over SSH or on a
+machine with no browser; `--no-open` skips the launch and leaves only the
+print.
 
 **Both** processes read those variables: `yaiba gcal login` in the
 command you type, and `yaiba gcal push` in the server that holds your

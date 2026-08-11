@@ -71,7 +71,7 @@ impl Calendar {
             // gone", and the next push is them asking for it back.
             let response = self
                 .http
-                .get(format!("{BASE}/calendars/{}", urlencode(id)))
+                .get(format!("{BASE}/calendars/{}", super::escape(id)))
                 .bearer_auth(&self.token)
                 .send()
                 .await
@@ -126,7 +126,7 @@ impl Calendar {
         let renamed = self
             .send(
                 self.http
-                    .patch(format!("{BASE}/calendars/{}", urlencode(id)))
+                    .patch(format!("{BASE}/calendars/{}", super::escape(id)))
                     .json(&json!({ "summary": want })),
             )
             .await;
@@ -150,7 +150,10 @@ impl Calendar {
         loop {
             let mut request = self
                 .http
-                .get(format!("{BASE}/calendars/{}/events", urlencode(calendar)))
+                .get(format!(
+                    "{BASE}/calendars/{}/events",
+                    super::escape(calendar)
+                ))
                 .query(&[("maxResults", "2500"), ("showDeleted", "false")]);
             if let Some(token) = &page {
                 request = request.query(&[("pageToken", token)]);
@@ -171,7 +174,10 @@ impl Calendar {
     pub async fn insert(&self, calendar: &str, event: &Event) -> Result<()> {
         let response = self
             .http
-            .post(format!("{BASE}/calendars/{}/events", urlencode(calendar)))
+            .post(format!(
+                "{BASE}/calendars/{}/events",
+                super::escape(calendar)
+            ))
             .bearer_auth(&self.token)
             .json(&body(event))
             .send()
@@ -193,8 +199,8 @@ impl Calendar {
             self.http
                 .patch(format!(
                     "{BASE}/calendars/{}/events/{}",
-                    urlencode(calendar),
-                    urlencode(&event.id)
+                    super::escape(calendar),
+                    super::escape(&event.id)
                 ))
                 .json(&body(event)),
         )
@@ -208,8 +214,8 @@ impl Calendar {
             .http
             .delete(format!(
                 "{BASE}/calendars/{}/events/{}",
-                urlencode(calendar),
-                urlencode(id)
+                super::escape(calendar),
+                super::escape(id)
             ))
             .bearer_auth(&self.token)
             .send()
@@ -301,21 +307,6 @@ fn endpoint(value: &Value) -> Option<NaiveDate> {
     }
     let stamp = value["dateTime"].as_str()?;
     stamp.get(..10)?.parse().ok()
-}
-
-/// Percent-encode a path segment. Calendar ids are email-shaped and
-/// event ids are base32hex, so only a small reserved set can appear.
-fn urlencode(segment: &str) -> String {
-    let mut out = String::with_capacity(segment.len());
-    for byte in segment.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(char::from(byte))
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -435,10 +426,13 @@ mod tests {
     #[test]
     fn a_calendar_id_survives_being_put_in_a_path() {
         assert_eq!(
-            urlencode("abc123@group.calendar.google.com"),
+            crate::gcal::escape("abc123@group.calendar.google.com"),
             "abc123%40group.calendar.google.com"
         );
         // Event ids are base32hex, so they pass through untouched.
-        assert_eq!(urlencode(&event_id(TaskId::nil())), event_id(TaskId::nil()));
+        assert_eq!(
+            crate::gcal::escape(&event_id(TaskId::nil())),
+            event_id(TaskId::nil())
+        );
     }
 }

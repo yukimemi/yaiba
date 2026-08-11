@@ -28,7 +28,7 @@
 //! only that the token is invalid — a person who has to *discover* that
 //! rule has already spent an evening on it.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
@@ -95,26 +95,19 @@ impl Credentials {
     }
 }
 
-/// An access token and the moment it stops being one.
+/// An access token, and how long Google said it was good for.
+///
+/// The lifetime is carried rather than acted on. A reconcile takes one
+/// token at the top and spends it for the whole run, so a run long
+/// enough to outlive an hour would start failing writes part way
+/// through — reported through `Outcome::refused` rather than silently,
+/// and fixed by running it again. Re-refreshing mid-run is the honest
+/// fix if a plan ever gets big enough to need it; claiming to do it
+/// while not doing it is what this comment replaced.
 pub struct Access {
     pub token: String,
-    expires_at: u64,
-}
-
-impl Access {
-    pub fn valid(&self) -> bool {
-        // A minute of slack: a token that expires mid-reconcile fails a
-        // write half way through a run, which is the one failure this
-        // whole module is arranged to avoid.
-        now() + 60 < self.expires_at
-    }
-}
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    #[allow(dead_code, reason = "carried for the note above, not yet acted on")]
+    pub expires_in: u64,
 }
 
 #[derive(Deserialize)]
@@ -138,25 +131,6 @@ fn challenge(verifier: &str) -> String {
 /// this crate already has rather than a dependency taken for one string.
 fn nonce() -> String {
     format!("{}-{}", TaskId::new_v4(), TaskId::new_v4())
-}
-
-/// Percent-encode the characters that would otherwise end a query value.
-///
-/// Deliberately not a general encoder: everything put through it here is
-/// a URL, a scope or a nonce, so the reserved set is small and known. A
-/// general one would be a dependency, and a wrong general one is worse
-/// than a narrow right one.
-fn escape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(char::from(byte))
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
 
 /// Undo the percent-encoding on one query value.
@@ -215,11 +189,13 @@ fn unescape(value: &str) -> String {
 
 /// Run the consent flow and return a refresh token.
 ///
-/// Prints the URL rather than opening a browser. Opening one is a
-/// dependency and a guess — over SSH, in a container, or on a headless
-/// box the guess is wrong and the person is left watching a process that
-/// looks hung, with the URL it wanted them to visit never shown.
-pub async fn consent(creds: &Credentials) -> Result<String> {
+/// Prints the URL **and** opens it, in that order. The print is what
+/// makes the launch safe to attempt: over SSH, in a container or on a
+/// headless box there is nothing to open, and a flow that relied on the
+/// browser would leave somebody watching a process that looks hung with
+/// no way to reach the address it is waiting on. `open` is `false` under
+/// `--no-open`.
+pub async fn consent(creds: &Credentials, open: bool) -> Result<String> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .context("could not bind a loopback port for the OAuth redirect")?;
@@ -232,11 +208,11 @@ pub async fn consent(creds: &Credentials) -> Result<String> {
         "{AUTH_URI}?client_id={}&redirect_uri={}&response_type=code&scope={}\
          &code_challenge={}&code_challenge_method=S256&state={}\
          &access_type=offline&prompt=consent",
-        escape(&creds.id),
-        escape(&redirect),
-        escape(SCOPE),
-        escape(&challenge(&verifier)),
-        escape(&state),
+        super::escape(&creds.id),
+        super::escape(&redirect),
+        super::escape(SCOPE),
+        super::escape(&challenge(&verifier)),
+        super::escape(&state),
     );
 
     println!("\nOpen this and grant yaiba access to your calendar:\n\n  {url}\n");
@@ -244,6 +220,11 @@ pub async fn consent(creds: &Credentials) -> Result<String> {
         "Google will warn that the app is unverified — that is expected for a client you \
          created yourself. Choose \"Advanced\", then \"Go to ... (unsafe)\".\n"
     );
+    // After the print, never instead of it — see the note on this
+    // function and the one on `browser`.
+    if open {
+        crate::browser::open(&url);
+    }
 
     let code = tokio::time::timeout(CONSENT_TIMEOUT, redirected_code(&listener, &state))
         .await
@@ -351,7 +332,7 @@ pub async fn refresh(creds: &Credentials, refresh_token: &str) -> Result<Access>
         token: response.access_token,
         // Google sends one; the fallback is its documented hour rather
         // than an optimistic forever.
-        expires_at: now() + response.expires_in.unwrap_or(3600),
+        expires_in: response.expires_in.unwrap_or(3600),
     })
 }
 
@@ -436,19 +417,6 @@ mod tests {
     }
 
     #[test]
-    fn escaping_leaves_the_unreserved_set_alone_and_encodes_the_rest() {
-        assert_eq!(escape("aZ0-._~"), "aZ0-._~");
-        assert_eq!(
-            escape("http://127.0.0.1:8188"),
-            "http%3A%2F%2F127.0.0.1%3A8188"
-        );
-        assert_eq!(
-            escape("https://www.googleapis.com/auth/calendar"),
-            "https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar"
-        );
-    }
-
-    #[test]
     fn a_redirect_value_is_decoded_before_it_is_used() {
         // The failure this prevents is not a crash: the code reaches
         // Google double-encoded, comes back `invalid_grant`, and the
@@ -476,25 +444,5 @@ mod tests {
         assert_eq!(unescape("%zz"), "%zz");
         // And `+` is left alone rather than read as a space.
         assert_eq!(unescape("a+b"), "a+b");
-    }
-
-    #[test]
-    fn an_access_token_is_spent_before_it_actually_expires() {
-        // The slack is the point: a token good for another 30 seconds is
-        // not good enough to start a reconcile with.
-        assert!(
-            !Access {
-                token: String::new(),
-                expires_at: now() + 30
-            }
-            .valid()
-        );
-        assert!(
-            Access {
-                token: String::new(),
-                expires_at: now() + 600
-            }
-            .valid()
-        );
     }
 }

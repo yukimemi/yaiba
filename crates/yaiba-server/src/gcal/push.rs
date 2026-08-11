@@ -38,11 +38,18 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    /// Whether anything changed — a reconcile that finds nothing to do
-    /// is the expected result of running it twice, and should read as
-    /// such rather than as a failure.
+    /// Whether there is genuinely nothing to report.
+    ///
+    /// A reconcile that finds nothing to do is the expected result of
+    /// running it twice, and reads as "already in step" rather than as a
+    /// failure. A run where *every* action was refused has the same three
+    /// zeroes and means the opposite, so the refusals are part of the
+    /// question: without them the caller announces "the calendar already
+    /// says what the plan says" and then lists everything it could not
+    /// do — a contradiction, printed at exactly the moment the run
+    /// accomplished nothing at all.
     pub fn quiet(&self) -> bool {
-        self.inserted == 0 && self.patched == 0 && self.deleted == 0
+        self.inserted == 0 && self.patched == 0 && self.deleted == 0 && self.refused.is_empty()
     }
 }
 
@@ -113,12 +120,12 @@ mod tests {
             }
             .quiet()
         );
-        // A refusal is not a change, but it is not quiet either as far
-        // as the person reading the line is concerned — they need to see
-        // it, which is why `refused` is reported separately rather than
-        // folded into this.
+        // Total failure has the same three zeroes as "nothing to do"
+        // and means the opposite. Reporting it as quiet made the CLI
+        // print "the calendar already says what the plan says" directly
+        // above the list of everything it could not do.
         assert!(
-            Outcome {
+            !Outcome {
                 refused: vec!["nope".into()],
                 ..Default::default()
             }
