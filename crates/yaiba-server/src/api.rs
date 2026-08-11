@@ -999,7 +999,7 @@ async fn push_gcal(State(state): State<AppState>) -> ApiResult<Json<crate::gcal:
     // happen, and `:asof` is a way of looking at what was.
     let today = Local::now().date_naive();
     let plan = schedule(&tasks, &deps, today);
-    let title = format!("yaiba: {}", project.name);
+    let title = crate::gcal::calendar_title(&project.name);
 
     let outcome =
         crate::gcal::push::run(&creds, &token, calendar.as_deref(), &title, &tasks, &plan)

@@ -51,6 +51,30 @@ const EVENT_ID_LEN: usize = 26;
 /// alone would eventually delete somebody's meeting.
 pub const STAMP_KEY: &str = "yaibaTask";
 
+/// What a project's calendar is called.
+const TITLE_PREFIX: &str = "yaiba: ";
+
+/// The calendar title for a project.
+pub fn calendar_title(project: &str) -> String {
+    format!("{TITLE_PREFIX}{project}")
+}
+
+/// Whether a calendar still carries the name yaiba gave it.
+///
+/// A project renamed in yaiba should take its calendar's name with it,
+/// or `:rename` leaves the two disagreeing forever with nothing to say
+/// so. A calendar renamed on the *Google* side should not be renamed
+/// back — that was somebody deciding what to call their own calendar,
+/// and taking it from them on the next push is the same overreach as
+/// deleting an event yaiba did not create.
+///
+/// The prefix is what tells the two apart. It cannot distinguish
+/// "renamed to something else with the same prefix", which is a person
+/// choosing a name yaiba would have chosen and losing nothing by it.
+pub fn is_yaiba_title(title: &str) -> bool {
+    title.starts_with(TITLE_PREFIX)
+}
+
 /// The event id for a task: base32hex of the UUID's 16 bytes.
 pub fn event_id(task: TaskId) -> String {
     let mut out = String::with_capacity(EVENT_ID_LEN);
@@ -459,6 +483,24 @@ mod tests {
             reconcile(std::slice::from_ref(&want), std::slice::from_ref(&forged)),
             vec![Action::Patch(want)]
         );
+    }
+
+    #[test]
+    fn a_calendar_yaiba_named_is_renameable_and_one_a_person_named_is_not() {
+        // The rename follows a project rename, which is the whole point
+        // — otherwise `:rename` leaves the calendar saying the old name
+        // for good, with neither side admitting they disagree.
+        assert!(is_yaiba_title(&calendar_title("work")));
+        assert!(is_yaiba_title("yaiba: anything at all"));
+
+        // And stops at the edge of what yaiba wrote. Somebody who
+        // renamed their own calendar keeps the name they chose; taking
+        // it back on the next push is the same overreach as deleting an
+        // event yaiba did not create.
+        assert!(!is_yaiba_title("Q3 planning"));
+        assert!(!is_yaiba_title("yaiba"));
+        assert!(!is_yaiba_title("my yaiba: work"));
+        assert!(!is_yaiba_title(""));
     }
 
     #[test]

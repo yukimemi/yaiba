@@ -856,6 +856,9 @@ happened to be in.
 - **Removed tasks take their events with them.** A task deleted, or one
   whose event you dragged somewhere it does not belong, is put back the
   way the plan says on the next push.
+- **Renaming the project renames the calendar** on the next push — but
+  only while the calendar still carries the name yaiba gave it. Rename
+  it yourself on the Google side and it keeps the name you chose.
 
 `yaiba gcal push` acts on the **active project** — the one `:proj` is
 looking at — and each project gets its own calendar. The credential is

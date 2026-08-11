@@ -77,6 +77,9 @@ impl Calendar {
                 .await
                 .context("could not reach the Calendar API")?;
             if response.status().is_success() {
+                let existing = self.ok(response).await?;
+                self.rename_if_ours(id, existing["summary"].as_str(), title)
+                    .await?;
                 return Ok(id.to_string());
             }
             if response.status() != reqwest::StatusCode::NOT_FOUND {
@@ -99,6 +102,39 @@ impl Calendar {
             .as_str()
             .map(str::to_string)
             .context("Google created a calendar without giving it an id")
+    }
+
+    /// Carry a project rename across to its calendar, and only that.
+    ///
+    /// Renaming a project in yaiba otherwise leaves the calendar saying
+    /// the old name for good, with nothing in either place admitting the
+    /// two disagree. What this must not do is take the name back from
+    /// somebody who renamed the calendar themselves, so it only rewrites
+    /// a title that still looks like one yaiba wrote — see
+    /// [`is_yaiba_title`].
+    ///
+    /// Best-effort. A rename that fails is a wrong label on a calendar
+    /// that is otherwise correct, and failing the whole push over it
+    /// would trade every event for a word.
+    async fn rename_if_ours(&self, id: &str, current: Option<&str>, want: &str) -> Result<()> {
+        let Some(current) = current else {
+            return Ok(());
+        };
+        if current == want || !super::is_yaiba_title(current) {
+            return Ok(());
+        }
+        let renamed = self
+            .send(
+                self.http
+                    .patch(format!("{BASE}/calendars/{}", urlencode(id)))
+                    .json(&json!({ "summary": want })),
+            )
+            .await;
+        match renamed {
+            Ok(_) => tracing::info!("renamed the calendar {current:?} to {want:?}"),
+            Err(e) => tracing::warn!("could not rename the calendar {current:?}: {e:#}"),
+        }
+        Ok(())
     }
 
     /// Every event on the calendar, as far as this module can read them.
