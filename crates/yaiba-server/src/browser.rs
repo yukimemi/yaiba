@@ -69,14 +69,12 @@ pub fn open(url: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[cfg(target_os = "windows")]
     #[test]
     fn an_oauth_url_is_quoted_so_cmd_cannot_split_it_on_ampersands() {
         let url =
             "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&response_type=code&scope=y";
-        let line = windows_command_line(url);
+        let line = super::windows_command_line(url);
         assert!(
             line.ends_with(&format!("\"{url}\"")),
             "the URL must be quoted as one argument: {line}"
