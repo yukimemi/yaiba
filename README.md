@@ -827,8 +827,9 @@ Then tell yaiba, and log in:
 export YAIBA_GCAL_CLIENT_ID=....apps.googleusercontent.com
 export YAIBA_GCAL_CLIENT_SECRET=GOCSPX-...
 
+yaiba gcal login      # opens your browser; grant access. Once per machine.
+
 yaiba                 # in one window, and leave it
-yaiba gcal login      # opens your browser; grant access
 yaiba gcal push
 ```
 
@@ -844,6 +845,10 @@ print.
 command you type, and `yaiba gcal push` in the server that holds your
 plan. So set them somewhere both inherit — a shell profile rather than
 the one window you happened to be in.
+
+`login` needs no running yaiba — the credential is yours, not a
+project's, so it writes straight to your credentials file. `push` does
+need one: it is reading a plan.
 
 ### What lands on the calendar
 

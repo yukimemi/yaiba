@@ -37,34 +37,15 @@ async fn gcal_command(action: GcalAction, url: Option<String>, open: bool) -> Re
 
     match action {
         GcalAction::Login => {
+            // No server in this arm at all. The credential is the
+            // person's and lands in their own credentials file, so
+            // nothing here touches a project — which also means the
+            // reachability check this used to need is gone, along with
+            // the failure it guarded: a consent flow completed and then
+            // thrown away because nobody was listening.
             let creds = gcal::oauth::Credentials::from_env()?;
-            // Before the consent flow, not after. Consent costs five
-            // minutes, a browser and clicking through Google's
-            // unverified-app warning, and the token it yields is written
-            // by the *server* — so discovering there is no server at the
-            // end of all that throws the whole thing away, and the token
-            // cannot simply be printed instead: a refresh token in a
-            // terminal's scrollback is a long-lived credential somewhere
-            // nobody will remember it is.
-            http.get(format!("{base}/api/state"))
-                .send()
-                .await
-                .with_context(|| unreachable_yaiba(&base))?
-                .error_for_status()
-                .with_context(|| unreachable_yaiba(&base))?;
-
             let token = gcal::oauth::consent(&creds, open).await?;
-            let response = http
-                .post(format!("{base}/api/gcal/token"))
-                .json(&serde_json::json!({ "refresh_token": token }))
-                .send()
-                .await
-                .with_context(|| unreachable_yaiba(&base))?;
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            if !status.is_success() {
-                bail!("yaiba refused the token ({status}): {body}");
-            }
+            gcal::oauth::store(&token)?;
             println!(
                 "yaiba can now write to your calendar. `yaiba gcal push` puts the plan on it."
             );

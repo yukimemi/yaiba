@@ -348,7 +348,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/peers/merge", post(merge_peer))
         .route("/api/peers/leave", post(leave_peers))
         .route("/api/ui", get(get_ui).put(put_ui))
-        .route("/api/gcal/token", post(put_gcal_token))
         .route("/api/gcal/push", post(push_gcal))
         .route("/api/projects", get(get_projects).post(switch_project))
         .route("/api/projects/new", post(create_project))
@@ -940,42 +939,6 @@ fn respond_at(store: &Store, asof: Option<NaiveDate>) -> ApiResult<Json<StateRes
     }))
 }
 
-#[derive(Deserialize)]
-struct GcalToken {
-    refresh_token: String,
-}
-
-/// File a refresh token against the active project.
-///
-/// The consent flow itself runs in the CLI, which owns the loopback
-/// socket and — more to the point — owns the terminal the person is
-/// looking at, so the URL to visit is printed where they typed the
-/// command. What comes back here is only the token, because this process
-/// is the one allowed to write the database. Same one-writer rule `mcp`
-/// and `leave` follow, and the same reason: a second process editing
-/// `yaiba.db` under a running server is the failure this codebase keeps
-/// choosing not to have.
-async fn put_gcal_token(
-    State(state): State<AppState>,
-    Json(body): Json<GcalToken>,
-) -> ApiResult<Json<serde_json::Value>> {
-    if body.refresh_token.trim().is_empty() {
-        return Err(ApiError::message(
-            StatusCode::BAD_REQUEST,
-            "no refresh token in the request",
-        ));
-    }
-    let project = state.active();
-    {
-        let store = lock(&project);
-        // The credential now lands in a file rather than the database,
-        // so this reads as an internal failure rather than a domain one.
-        crate::gcal::oauth::store(&store, body.refresh_token.trim())
-            .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
-    }
-    Ok(Json(serde_json::json!({ "project": project.name })))
-}
-
 /// Make the calendar say what the plan says.
 async fn push_gcal(State(state): State<AppState>) -> ApiResult<Json<crate::gcal::push::Outcome>> {
     let creds = crate::gcal::oauth::Credentials::from_env()
@@ -987,7 +950,7 @@ async fn push_gcal(State(state): State<AppState>) -> ApiResult<Json<crate::gcal:
     // put every other request behind Google's rate limiter.
     let (token, calendar, tasks, deps) = {
         let store = lock(&project);
-        let token = crate::gcal::oauth::stored(&store)
+        let token = crate::gcal::oauth::stored()
             .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?
             .ok_or_else(|| {
                 ApiError::message(
@@ -1388,33 +1351,6 @@ mod handler_tests {
     /// The regression: reordering `is_open` under the registry lock left
     /// the no-op shortcut in front of it, so renaming a project that was
     /// never open *to its own name* answered 200 instead of 404.
-    #[tokio::test]
-    async fn a_gcal_token_that_is_blank_is_refused_rather_than_stored() {
-        // The handler is what stands between an empty string and a
-        // credential that looks present and fails on every push with a
-        // message about publishing status.
-        for body in [r#"{"refresh_token":""}"#, r#"{"refresh_token":"   "}"#] {
-            let (status, _) = send(server(&["work"]), "POST", "/api/gcal/token", Some(body)).await;
-            assert_eq!(status, StatusCode::BAD_REQUEST, "{body} was accepted");
-        }
-    }
-
-    #[tokio::test]
-    async fn a_gcal_token_is_filed_against_the_project_being_looked_at() {
-        let app = server(&["work", "home"]);
-        let (status, body) = send(
-            app,
-            "POST",
-            "/api/gcal/token",
-            Some(r#"{"refresh_token":"1//abc"}"#),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK);
-        // Named in the response rather than assumed, because "which
-        // project did that go to" is the question #168 exists about.
-        assert!(body.contains("work"), "{body}");
-    }
-
     #[tokio::test]
     async fn pushing_before_there_is_anything_to_push_with_is_a_412() {
         // Two preconditions, both 412 and either can be the one that
