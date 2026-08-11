@@ -23,6 +23,10 @@
 //! twice is a no-op the second time, and two replicas pointed at one
 //! calendar derive the same ids and so converge rather than duplicating.
 
+pub mod client;
+pub mod oauth;
+pub mod push;
+
 use chrono::{Duration, NaiveDate};
 use yaiba_core::{
     graph::Schedule,

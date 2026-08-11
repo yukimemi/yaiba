@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
+use yaiba::gcal;
 use yaiba::projects::{self, Registry};
 use yaiba::updater::{self, UpdateMode};
 use yaiba::{api, app, mcp};
@@ -22,6 +23,82 @@ const DEFAULT_PORT: u16 = 8188;
 /// How long the join hand-off waits for the peer before handing the UI
 /// over to the background sync driver.
 const FIRST_SYNC: Duration = Duration::from_secs(10);
+
+/// `yaiba gcal <action>`, run against a yaiba that is already up.
+///
+/// A client, not a second writer — the same arrangement `mcp` is in, and
+/// the honest failure is the same one: if nothing is running there is
+/// nothing to talk to, and starting a server from in here would mean
+/// guessing a port and a project.
+async fn gcal_command(action: GcalAction, url: Option<String>) -> Result<()> {
+    let base = url.unwrap_or_else(|| format!("http://127.0.0.1:{DEFAULT_PORT}"));
+    let http = reqwest::Client::new();
+
+    match action {
+        GcalAction::Login => {
+            let creds = gcal::oauth::Credentials::from_env()?;
+            let token = gcal::oauth::consent(&creds).await?;
+            let response = http
+                .post(format!("{base}/api/gcal/token"))
+                .json(&serde_json::json!({ "refresh_token": token }))
+                .send()
+                .await
+                .with_context(|| unreachable_yaiba(&base))?;
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if !status.is_success() {
+                bail!("yaiba refused the token ({status}): {body}");
+            }
+            println!(
+                "yaiba can now write to your calendar. `yaiba gcal push` puts the plan on it."
+            );
+            Ok(())
+        }
+
+        GcalAction::Push => {
+            let response = http
+                .post(format!("{base}/api/gcal/push"))
+                .send()
+                .await
+                .with_context(|| unreachable_yaiba(&base))?;
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if !status.is_success() {
+                // The server already writes a sentence worth reading —
+                // the missing-credential case names the command to run,
+                // and a rejected refresh names the seven-day rule. Pass
+                // it through rather than wrapping it in a second one.
+                let text: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+                bail!("{}", text["error"].as_str().unwrap_or(body.as_str()));
+            }
+
+            let outcome: gcal::push::Outcome =
+                serde_json::from_str(&body).context("yaiba answered something unexpected")?;
+            if outcome.quiet() {
+                println!("The calendar already says what the plan says.");
+            } else {
+                println!(
+                    "{} added, {} updated, {} removed.",
+                    outcome.inserted, outcome.patched, outcome.deleted
+                );
+            }
+            // Never folded into the counts: a run that half landed looks
+            // exactly like one that landed, and the events it missed are
+            // the ones nobody thinks to check.
+            for refusal in &outcome.refused {
+                println!("  {refusal}");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn unreachable_yaiba(base: &str) -> String {
+    format!(
+        "no yaiba answering at {base}. This talks to a running one rather than starting its \
+         own, so the server stays the only writer — leave `yaiba` up in another window"
+    )
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -242,6 +319,41 @@ enum Command {
         #[arg(long, value_name = "URL", env = "YAIBA_MCP_URL")]
         url: Option<String>,
     },
+
+    /// Put the plan on a Google Calendar.
+    ///
+    /// Deliberately not spelled `sync`. That word already means
+    /// peer-to-peer replication everywhere else in yaiba — the
+    /// `yaiba-sync` crate, `SyncNode`, the room a project shares — and
+    /// one word meaning two things is exactly what the `join` / `merge`
+    /// tangle cost. A longer subcommand is the cheaper side of that.
+    ///
+    /// Like `mcp`, this talks to a yaiba that is already running rather
+    /// than starting one, so the server stays the only writer.
+    Gcal {
+        #[command(subcommand)]
+        action: GcalAction,
+
+        /// The running yaiba to talk to.
+        #[arg(long, value_name = "URL", env = "YAIBA_MCP_URL")]
+        url: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum GcalAction {
+    /// Grant yaiba access to your calendar, once.
+    ///
+    /// The consent flow runs in this process rather than in the server
+    /// because the URL has to appear where you typed the command. Only
+    /// the resulting token is handed over, and the server is what writes
+    /// it down.
+    Login,
+    /// Reconcile the calendar against the plan.
+    ///
+    /// Idempotent: it works out the difference and applies it, so a
+    /// second run in a row does nothing.
+    Push,
 }
 
 /// What the resolved command says to open.
@@ -330,6 +442,9 @@ async fn main() -> Result<()> {
         // Serves an already-running yaiba, so it deliberately skips
         // everything below: no registry, no database, no listener.
         Some(Command::Mcp { url }) => return mcp::serve(url.clone()).await,
+        Some(Command::Gcal { action, url }) => {
+            return gcal_command(action.clone(), url.clone()).await;
+        }
         _ => {}
     }
 
