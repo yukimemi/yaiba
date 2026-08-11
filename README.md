@@ -836,9 +836,10 @@ Google will say the app is unverified. It is — it is a client you made
 for yourself five minutes ago, and nobody reviews those. *Advanced* →
 *Go to … (unsafe)*.
 
-The variables are read by the process that serves your plan, so set them
-where you start `yaiba` — a shell profile rather than the one window you
-happened to be in.
+**Both** processes read those variables: `yaiba gcal login` in the
+command you type, and `yaiba gcal push` in the server that holds your
+plan. So set them somewhere both inherit — a shell profile rather than
+the one window you happened to be in.
 
 ### What lands on the calendar
 

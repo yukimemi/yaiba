@@ -50,7 +50,7 @@ pub struct Calendar {
 impl Calendar {
     pub fn new(token: String) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: super::http(),
             token,
         }
     }

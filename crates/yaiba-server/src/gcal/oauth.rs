@@ -159,6 +159,60 @@ fn escape(value: &str) -> String {
     out
 }
 
+/// Undo the percent-encoding on one query value.
+///
+/// The redirect is a URL, so a value in it may be encoded and has to be
+/// decoded before it means anything — an authorisation code handed
+/// onwards still wearing its `%2F` gets form-encoded a second time and
+/// reaches Google as `%252F`, which comes back as `invalid_grant` with a
+/// message about publishing status that has nothing to do with it.
+///
+/// In practice Google leaves the `/` in a code alone, because `/` is
+/// legal in a query and needs no encoding — which is why the flow worked
+/// before this existed. That is a property of what Google currently
+/// sends, not of what a URL is allowed to contain, and it is not one to
+/// keep depending on.
+///
+/// `+` is deliberately *not* read as a space. That convention belongs to
+/// form bodies; the two values this ever sees are an authorisation code
+/// and a nonce this process minted, and rewriting a literal `+` in
+/// either of them would corrupt the thing being decoded.
+fn unescape(value: &str) -> String {
+    fn nibble(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    let raw = value.as_bytes();
+    let mut out = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        match (raw[i], raw.get(i + 1).copied(), raw.get(i + 2).copied()) {
+            (b'%', Some(hi), Some(lo)) => match (nibble(hi), nibble(lo)) {
+                (Some(hi), Some(lo)) => {
+                    out.push((hi << 4) | lo);
+                    i += 3;
+                }
+                // A stray `%` that is not an escape stays a `%`, which
+                // is what every browser does with one.
+                _ => {
+                    out.push(raw[i]);
+                    i += 1;
+                }
+            },
+            _ => {
+                out.push(raw[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Run the consent flow and return a refresh token.
 ///
 /// Prints the URL rather than opening a browser. Opening one is a
@@ -240,9 +294,9 @@ async fn handle_redirect(mut stream: TcpStream, state: &str) -> Result<Option<St
     let mut error = None;
     for pair in query.split('&') {
         match pair.split_once('=') {
-            Some(("code", value)) => code = Some(value.to_string()),
-            Some(("state", value)) => echoed = Some(value.to_string()),
-            Some(("error", value)) => error = Some(value.to_string()),
+            Some(("code", value)) => code = Some(unescape(value)),
+            Some(("state", value)) => echoed = Some(unescape(value)),
+            Some(("error", value)) => error = Some(unescape(value)),
             _ => {}
         }
     }
@@ -306,7 +360,7 @@ async fn exchange(creds: &Credentials, form: &[(&str, &str)]) -> Result<TokenRes
     params.push(("client_id", &creds.id));
     params.push(("client_secret", &creds.secret));
 
-    let response = reqwest::Client::new()
+    let response = super::http()
         .post(TOKEN_URI)
         .form(&params)
         .send()
@@ -392,6 +446,36 @@ mod tests {
             escape("https://www.googleapis.com/auth/calendar"),
             "https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar"
         );
+    }
+
+    #[test]
+    fn a_redirect_value_is_decoded_before_it_is_used() {
+        // The failure this prevents is not a crash: the code reaches
+        // Google double-encoded, comes back `invalid_grant`, and the
+        // handler blames the seven-day publishing rule.
+        assert_eq!(unescape("4%2F0AVMBsJj-x_y"), "4/0AVMBsJj-x_y");
+        assert_eq!(unescape("access%5Fdenied"), "access_denied");
+        assert_eq!(unescape("%e5%88%83"), "刃");
+        // Lower and upper hex both, since nothing says which Google uses.
+        assert_eq!(unescape("%2f%2F"), "//");
+    }
+
+    #[test]
+    fn a_value_that_needs_no_decoding_survives_it_untouched() {
+        // Google leaves `/` alone today — it is legal in a query — which
+        // is why the flow worked before the decoder existed. Decoding
+        // must therefore be a no-op on what actually arrives.
+        assert_eq!(unescape("4/0AVMBsJj-x_y"), "4/0AVMBsJj-x_y");
+        // The `state` this process minted comes back through the same
+        // path, and it is compared byte for byte — a decoder that
+        // touched it would fail every consent.
+        let state = nonce();
+        assert_eq!(unescape(&state), state);
+        // A stray percent is not an escape and stays put.
+        assert_eq!(unescape("100%"), "100%");
+        assert_eq!(unescape("%zz"), "%zz");
+        // And `+` is left alone rather than read as a space.
+        assert_eq!(unescape("a+b"), "a+b");
     }
 
     #[test]

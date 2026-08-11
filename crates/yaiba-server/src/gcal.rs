@@ -27,7 +27,10 @@ pub mod client;
 pub mod oauth;
 pub mod push;
 
-use chrono::{Duration, NaiveDate};
+use std::sync::OnceLock;
+use std::time::Duration;
+
+use chrono::NaiveDate;
 use yaiba_core::{
     graph::Schedule,
     model::{Task, TaskId},
@@ -50,6 +53,37 @@ const EVENT_ID_LEN: usize = 26;
 /// a quarter of them decode cleanly. Deleting on the strength of the id
 /// alone would eventually delete somebody's meeting.
 pub const STAMP_KEY: &str = "yaibaTask";
+
+/// How long any one call to Google — or to a local yaiba — may take.
+///
+/// `reqwest::Client::new()` applies none at all, and the failure that
+/// buys is not an error but a wait: a socket that opens and then goes
+/// quiet holds `push_gcal`'s handler for as long as the peer keeps it
+/// alive. Thirty seconds is far longer than any of these calls needs and
+/// far shorter than "until something gives up".
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The HTTP client every part of this module shares.
+///
+/// One rather than one per call: building a client builds a TLS
+/// configuration and a connection pool, and throwing both away after a
+/// single request is most of the cost of the request. `Client` is an
+/// `Arc` inside, so handing out clones is what it is designed for.
+pub fn http() -> reqwest::Client {
+    static SHARED: OnceLock<reqwest::Client> = OnceLock::new();
+    SHARED
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(REQUEST_TIMEOUT)
+                .build()
+                // Only a TLS backend that will not initialise can fail
+                // here, and that is not a condition a calendar push can
+                // do anything about — nor one the default client would
+                // have survived either.
+                .unwrap_or_default()
+        })
+        .clone()
+}
 
 /// What a project's calendar is called.
 const TITLE_PREFIX: &str = "yaiba: ";
@@ -147,7 +181,7 @@ pub fn task_id(event_id: &str) -> Option<TaskId> {
 /// zero-length.
 fn exclusive_end(last_day: NaiveDate) -> NaiveDate {
     last_day
-        .checked_add_signed(Duration::days(1))
+        .checked_add_signed(chrono::Duration::days(1))
         .unwrap_or(NaiveDate::MAX)
 }
 

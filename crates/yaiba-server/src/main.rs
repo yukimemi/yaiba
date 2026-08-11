@@ -32,7 +32,7 @@ const FIRST_SYNC: Duration = Duration::from_secs(10);
 /// guessing a port and a project.
 async fn gcal_command(action: GcalAction, url: Option<String>) -> Result<()> {
     let base = url.unwrap_or_else(|| format!("http://127.0.0.1:{DEFAULT_PORT}"));
-    let http = reqwest::Client::new();
+    let http = gcal::http();
 
     match action {
         GcalAction::Login => {
@@ -335,7 +335,13 @@ enum Command {
         action: GcalAction,
 
         /// The running yaiba to talk to.
-        #[arg(long, value_name = "URL", env = "YAIBA_MCP_URL")]
+        ///
+        /// Its own variable rather than sharing `mcp`'s. That one is
+        /// named for MCP, and pointing an agent at a second yaiba would
+        /// otherwise silently redirect `gcal` as well — one name meaning
+        /// two things, which is the trade this repo has already paid for
+        /// once.
+        #[arg(long, value_name = "URL", env = "YAIBA_GCAL_URL")]
         url: Option<String>,
     },
 }
