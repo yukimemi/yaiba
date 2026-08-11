@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod browser;
+pub mod credentials;
 pub mod gcal;
 pub mod mcp;
 pub mod projects;

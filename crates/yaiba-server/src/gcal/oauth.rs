@@ -53,8 +53,6 @@ const TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 /// rather than trusting yaiba to tidy up after itself.
 const SCOPE: &str = "https://www.googleapis.com/auth/calendar";
 
-/// The `meta` key the refresh token is filed under.
-const KEY_REFRESH: &str = "gcal_refresh_token";
 /// The `meta` key holding the calendar this project writes to.
 pub const KEY_CALENDAR: &str = "gcal_calendar_id";
 
@@ -369,19 +367,37 @@ async fn exchange(creds: &Credentials, form: &[(&str, &str)]) -> Result<TokenRes
     serde_json::from_str(&body).context("Google's token response was not the shape expected")
 }
 
-/// The refresh token this project has stored, if it has one.
-///
-/// Both of these speak the store's own error type rather than
-/// `anyhow`'s, so a handler can `?` them beside every other store call.
-/// They are store operations that happen to be about a credential, not
-/// network ones.
-pub fn stored(store: &yaiba_core::store::Store) -> yaiba_core::Result<Option<String>> {
-    Ok(store.meta(KEY_REFRESH)?.filter(|t| !t.is_empty()))
+/// The refresh token this machine has stored, if it has one.
+pub fn stored() -> Result<Option<String>> {
+    stored_at(&crate::credentials::default_path()?)
 }
 
-/// File a refresh token against this project.
-pub fn store(store: &yaiba_core::store::Store, token: &str) -> yaiba_core::Result<()> {
-    store.set_meta(KEY_REFRESH, token)
+/// As [`stored`], against a named credentials file.
+///
+/// The seam exists for tests and is not optional. A credential that
+/// lives at a path derived from `data_dir()` is a credential a test run
+/// shares with the person running it: `push_gcal` reads one and then
+/// goes to the network, so a handler test on a machine that is logged in
+/// would make live Calendar API calls — and, finding no calendar id in
+/// its in-memory store, create a stray calendar in a real account.
+/// `credentials.rs` already takes explicit paths for the same reason;
+/// this is that seam carried up to the caller that needed it.
+pub fn stored_at(path: &std::path::Path) -> Result<Option<String>> {
+    Ok(crate::credentials::load_from(path)?
+        .gcal_refresh_token
+        .filter(|t| !t.is_empty()))
+}
+
+/// File a refresh token for this machine.
+///
+/// Takes no `Store`, and that is the whole shape of #168: a credential
+/// is the person's, so writing it touches no project and needs no
+/// database. `gcal login` therefore runs without a yaiba to talk to,
+/// while `gcal push` still needs one — it is reading a plan.
+pub fn store(token: &str) -> Result<()> {
+    let mut credentials = crate::credentials::load()?;
+    credentials.gcal_refresh_token = Some(token.to_string());
+    crate::credentials::save(&credentials)
 }
 
 #[cfg(test)]
