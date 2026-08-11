@@ -31,7 +31,7 @@ axum                = { version = "0.8.9", features = ["macros"] }
 # already in the tree under iroh's TLS stack, so neither costs build time
 # — and hand-rolling either inside an auth flow is the wrong place to
 # save a dependency.
-base64              = "0.23.0"
+base64              = "0.23.1"
 chrono              = { version = "0.4.45", features = ["serde"] }
 clap                = { version = "4.6.6", features = ["derive", "env"] }
 # Only the fuzzy picker is used; the default feature set drags in the
