@@ -771,8 +771,8 @@ claude mcp add yaiba -- yaiba mcp  # once
 ```
 
 Point it elsewhere with `yaiba mcp --url http://127.0.0.1:9000`, or
-`YAIBA_MCP_URL`. It must be `http://` — this dials your own machine and
-is built without TLS.
+`YAIBA_MCP_URL`. `http://` is what you want — this dials your own
+machine, which has no certificate to present.
 
 Eight tools: `plan` reads everything (computed dates, critical path,
 what's blocked, what's overdue); `add_task`, `update_task`,
@@ -790,6 +790,90 @@ cutting one dependency can move the finish date a week.
 
 There is no authentication on the API, and the MCP server is a local
 process talking to `127.0.0.1`. Keep it that way.
+
+## Putting the plan on a Google Calendar
+
+`yaiba gcal push` writes the schedule to a calendar of its own, so the
+week you planned sits beside the meetings you actually have — on your
+phone, in whatever your team already looks at.
+
+It runs when you ask it to. Most tasks have no pinned start, so their
+dates come out of the dependency graph and one new edge moves many bars
+at once; pushing continuously would be a calendar rewriting itself while
+you think. On demand it is one reconcile: work out the difference, apply
+it, stop. Running it twice does nothing the second time.
+
+### Setting it up
+
+yaiba has no Google account of its own, so you lend it one. Once, about
+five minutes, in the [Cloud console](https://console.cloud.google.com/):
+
+1. **New project.** Any name.
+2. **Enable the Calendar API** — *APIs & Services* → *Library* → *Google
+   Calendar API* → *Enable*.
+3. **Configure the consent screen** — *External*. App name, your email
+   for support and for developer contact. Add the scope
+   `https://www.googleapis.com/auth/calendar`.
+4. **Publish it.** On the consent screen, set the publishing status to
+   *In production*. **Do not skip this** — a project left in *Testing*
+   is issued refresh tokens that expire after seven days, and you will
+   be logging in again every week without being told why.
+5. **Create credentials** — *Credentials* → *Create credentials* →
+   *OAuth client ID* → **Desktop app**. Keep the client id and secret.
+
+Then tell yaiba, and log in:
+
+```sh
+export YAIBA_GCAL_CLIENT_ID=....apps.googleusercontent.com
+export YAIBA_GCAL_CLIENT_SECRET=GOCSPX-...
+
+yaiba                 # in one window, and leave it
+yaiba gcal login      # opens your browser; grant access
+yaiba gcal push
+```
+
+Google will say the app is unverified. It is — it is a client you made
+for yourself five minutes ago, and nobody reviews those. *Advanced* →
+*Go to … (unsafe)*.
+
+The URL is printed as well as opened, so this works over SSH or on a
+machine with no browser; `--no-open` skips the launch and leaves only the
+print.
+
+**Both** processes read those variables: `yaiba gcal login` in the
+command you type, and `yaiba gcal push` in the server that holds your
+plan. So set them somewhere both inherit — a shell profile rather than
+the one window you happened to be in.
+
+### What lands on the calendar
+
+- **A calendar of its own**, called `yaiba: <project>`. Nothing is
+  written to your primary one, and getting the plan back off your
+  calendar is deleting that calendar rather than trusting yaiba to tidy
+  up after itself.
+- **All-day events**, one per task, spanning the dates the gantt draws.
+- **Leaves only.** A summary's span is the union of its children's, so
+  an event for it would book the same days twice.
+- **Events yaiba did not create are never touched.** Every event it
+  writes carries a private `yaibaTask` stamp, and anything without one
+  is somebody else's — including anything you add to that calendar
+  yourself.
+- **Removed tasks take their events with them.** A task deleted, or one
+  whose event you dragged somewhere it does not belong, is put back the
+  way the plan says on the next push.
+- **Renaming the project renames the calendar** on the next push — but
+  only while the calendar still carries the name yaiba gave it. Rename
+  it yourself on the Google side and it keeps the name you chose.
+
+`yaiba gcal push` acts on the **active project** — the one `:proj` is
+looking at — and each project gets its own calendar. The credential is
+currently stored per project too, so a second project needs its own
+`yaiba gcal login`; that is [#168](https://github.com/yukimemi/yaiba/issues/168)
+and it is the token's scope that is wrong, not yours for asking.
+
+Nothing is read back. Google's events carry no dependencies and no
+breakdown, and a start dragged in a calendar would fight the forward
+pass that computed it.
 
 ## How it works
 

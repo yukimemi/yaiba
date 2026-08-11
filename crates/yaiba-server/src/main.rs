@@ -9,6 +9,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
+use yaiba::browser;
+use yaiba::gcal;
 use yaiba::projects::{self, Registry};
 use yaiba::updater::{self, UpdateMode};
 use yaiba::{api, app, mcp};
@@ -22,6 +24,97 @@ const DEFAULT_PORT: u16 = 8188;
 /// How long the join hand-off waits for the peer before handing the UI
 /// over to the background sync driver.
 const FIRST_SYNC: Duration = Duration::from_secs(10);
+
+/// `yaiba gcal <action>`, run against a yaiba that is already up.
+///
+/// A client, not a second writer — the same arrangement `mcp` is in, and
+/// the honest failure is the same one: if nothing is running there is
+/// nothing to talk to, and starting a server from in here would mean
+/// guessing a port and a project.
+async fn gcal_command(action: GcalAction, url: Option<String>, open: bool) -> Result<()> {
+    let base = url.unwrap_or_else(|| format!("http://127.0.0.1:{DEFAULT_PORT}"));
+    let http = gcal::http();
+
+    match action {
+        GcalAction::Login => {
+            let creds = gcal::oauth::Credentials::from_env()?;
+            // Before the consent flow, not after. Consent costs five
+            // minutes, a browser and clicking through Google's
+            // unverified-app warning, and the token it yields is written
+            // by the *server* — so discovering there is no server at the
+            // end of all that throws the whole thing away, and the token
+            // cannot simply be printed instead: a refresh token in a
+            // terminal's scrollback is a long-lived credential somewhere
+            // nobody will remember it is.
+            http.get(format!("{base}/api/state"))
+                .send()
+                .await
+                .with_context(|| unreachable_yaiba(&base))?
+                .error_for_status()
+                .with_context(|| unreachable_yaiba(&base))?;
+
+            let token = gcal::oauth::consent(&creds, open).await?;
+            let response = http
+                .post(format!("{base}/api/gcal/token"))
+                .json(&serde_json::json!({ "refresh_token": token }))
+                .send()
+                .await
+                .with_context(|| unreachable_yaiba(&base))?;
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if !status.is_success() {
+                bail!("yaiba refused the token ({status}): {body}");
+            }
+            println!(
+                "yaiba can now write to your calendar. `yaiba gcal push` puts the plan on it."
+            );
+            Ok(())
+        }
+
+        GcalAction::Push => {
+            let response = http
+                .post(format!("{base}/api/gcal/push"))
+                .send()
+                .await
+                .with_context(|| unreachable_yaiba(&base))?;
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if !status.is_success() {
+                // The server already writes a sentence worth reading —
+                // the missing-credential case names the command to run,
+                // and a rejected refresh names the seven-day rule. Pass
+                // it through rather than wrapping it in a second one.
+                let text: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+                bail!("{}", text["error"].as_str().unwrap_or(body.as_str()));
+            }
+
+            let outcome: gcal::push::Outcome =
+                serde_json::from_str(&body).context("yaiba answered something unexpected")?;
+            if outcome.quiet() {
+                println!("The calendar already says what the plan says.");
+            } else {
+                println!(
+                    "{} added, {} updated, {} removed.",
+                    outcome.inserted, outcome.patched, outcome.deleted
+                );
+            }
+            // Never folded into the counts: a run that half landed looks
+            // exactly like one that landed, and the events it missed are
+            // the ones nobody thinks to check.
+            for refusal in &outcome.refused {
+                println!("  {refusal}");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn unreachable_yaiba(base: &str) -> String {
+    format!(
+        "no yaiba answering at {base}. This talks to a running one rather than starting its \
+         own, so the server stays the only writer — leave `yaiba` up in another window"
+    )
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -57,7 +150,9 @@ struct Cli {
     #[arg(long, global = true, env = "YAIBA_DB")]
     db: Option<PathBuf>,
 
-    /// Don't launch a browser on startup.
+    /// Don't launch a browser — on startup, or for the `gcal login`
+    /// consent screen. Both print the URL either way, which is what makes
+    /// this usable over SSH rather than a way to lose the address.
     #[arg(long, global = true)]
     no_open: bool,
 
@@ -242,6 +337,47 @@ enum Command {
         #[arg(long, value_name = "URL", env = "YAIBA_MCP_URL")]
         url: Option<String>,
     },
+
+    /// Put the plan on a Google Calendar.
+    ///
+    /// Deliberately not spelled `sync`. That word already means
+    /// peer-to-peer replication everywhere else in yaiba — the
+    /// `yaiba-sync` crate, `SyncNode`, the room a project shares — and
+    /// one word meaning two things is exactly what the `join` / `merge`
+    /// tangle cost. A longer subcommand is the cheaper side of that.
+    ///
+    /// Like `mcp`, this talks to a yaiba that is already running rather
+    /// than starting one, so the server stays the only writer.
+    Gcal {
+        #[command(subcommand)]
+        action: GcalAction,
+
+        /// The running yaiba to talk to.
+        ///
+        /// Its own variable rather than sharing `mcp`'s. That one is
+        /// named for MCP, and pointing an agent at a second yaiba would
+        /// otherwise silently redirect `gcal` as well — one name meaning
+        /// two things, which is the trade this repo has already paid for
+        /// once.
+        #[arg(long, value_name = "URL", env = "YAIBA_GCAL_URL")]
+        url: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum GcalAction {
+    /// Grant yaiba access to your calendar, once.
+    ///
+    /// The consent flow runs in this process rather than in the server
+    /// because the URL has to appear where you typed the command. Only
+    /// the resulting token is handed over, and the server is what writes
+    /// it down.
+    Login,
+    /// Reconcile the calendar against the plan.
+    ///
+    /// Idempotent: it works out the difference and applies it, so a
+    /// second run in a row does nothing.
+    Push,
 }
 
 /// What the resolved command says to open.
@@ -330,6 +466,9 @@ async fn main() -> Result<()> {
         // Serves an already-running yaiba, so it deliberately skips
         // everything below: no registry, no database, no listener.
         Some(Command::Mcp { url }) => return mcp::serve(url.clone()).await,
+        Some(Command::Gcal { action, url }) => {
+            return gcal_command(action.clone(), url.clone(), !cli.no_open).await;
+        }
         _ => {}
     }
 
@@ -516,7 +655,7 @@ async fn main() -> Result<()> {
         relay_only: cli.relay_only(),
     });
     if !cli.no_open {
-        open_browser(&url);
+        browser::open(&url);
     }
 
     axum::serve(listener, router)
@@ -1007,25 +1146,6 @@ fn banner(
             None => format!("  {DIM}▸ sync  off (--no-sync){RESET}"),
         }
     );
-}
-
-/// Best-effort browser launch. A failure here is cosmetic — the URL is
-/// already on screen — so it warns instead of aborting startup.
-fn open_browser(url: &str) {
-    #[cfg(target_os = "windows")]
-    // The empty string is `start`'s title argument; without it a quoted
-    // URL would be consumed as the window title and nothing opens.
-    let spawned = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .spawn();
-    #[cfg(target_os = "macos")]
-    let spawned = std::process::Command::new("open").arg(url).spawn();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let spawned = std::process::Command::new("xdg-open").arg(url).spawn();
-
-    if let Err(e) = spawned {
-        tracing::warn!("could not open a browser automatically: {e}");
-    }
 }
 
 #[cfg(test)]

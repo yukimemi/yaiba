@@ -27,6 +27,11 @@ debug = "line-tables-only"
 # so version bumps happen in one place.
 anyhow              = "1.0.104"
 axum                = { version = "0.8.9", features = ["macros"] }
+# The two halves of a PKCE `S256` challenge, and nothing else. Both are
+# already in the tree under iroh's TLS stack, so neither costs build time
+# — and hand-rolling either inside an auth flow is the wrong place to
+# save a dependency.
+base64              = "0.23.0"
 chrono              = { version = "0.4.45", features = ["serde"] }
 clap                = { version = "4.6.6", features = ["derive", "env"] }
 # Only the fuzzy picker is used; the default feature set drags in the
@@ -41,10 +46,23 @@ mime_guess          = "2.0.5"
 # dead weight; `ring` is the backend iroh already builds.
 rcgen               = { version = "0.14.9", default-features = false, features = ["ring"] }
 # The MCP server reaches the running yaiba through its own HTTP API rather
-# than opening the database — see the header of `mcp.rs` for why. TLS is
-# dropped because the only host it ever dials is loopback, and reqwest is
+# than opening the database — see the header of `mcp.rs` for why. reqwest is
 # already in the tree via iroh, so this adds no build time.
-reqwest             = { version = "0.13.4", default-features = false, features = ["json"] }
+#
+# TLS was dropped here while loopback was the only host anything dialled.
+# `gcal` dials googleapis.com, so it is back. `rustls` rather than
+# `default-tls` keeps it on the stack iroh already builds, so no second
+# TLS implementation is linked in. Note 0.13 renamed these: the
+# `rustls-tls-native-roots` / `-webpki-roots` split of 0.12 is gone, and
+# the root store now comes from `rustls-platform-verifier` — the machine's
+# own store, which is what `yaiba-sync`'s `ca_tls_config` goes out of its
+# way to read so a TLS-inspecting proxy's CA is trusted.
+reqwest             = { version = "0.13.4", default-features = false, features = [
+    "form",
+    "json",
+    "query",
+    "rustls",
+] }
 # The official MCP SDK. `transport-io` is the stdio server — what
 # `claude mcp add` launches — and `schemars` derives each tool's input
 # schema from its request struct, so the schema cannot drift from the
@@ -62,6 +80,8 @@ rustls-pki-types    = "1.15.1"
 schemars            = "1.2.2"
 serde               = { version = "1.0.229", features = ["derive"] }
 serde_json          = "1.0.151"
+# The other half of the PKCE challenge — see `base64` above.
+sha2                = "0.11.0"
 thiserror           = "2.0.20"
 tokio               = { version = "1.53.1", features = ["full"] }
 # Dev-only: `ServiceExt::oneshot`, for driving handlers without a socket.

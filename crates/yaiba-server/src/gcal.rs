@@ -23,7 +23,14 @@
 //! twice is a no-op the second time, and two replicas pointed at one
 //! calendar derive the same ids and so converge rather than duplicating.
 
-use chrono::{Duration, NaiveDate};
+pub mod client;
+pub mod oauth;
+pub mod push;
+
+use std::sync::OnceLock;
+use std::time::Duration;
+
+use chrono::NaiveDate;
 use yaiba_core::{
     graph::Schedule,
     model::{Task, TaskId},
@@ -46,6 +53,82 @@ const EVENT_ID_LEN: usize = 26;
 /// a quarter of them decode cleanly. Deleting on the strength of the id
 /// alone would eventually delete somebody's meeting.
 pub const STAMP_KEY: &str = "yaibaTask";
+
+/// How long any one call to Google — or to a local yaiba — may take.
+///
+/// `reqwest::Client::new()` applies none at all, and the failure that
+/// buys is not an error but a wait: a socket that opens and then goes
+/// quiet holds `push_gcal`'s handler for as long as the peer keeps it
+/// alive. Thirty seconds is far longer than any of these calls needs and
+/// far shorter than "until something gives up".
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The HTTP client every part of this module shares.
+///
+/// One rather than one per call: building a client builds a TLS
+/// configuration and a connection pool, and throwing both away after a
+/// single request is most of the cost of the request. `Client` is an
+/// `Arc` inside, so handing out clones is what it is designed for.
+pub fn http() -> reqwest::Client {
+    static SHARED: OnceLock<reqwest::Client> = OnceLock::new();
+    SHARED
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(REQUEST_TIMEOUT)
+                .build()
+                // Only a TLS backend that will not initialise can fail
+                // here, and that is not a condition a calendar push can
+                // do anything about — nor one the default client would
+                // have survived either.
+                .unwrap_or_default()
+        })
+        .clone()
+}
+
+/// Percent-encode everything outside RFC 3986's unreserved set.
+///
+/// One encoder for the query values in `oauth` and the path segments in
+/// `client`, which were byte-for-byte the same function in two files.
+/// Deliberately not a general URL encoder: what goes through it is a
+/// redirect URI, a scope, a nonce, a calendar id and an event id, so the
+/// reserved set is small and known. Encoding *more* than necessary is
+/// always safe here; a general encoder that gets a class wrong is not.
+pub fn escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(char::from(byte))
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// What a project's calendar is called.
+const TITLE_PREFIX: &str = "yaiba: ";
+
+/// The calendar title for a project.
+pub fn calendar_title(project: &str) -> String {
+    format!("{TITLE_PREFIX}{project}")
+}
+
+/// Whether a calendar still carries the name yaiba gave it.
+///
+/// A project renamed in yaiba should take its calendar's name with it,
+/// or `:rename` leaves the two disagreeing forever with nothing to say
+/// so. A calendar renamed on the *Google* side should not be renamed
+/// back — that was somebody deciding what to call their own calendar,
+/// and taking it from them on the next push is the same overreach as
+/// deleting an event yaiba did not create.
+///
+/// The prefix is what tells the two apart. It cannot distinguish
+/// "renamed to something else with the same prefix", which is a person
+/// choosing a name yaiba would have chosen and losing nothing by it.
+pub fn is_yaiba_title(title: &str) -> bool {
+    title.starts_with(TITLE_PREFIX)
+}
 
 /// The event id for a task: base32hex of the UUID's 16 bytes.
 pub fn event_id(task: TaskId) -> String {
@@ -119,7 +202,7 @@ pub fn task_id(event_id: &str) -> Option<TaskId> {
 /// zero-length.
 fn exclusive_end(last_day: NaiveDate) -> NaiveDate {
     last_day
-        .checked_add_signed(Duration::days(1))
+        .checked_add_signed(chrono::Duration::days(1))
         .unwrap_or(NaiveDate::MAX)
 }
 
@@ -455,6 +538,24 @@ mod tests {
             reconcile(std::slice::from_ref(&want), std::slice::from_ref(&forged)),
             vec![Action::Patch(want)]
         );
+    }
+
+    #[test]
+    fn a_calendar_yaiba_named_is_renameable_and_one_a_person_named_is_not() {
+        // The rename follows a project rename, which is the whole point
+        // — otherwise `:rename` leaves the calendar saying the old name
+        // for good, with neither side admitting they disagree.
+        assert!(is_yaiba_title(&calendar_title("work")));
+        assert!(is_yaiba_title("yaiba: anything at all"));
+
+        // And stops at the edge of what yaiba wrote. Somebody who
+        // renamed their own calendar keeps the name they chose; taking
+        // it back on the next push is the same overreach as deleting an
+        // event yaiba did not create.
+        assert!(!is_yaiba_title("Q3 planning"));
+        assert!(!is_yaiba_title("yaiba"));
+        assert!(!is_yaiba_title("my yaiba: work"));
+        assert!(!is_yaiba_title(""));
     }
 
     #[test]
