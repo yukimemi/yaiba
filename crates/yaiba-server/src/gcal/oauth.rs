@@ -369,7 +369,21 @@ async fn exchange(creds: &Credentials, form: &[(&str, &str)]) -> Result<TokenRes
 
 /// The refresh token this machine has stored, if it has one.
 pub fn stored() -> Result<Option<String>> {
-    Ok(crate::credentials::load()?
+    stored_at(&crate::credentials::default_path()?)
+}
+
+/// As [`stored`], against a named credentials file.
+///
+/// The seam exists for tests and is not optional. A credential that
+/// lives at a path derived from `data_dir()` is a credential a test run
+/// shares with the person running it: `push_gcal` reads one and then
+/// goes to the network, so a handler test on a machine that is logged in
+/// would make live Calendar API calls — and, finding no calendar id in
+/// its in-memory store, create a stray calendar in a real account.
+/// `credentials.rs` already takes explicit paths for the same reason;
+/// this is that seam carried up to the caller that needed it.
+pub fn stored_at(path: &std::path::Path) -> Result<Option<String>> {
+    Ok(crate::credentials::load_from(path)?
         .gcal_refresh_token
         .filter(|t| !t.is_empty()))
 }

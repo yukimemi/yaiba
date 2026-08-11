@@ -114,6 +114,14 @@ pub struct AppState {
     /// up the same way one opened at startup did. `None` under
     /// `--no-sync`, which is the whole reason this is an `Option`.
     transport: Option<yaiba_sync::Transport>,
+    /// Where machine-level credentials are read from. `None` means the
+    /// real one, under the data directory.
+    ///
+    /// Overridable so that tests are not sharing a file with the person
+    /// running them. Without it a handler test reads whatever Google
+    /// credential the developer happens to be logged in with, and
+    /// `push_gcal` goes on to make live API calls with it.
+    credentials: Option<PathBuf>,
 }
 
 /// The open projects, and the name of the one being looked at.
@@ -161,6 +169,21 @@ impl AppState {
             })),
             registry: Arc::new(tokio::sync::Mutex::new(())),
             transport,
+            credentials: None,
+        }
+    }
+
+    /// Read credentials from here rather than from the data directory.
+    pub fn with_credentials_path(mut self, path: PathBuf) -> Self {
+        self.credentials = Some(path);
+        self
+    }
+
+    /// The credentials file this server reads.
+    pub fn credentials_path(&self) -> anyhow::Result<PathBuf> {
+        match &self.credentials {
+            Some(path) => Ok(path.clone()),
+            None => crate::credentials::default_path(),
         }
     }
 
@@ -950,12 +973,17 @@ async fn push_gcal(State(state): State<AppState>) -> ApiResult<Json<crate::gcal:
     // put every other request behind Google's rate limiter.
     let (token, calendar, tasks, deps) = {
         let store = lock(&project);
-        let token = crate::gcal::oauth::stored()
+        let token = state
+            .credentials_path()
+            .and_then(|path| crate::gcal::oauth::stored_at(&path))
             .map_err(|e| ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?
             .ok_or_else(|| {
+                // Not "this project has no credential": the credential is
+                // the machine's, and saying otherwise would steer people
+                // back to the per-project model #168 removed.
                 ApiError::message(
                     StatusCode::PRECONDITION_FAILED,
-                    "this project has no Google credential yet — run `yaiba gcal login`",
+                    "no Google credential on this machine yet — run `yaiba gcal login`",
                 )
             })?;
         let calendar = store.meta(crate::gcal::oauth::KEY_CALENDAR)?;
@@ -1323,7 +1351,26 @@ mod handler_tests {
                 )
             })
             .collect();
-        router(AppState::with_projects(projects, None))
+        // Never the real credentials file: `push_gcal` reads one and
+        // then goes to the network, so a test sharing it with the
+        // developer would make live Calendar API calls under their
+        // account. The path deliberately does not exist.
+        router(
+            AppState::with_projects(projects, None)
+                .with_credentials_path(server_credentials_path()),
+        )
+    }
+
+    /// A credentials path of this process's own, which is never created.
+    ///
+    /// Not `YAIBA_DATA_DIR`: `set_var` is `unsafe` in edition 2024 and
+    /// the environment is shared across the whole test binary, which is
+    /// the hazard `seed_default` already documents.
+    fn server_credentials_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "yaiba-test-credentials-{}.toml",
+            std::process::id()
+        ))
     }
 
     async fn send(
@@ -1351,6 +1398,26 @@ mod handler_tests {
     /// The regression: reordering `is_open` under the registry lock left
     /// the no-op shortcut in front of it, so renaming a project that was
     /// never open *to its own name* answered 200 instead of 404.
+    #[tokio::test]
+    async fn a_push_never_reads_the_credential_the_developer_is_logged_in_with() {
+        // The hazard this guards is not a wrong assertion, it is a live
+        // API call: `push_gcal` reads a token and then goes to the
+        // network, and its in-memory store names no calendar — so a run
+        // that got that far would create a stray `yaiba: work` calendar
+        // in somebody's real Google account, from `cargo test`.
+        let path = server_credentials_path();
+        assert!(
+            !path.exists(),
+            "the test server must not point at a file anybody is using: {}",
+            path.display()
+        );
+        assert_ne!(
+            Some(path.as_path()),
+            crate::credentials::default_path().ok().as_deref(),
+            "the test server must not share the real credentials file"
+        );
+    }
+
     #[tokio::test]
     async fn pushing_before_there_is_anything_to_push_with_is_a_412() {
         // Two preconditions, both 412 and either can be the one that
