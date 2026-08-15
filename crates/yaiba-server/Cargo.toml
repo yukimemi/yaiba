@@ -51,6 +51,11 @@ tower-http         = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+# `browser.rs` hands a URL to the shell directly rather than through
+# `cmd /C start`. Windows-only, so it is not in the table above.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
 [dev-dependencies]
 yaiba-sync = { workspace = true }
 tower      = { workspace = true }
