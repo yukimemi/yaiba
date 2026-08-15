@@ -700,6 +700,19 @@ fn substitute(date: NaiveDate) -> Option<&'static str> {
         cursor = cursor.pred_opt()?;
         // Nothing but holidays may stand between: the first ordinary day
         // behind us means there is nothing to carry over.
+        //
+        // *Statutory* holidays, specifically — a 国民の休日 in the gap
+        // would break the chain rather than extend it. That is unreachable
+        // under the law as it stands, because the sandwich rule needs a
+        // 祝日 on both sides and the only run it produces (敬老の日, the
+        // 22nd, 秋分の日) is bounded by a Monday, which is never the Sunday
+        // this walk is looking for. It stops being unreachable the moment
+        // a fixed-date holiday is added next to an existing one, or a
+        // Happy-Monday holiday is moved back to a fixed date: then two
+        // 祝日 could straddle an ordinary day with a Sunday 祝日 behind
+        // them, and the day after would silently keep working. Reading
+        // `jp_holiday` here instead would fix it and recurse, so the
+        // reachable version is a small ordered pass over the run.
         statutory(cursor)?;
         if cursor.weekday() == Weekday::Sun {
             return Some("振替休日");
@@ -871,6 +884,24 @@ mod tests {
     }
 
     #[test]
+    fn a_zero_count_forwards_is_the_same_answer() {
+        // The other way round, and the one the doc's `count > 0` line
+        // does not cover either: `to` is genuinely the *later* date, and
+        // the count is still zero because both ends snap forward onto the
+        // same Thursday. Nothing was walked, so the answer is about
+        // `from`, exactly as it is when the dates are the other way round.
+        let cal = with_jp();
+        let sat = day("2026-05-02");
+        let sun = day("2026-05-03");
+
+        assert!(sun > sat, "the later date, and still a count of zero");
+        assert_eq!(cal.count(sat, sun), 0);
+        assert_eq!(cal.advance(sat, 0), cal.snap_forward(sat));
+        assert_eq!(cal.advance(sat, 0), day("2026-05-07"));
+        assert_eq!(cal.snap_forward(sun), day("2026-05-07"));
+    }
+
+    #[test]
     fn counting_backwards_keeps_the_sign() {
         let cal = workdays();
         let (mon, fri) = (day("2026-08-17"), day("2026-08-21"));
@@ -954,6 +985,66 @@ mod tests {
         // 1st; the next working day after it is the 7th.
         assert_eq!(cal.advance(day("2026-05-01"), 1), day("2026-05-07"));
         assert_eq!(cal.count(day("2026-05-01"), day("2026-05-07")), 1);
+    }
+
+    #[test]
+    fn retreating_steps_back_over_the_same_run() {
+        let cal = with_jp();
+        // Backwards is the direction the scheduler's late pass walks, and
+        // it has its own snap and its own loop — a forward test says
+        // nothing about it. From the Thursday after Golden Week, one
+        // working day back is the Friday *before* it: 05-02 and 05-03 are
+        // the weekend, and the 4th, 5th and 6th are holidays.
+        assert_eq!(cal.retreat(day("2026-05-07"), 1), day("2026-05-01"));
+        assert_eq!(cal.retreat(day("2026-05-07"), 2), day("2026-04-30"));
+        // And over September's sandwich, where the run is three holidays
+        // against a weekend rather than the other way round: 敬老の日 the
+        // 21st, 国民の休日 the 22nd, 秋分の日 the 23rd.
+        assert_eq!(cal.retreat(day("2026-09-24"), 1), day("2026-09-18"));
+        // A negative retreat is an advance, which is the same function
+        // read from the other end.
+        assert_eq!(cal.retreat(day("2026-05-01"), -1), day("2026-05-07"));
+    }
+
+    #[test]
+    fn a_holiday_on_a_weekend_is_a_name_and_not_a_day() {
+        // Both halves of the rule `off_days` documents. 憲法記念日 falls on
+        // Sunday 2026-05-03, so it is listed — the chart's header has a
+        // name to show — while the day off it would have been was already
+        // a weekend, and the arithmetic must not count it twice.
+        let cal = with_jp();
+        assert_eq!(
+            cal.off_days(day("2026-05-01"), day("2026-05-31")),
+            vec![
+                (day("2026-05-03"), "憲法記念日".to_string()),
+                (day("2026-05-04"), "みどりの日".to_string()),
+                (day("2026-05-05"), "こどもの日".to_string()),
+                (day("2026-05-06"), "振替休日".to_string()),
+            ]
+        );
+
+        // The same May with the Sunday holiday simply absent: only the
+        // three weekdays are days off. Every date this calendar answers is
+        // the date the bundled table answers, which is what "changes
+        // nothing about whether the day is worked" means once it is
+        // measured rather than asserted.
+        let mut nameless = workdays();
+        for date in ["2026-05-04", "2026-05-05", "2026-05-06"] {
+            nameless
+                .marks
+                .insert(day(date), DayMark::Holiday(String::new()));
+        }
+        for (from, to) in [("2026-04-30", "2026-05-07"), ("2026-05-01", "2026-05-11")] {
+            assert_eq!(
+                cal.count(day(from), day(to)),
+                nameless.count(day(from), day(to)),
+                "the Sunday holiday added a working day between {from} and {to}"
+            );
+        }
+        assert_eq!(
+            cal.retreat(day("2026-05-07"), 1),
+            nameless.retreat(day("2026-05-07"), 1)
+        );
     }
 
     #[test]

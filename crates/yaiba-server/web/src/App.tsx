@@ -3730,6 +3730,17 @@ export function App() {
       });
       setShowProjects(true);
     }
+    // A result that *writes* is refused as a whole while the view is
+    // scrubbed to `:asof`, and it has to be refused here rather than only
+    // inside the write: `liveOnly` says why, and the optimistic `message`
+    // at the end of this function would then print straight over the
+    // refusal and claim a change that never landed. The write itself was
+    // always blocked — `applyCalendar` and `run` keep their own guard —
+    // so what this fixes is the sentence, which was the half that lied.
+    //
+    // `cal` and `ops` are the two families that carry a message alongside
+    // a write; `gcal.push` reports its own outcome and returns none.
+    if ((result.cal || result.ops) && !liveOnly()) return;
     if (result.gcal?.push) pushGcal();
     if (result.cal) applyCalendar(result.cal);
     if (result.project?.pick) {

@@ -75,7 +75,7 @@ function check(label: string, got: string, want: string): void {
 // Golden Week 2026, which is the week this feature exists for: 05-01 is
 // a Friday, 05-02 and 05-03 the weekend, 05-04 みどりの日, 05-05
 // こどもの日, and 05-06 the substitute for 憲法記念日 falling on the
-// Sunday. Six days off in a row, so a one-day task starting on the
+// Sunday. Five days off in a row, so a one-day task starting on the
 // Friday finishes on Thursday 05-07 — a gap no hand-written fixture
 // would think to invent, and exactly the case a calendar is bought for.
 //

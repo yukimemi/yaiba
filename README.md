@@ -647,6 +647,15 @@ produce a list of dates can feed it:
 curl -s https://example.test/holidays.csv | yaiba cal holiday --file -
 ```
 
+A line that names no date is dropped, and a date named twice keeps the
+last name it was given — the format is forgiving on purpose. It is not
+quiet about it, though, because a file that lost two lines must not print
+what a clean one prints:
+
+```text
+3 days marked off. (2 lines skipped, 1 date repeated)
+```
+
 **One request, so it either all lands or none of it does.** The server
 validates every line before writing any of them; a typo on line 40 leaves
 the calendar exactly as it was and says which date it choked on. Fifty

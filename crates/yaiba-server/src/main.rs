@@ -115,6 +115,10 @@ async fn cal_command(action: Option<CalAction>, url: Option<String>) -> Result<(
     let base = url.unwrap_or_else(|| format!("http://127.0.0.1:{DEFAULT_PORT}"));
     let http = gcal::http();
 
+    // What the file did not give us, which only the marking verbs can
+    // pick up and only the count below can put in context.
+    let mut note = DayFileNote::default();
+
     // Built before anything is sent, so a bad week spec or an unreadable
     // file costs no request at all.
     let patch = match &action {
@@ -146,15 +150,22 @@ async fn cal_command(action: Option<CalAction>, url: Option<String>) -> Result<(
         // names them in its refusal, so checking here would be a second
         // copy that goes stale the day another one is added.
         Some(CalAction::Region { name }) => Some(serde_json::json!({ "region": name })),
-        Some(CalAction::Holiday { date, name, file }) => Some(serde_json::json!({
-            "days": day_map(date.as_deref(), name.as_deref(), file.as_deref(), Mark::Off)?
-        })),
-        Some(CalAction::Workday { date, file }) => Some(serde_json::json!({
-            "days": day_map(date.as_deref(), None, file.as_deref(), Mark::Worked)?
-        })),
-        Some(CalAction::Clear { date, file }) => Some(serde_json::json!({
-            "days": day_map(date.as_deref(), None, file.as_deref(), Mark::Forget)?
-        })),
+        Some(CalAction::Holiday { date, name, file }) => {
+            let (days, parsed) =
+                day_map(date.as_deref(), name.as_deref(), file.as_deref(), Mark::Off)?;
+            note = parsed;
+            Some(serde_json::json!({ "days": days }))
+        }
+        Some(CalAction::Workday { date, file }) => {
+            let (days, parsed) = day_map(date.as_deref(), None, file.as_deref(), Mark::Worked)?;
+            note = parsed;
+            Some(serde_json::json!({ "days": days }))
+        }
+        Some(CalAction::Clear { date, file }) => {
+            let (days, parsed) = day_map(date.as_deref(), None, file.as_deref(), Mark::Forget)?;
+            note = parsed;
+            Some(serde_json::json!({ "days": days }))
+        }
     };
 
     let marked = patch
@@ -190,7 +201,11 @@ async fn cal_command(action: Option<CalAction>, url: Option<String>) -> Result<(
             Some(CalAction::Clear { .. }) => "cleared",
             _ => "marked off",
         };
-        println!("{days} {} {verb}.", if days == 1 { "day" } else { "days" });
+        println!(
+            "{days} {} {verb}.{}",
+            if days == 1 { "day" } else { "days" },
+            note.aside()
+        );
     }
     // Every write answers with where the plan then stands, which is the
     // bargain the rest of yaiba makes: the calendar is only interesting
@@ -226,13 +241,18 @@ impl Mark {
 /// Dates are passed through as typed rather than parsed here. The server
 /// validates them and names the one it choked on, and a second parser here
 /// would only be able to disagree with it.
+///
+/// The [`DayFileNote`] comes back with the map because what a file lost is
+/// only interesting next to how many days went out — and the count is
+/// printed by the caller.
 fn day_map(
     date: Option<&str>,
     name: Option<&str>,
     file: Option<&std::path::Path>,
     mark: Mark,
-) -> Result<serde_json::Map<String, serde_json::Value>> {
+) -> Result<(serde_json::Map<String, serde_json::Value>, DayFileNote)> {
     let mut days = serde_json::Map::new();
+    let mut note = DayFileNote::default();
     if let Some(path) = file {
         let text = if path == std::path::Path::new("-") {
             std::io::read_to_string(std::io::stdin()).context("could not read stdin")?
@@ -240,13 +260,16 @@ fn day_map(
             std::fs::read_to_string(path)
                 .with_context(|| format!("could not read {}", path.display()))?
         };
-        let lines = parse_day_file(&text);
+        let (lines, parsed) = parse_day_file(&text);
+        note = parsed;
         if lines.is_empty() {
             bail!(
                 "{} named no days — one `date[,name]` per line, `#` for a comment",
                 path.display()
             );
         }
+        // Last one wins, which is what a map does and what the note has
+        // already counted.
         for (day, label) in lines {
             days.insert(day, mark.value(&label));
         }
@@ -254,7 +277,50 @@ fn day_map(
     if let Some(day) = date {
         days.insert(day.to_string(), mark.value(name.unwrap_or_default()));
     }
-    Ok(days)
+    Ok((days, note))
+}
+
+/// What a day file lost on the way in, so the sentence can say so.
+///
+/// Both of these are *tolerated*: the format is documented as forgiving,
+/// and refusing a whole file over a stray line would be the worse
+/// failure — the file usually came out of somebody else's spreadsheet.
+/// But a tolerated line and a clean file must not print the same thing.
+/// The count that gets printed is the size of the map that was sent, and
+/// somebody comparing it against the lines they wrote is owed the
+/// difference rather than left to find it on the chart.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct DayFileNote {
+    /// Lines that named no date at all — `,Christmas`, a separator with
+    /// nothing in front of it.
+    skipped: usize,
+    /// Dates named more than once. The last one wins, which is what the
+    /// map does and not something worth changing; it is only worth
+    /// mentioning.
+    repeated: usize,
+}
+
+impl DayFileNote {
+    /// The aside that follows the count, empty when the file was clean.
+    ///
+    /// Phrased and pluralised like the count it trails, because it is
+    /// read as one sentence: `3 days marked off. (2 lines skipped, 1 date
+    /// repeated)`.
+    fn aside(self) -> String {
+        let mut parts = Vec::new();
+        if self.skipped > 0 {
+            let noun = if self.skipped == 1 { "line" } else { "lines" };
+            parts.push(format!("{} {noun} skipped", self.skipped));
+        }
+        if self.repeated > 0 {
+            let noun = if self.repeated == 1 { "date" } else { "dates" };
+            parts.push(format!("{} {noun} repeated", self.repeated));
+        }
+        match parts.is_empty() {
+            true => String::new(),
+            false => format!(" ({})", parts.join(", ")),
+        }
+    }
 }
 
 /// `date[,name]` a line, `#` comments and blank lines skipped.
@@ -270,8 +336,17 @@ fn day_map(
 /// leading BOM Excel writes is stripped — otherwise the first date arrives
 /// as `\u{feff}2026-01-01` and the server refuses it with a message that
 /// looks like nonsense.
-fn parse_day_file(text: &str) -> Vec<(String, String)> {
-    text.strip_prefix('\u{feff}')
+///
+/// Every line kept is returned in the order it was written, duplicates
+/// included, because the map the caller builds is where last-one-wins
+/// belongs. What is *not* kept, and what was written twice, comes back
+/// beside them as a [`DayFileNote`] — see there for why neither is an
+/// error.
+fn parse_day_file(text: &str) -> (Vec<(String, String)>, DayFileNote) {
+    let mut note = DayFileNote::default();
+    let mut seen = std::collections::HashSet::new();
+    let days = text
+        .strip_prefix('\u{feff}')
         .unwrap_or(text)
         .lines()
         .map(str::trim)
@@ -283,8 +358,18 @@ fn parse_day_file(text: &str) -> Vec<(String, String)> {
             ),
             None => (line.to_string(), String::new()),
         })
-        .filter(|(day, _)| !day.is_empty())
-        .collect()
+        .filter(|(day, _)| {
+            if day.is_empty() {
+                note.skipped += 1;
+                return false;
+            }
+            if !seen.insert(day.clone()) {
+                note.repeated += 1;
+            }
+            true
+        })
+        .collect();
+    (days, note)
 }
 
 /// Just enough of `/api/state` to say where the calendar stands.
@@ -1506,7 +1591,7 @@ mod tests {
 
     #[test]
     fn a_day_file_is_one_date_and_an_optional_name_per_line() {
-        let parsed = parse_day_file(
+        let (parsed, note) = parse_day_file(
             "\u{feff}# 2026, as the office keeps it\n\
              \n\
              2026-12-29,年末休み\n\
@@ -1528,23 +1613,83 @@ mod tests {
                 ),
             ]
         );
-        assert!(parse_day_file("# nothing but a comment\n\n").is_empty());
+        // A clean file has nothing to say for itself, and the count that
+        // gets printed then stands on its own.
+        assert_eq!(note, DayFileNote::default());
+        assert_eq!(note.aside(), "");
+        assert!(parse_day_file("# nothing but a comment\n\n").0.is_empty());
+    }
+
+    #[test]
+    fn a_day_file_says_what_it_could_not_use() {
+        // Neither a skipped line nor a repeated date is an error — the
+        // format is forgiving on purpose — but neither may look like a
+        // clean file either. All three lines here are what a spreadsheet
+        // produces: a name that ended up in the second column with no
+        // date in the first, a row that is nothing but its separator, and
+        // the same shutdown day entered twice.
+        let (parsed, note) = parse_day_file(
+            ",Christmas\n\
+             2026-12-29,年末休み\n\
+             ,\n\
+             2026-12-30\n\
+             2026-12-29,冬期休暇\n",
+        );
+        assert_eq!(
+            parsed,
+            vec![
+                ("2026-12-29".to_string(), "年末休み".to_string()),
+                ("2026-12-30".to_string(), String::new()),
+                // Kept in the order it was written; the map is where the
+                // last one wins.
+                ("2026-12-29".to_string(), "冬期休暇".to_string()),
+            ]
+        );
+        assert_eq!(
+            note,
+            DayFileNote {
+                skipped: 2,
+                repeated: 1
+            }
+        );
+        assert_eq!(note.aside(), " (2 lines skipped, 1 date repeated)");
+
+        // Through the path that actually reads a file: the map is two
+        // days where four lines were written, and the note is what says
+        // where the other two went.
+        let path = std::env::temp_dir().join("yaiba-cal-day-file-note.csv");
+        std::fs::write(
+            &path,
+            ",Christmas\n2026-12-29,年末休み\n2026-12-29,冬期休暇\n2026-12-30\n",
+        )
+        .expect("write the day file");
+        let mapped = day_map(None, None, Some(&path), Mark::Off);
+        std::fs::remove_file(&path).ok();
+
+        let (days, note) = mapped.unwrap();
+        assert_eq!(days.len(), 2);
+        assert_eq!(
+            days["2026-12-29"],
+            serde_json::json!("冬期休暇"),
+            "last one wins, as the map does"
+        );
+        assert_eq!(note.aside(), " (1 line skipped, 1 date repeated)");
     }
 
     #[test]
     fn a_day_map_carries_what_each_verb_means() {
         // The three marks are three values, and `null` is the one that says
         // "no opinion" — LWW has no delete, so forgetting has to be written.
-        let off = day_map(Some("2026-05-01"), Some("創立記念日"), None, Mark::Off).unwrap();
+        let (off, _) = day_map(Some("2026-05-01"), Some("創立記念日"), None, Mark::Off).unwrap();
         assert_eq!(off["2026-05-01"], serde_json::json!("創立記念日"));
 
-        let unnamed = day_map(Some("2026-05-01"), None, None, Mark::Off).unwrap();
+        let (unnamed, _) = day_map(Some("2026-05-01"), None, None, Mark::Off).unwrap();
         assert_eq!(unnamed["2026-05-01"], serde_json::json!(true));
 
-        let worked = day_map(Some("2026-08-15"), None, None, Mark::Worked).unwrap();
+        let (worked, _) = day_map(Some("2026-08-15"), None, None, Mark::Worked).unwrap();
         assert_eq!(worked["2026-08-15"], serde_json::json!(false));
 
-        let forgotten = day_map(Some("2026-08-15"), None, None, Mark::Forget).unwrap();
+        let (forgotten, _) = day_map(Some("2026-08-15"), None, None, Mark::Forget).unwrap();
         assert_eq!(forgotten["2026-08-15"], serde_json::Value::Null);
     }
 

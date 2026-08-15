@@ -1610,4 +1610,27 @@ mod tests {
             "the same number counted in squares lands on a Saturday"
         );
     }
+
+    #[test]
+    fn absurd_numbers_saturate_on_a_working_day_calendar_too() {
+        // The saturation test above runs on `Days`, where an absurd number
+        // is one clamped addition. On `Workdays` the same number is a
+        // *walk* — every step asks the calendar whether the day is worked
+        // — so the guard being tested is a different one (`MAX_WALK`), and
+        // the failure it prevents is a hang rather than a panic. Reachable
+        // from one peer writing `duration_days` nobody bounded.
+        let mut huge = task(1, 1, Some(day(3)));
+        huge.duration_days = i64::MAX;
+        let tasks = vec![huge, task(2, i64::MAX, None), task(3, 1, None)];
+        let deps = vec![dep_lag(1, 2, i64::MAX), dep_lag(2, 3, i64::MAX)];
+
+        let s = schedule(&tasks, &deps, day(3), &workdays());
+        for n in [1, 2, 3] {
+            assert!(
+                find(&s, n).end >= find(&s, n).start,
+                "task {n} came back inside out"
+            );
+        }
+        assert!(s.end >= s.start);
+    }
 }

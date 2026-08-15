@@ -1415,6 +1415,14 @@ degradation has stopped working and that is the bug to fix.
     writes one and the first date otherwise arrives as
     `\u{feff}2026-01-01` and is refused with a message that reads as
     nonsense.
+  - **Forgiving, but not silent.** A line with no date in front of its
+    separator is dropped and a date written twice keeps its last name —
+    refusing the file over either would be the worse failure, since it
+    usually came out of somebody else's spreadsheet. What is not
+    acceptable is printing the same sentence a clean file prints: the
+    count is the size of the map that was sent, so `parse_day_file`
+    returns what it lost beside the lines it kept and the count carries
+    it, `3 days marked off. (2 lines skipped, 1 date repeated)`.
   - `week` is parsed client-side and `region` is not, and the asymmetry is
     deliberate: the API takes only the mask, so the words have to be
     resolved somewhere, while the *list of regions* belongs to the build

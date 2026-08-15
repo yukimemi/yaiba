@@ -1254,10 +1254,16 @@ struct CalendarPatch {
     /// values spelled in one place regardless.
     #[serde(default)]
     mode: Option<String>,
-    /// Taken as a list rather than `[bool; 7]` so a wrong length is a 400
-    /// naming the problem, not an extractor rejection naming a type.
+    /// Seven `true`/`false`, Monday first — but taken as raw JSON and
+    /// checked by hand, for the same reason as `mode`. Typed
+    /// `Option<Vec<bool>>` the *length* was a 400 while an element of the
+    /// wrong type was serde's 422 of `text/plain`, and `[1,1,1,1,1,0,0]`
+    /// is the likeliest way to get this wrong. Every field on this route is
+    /// tolerant here and strict in the handler, so that the promise "every
+    /// refusal is a 400 with a sentence in it" is true rather than nearly
+    /// true.
     #[serde(default)]
-    week: Option<Vec<bool>>,
+    week: Option<serde_json::Value>,
     /// Which built-in holiday table to use: `"none"` or `"jp"`. Parsed by
     /// hand for the same reason as `mode`.
     #[serde(default)]
@@ -1277,7 +1283,7 @@ struct CalendarPatch {
     /// to stay different things, the way `TaskPatch` keeps them apart for
     /// the dates.
     #[serde(default)]
-    days: Option<BTreeMap<String, serde_json::Value>>,
+    days: Option<serde_json::Value>,
 }
 
 /// Change the working calendar.
@@ -1330,14 +1336,34 @@ async fn put_calendar(
         None => None,
     };
 
-    let week = match patch.week {
-        Some(week) => {
-            let week: [bool; 7] = week.try_into().map_err(|week: Vec<bool>| {
+    let week = match &patch.week {
+        Some(value) => {
+            let values = value.as_array().ok_or_else(|| {
                 ApiError::message(
                     StatusCode::BAD_REQUEST,
-                    format!("week must be 7 days starting Monday — got {}", week.len()),
+                    "week must be seven true/false values, Monday first",
                 )
             })?;
+            if values.len() != 7 {
+                return Err(ApiError::message(
+                    StatusCode::BAD_REQUEST,
+                    format!("week must be 7 days starting Monday — got {}", values.len()),
+                ));
+            }
+            let mut week = [false; 7];
+            for (slot, value) in week.iter_mut().zip(values) {
+                // Named rather than left to serde: `1`/`0` is how somebody
+                // who has seen the stored `"1111100"` mask will write this,
+                // and a refusal that says so beats one naming a Rust type.
+                *slot = value.as_bool().ok_or_else(|| {
+                    ApiError::message(
+                        StatusCode::BAD_REQUEST,
+                        format!(
+                            "week takes true and false, not {value} — seven of them, Monday first"
+                        ),
+                    )
+                })?;
+            }
             if !week.contains(&true) {
                 return Err(ApiError::message(
                     StatusCode::BAD_REQUEST,
@@ -1352,7 +1378,16 @@ async fn put_calendar(
     // Parsed into store terms up front, so a typo in the last date of a
     // long list costs nothing.
     let mut marks: Vec<(NaiveDate, Option<DayMark>)> = Vec::new();
-    for (day, value) in patch.days.unwrap_or_default() {
+    let days = match &patch.days {
+        Some(value) => value.as_object().ok_or_else(|| {
+            ApiError::message(
+                StatusCode::BAD_REQUEST,
+                "days is a map of date to name, true, false or null",
+            )
+        })?,
+        None => &serde_json::Map::new(),
+    };
+    for (day, value) in days {
         let date: NaiveDate = day.parse().map_err(|_| {
             ApiError::message(
                 StatusCode::BAD_REQUEST,
@@ -1360,7 +1395,7 @@ async fn put_calendar(
             )
         })?;
         let mark = match value {
-            serde_json::Value::String(name) => Some(DayMark::Holiday(name)),
+            serde_json::Value::String(name) => Some(DayMark::Holiday(name.clone())),
             serde_json::Value::Bool(true) => Some(DayMark::Holiday(String::new())),
             serde_json::Value::Bool(false) => Some(DayMark::Working),
             serde_json::Value::Null => None,
