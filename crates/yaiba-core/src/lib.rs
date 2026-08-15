@@ -10,12 +10,14 @@
 //! memory, so a plain `rusqlite::Connection` behind a mutex beats
 //! dragging an async SQL runtime in. The server crate owns the mutex.
 
+pub mod calendar;
 pub mod crdt;
 pub mod graph;
 pub mod hlc;
 pub mod model;
 pub mod store;
 
+pub use calendar::{Calendar, CalendarMode, DayMark, HolidaySet, jp_holiday, jp_holidays};
 pub use crdt::{Entry, VersionVector};
 pub use graph::{Schedule, Scheduled, schedule};
 pub use hlc::{Clock, Hlc, NodeId};

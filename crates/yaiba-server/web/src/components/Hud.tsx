@@ -40,6 +40,15 @@ interface Props {
   peerCount: number;
   syncOn: boolean;
   /**
+   * The plan counts durations in working days.
+   *
+   * Shown only when it is true, and only as a word: it is the answer to
+   * "why does a five-day task cover seven columns", which is a question
+   * somebody asks *at* the screen. In calendar-day mode there is
+   * nothing surprising to explain, so there is nothing to say.
+   */
+  workdays: boolean;
+  /**
    * The date the whole view is computed against — always shown, because
    * every bar, percentage and overdue flag on screen is relative to it.
    */
@@ -96,6 +105,7 @@ export function Hud({
   projectEnd,
   peerCount,
   syncOn,
+  workdays,
   reference,
   isAsOf,
   asofOpen,
@@ -295,6 +305,22 @@ export function Hud({
       {overdueCount > 0 && (
         <span className="hud__stat hud__stat--overdue">
           {t("overdue")} <b>{overdueCount}</b>
+        </span>
+      )}
+      {/* Beside `ends`, because it is the readout that changes meaning:
+          the finish date is the same kind of thing in either mode, but
+          the durations behind it are not. A word, not a switch — `:cal`
+          reports and `:cal off` reverts, and a chip that turned the
+          whole plan's arithmetic over on one click would be the loudest
+          button in the bar. */}
+      {workdays && (
+        <span
+          className="hud__cal"
+          title={t(
+            "durations are working days — weekends and holidays are skipped (:cal)",
+          )}
+        >
+          {t("▤ workdays")}
         </span>
       )}
       <span className="hud__stat">

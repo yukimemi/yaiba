@@ -53,6 +53,66 @@ pub const FIELD_LAG: &str = "lag";
 /// Prefix for the per-tag boolean entries.
 pub const TAG_PREFIX: &str = "tag:";
 
+/// Key of the project's working calendar: a singleton entity, `cal`.
+///
+/// One entity rather than one per year, because there is one calendar —
+/// and it has to *sync*. The schedule is recomputed on every replica from
+/// tasks and edges, so a calendar living in `meta` (which `entries_since`
+/// never sends) would give two peers two sets of dates for the same plan.
+pub const CAL_KEY: &str = "cal";
+/// `"days"` (calendar days) or `"workdays"`. Anything else reads as
+/// `"days"`.
+pub const FIELD_CAL_MODE: &str = "mode";
+/// The working week as seven characters, **Monday first**: `"1111100"`.
+/// A wrong length or a stray character reads as the default week.
+pub const FIELD_CAL_WEEK: &str = "week";
+/// Which built-in holiday table applies: `"none"` or `"jp"`. An unknown
+/// name reads as `"none"`.
+///
+/// A name and not a boolean, because a boolean would have written "Japan
+/// or nowhere" into the wire format — and the table is one option, not the
+/// shape of the feature. Adding a region is then a variant and a function
+/// on this side of the wire, with nothing to migrate on the other.
+///
+/// This is the one place the additive argument [`FIELD_LAG`] makes does
+/// *not* fully hold, and it is worth being straight about: the table lives
+/// in code, so a replica that has never heard of `"us"` degrades that row
+/// to `"none"` and computes different dates for the same plan rather than
+/// merely ignoring a setting. Unavoidable while the tables ship with the
+/// binary — the escape hatch is `holiday:` entries, which are data and
+/// therefore mean the same thing on every version.
+pub const FIELD_CAL_HOLIDAYS: &str = "holidays";
+/// Prefix for the per-day override entries: `holiday:2026-05-01`.
+///
+/// One entry per day, the way `tag:` is one entry per tag rather than a
+/// single array — so two peers marking two different days both keep their
+/// day, and only a clash on the *same* day is a last-writer-wins
+/// question.
+pub const HOLIDAY_PREFIX: &str = "holiday:";
+
+/// Field name of one day's override on the `cal` key.
+///
+/// The whole calendar is a pure addition to a live protocol, which is what
+/// makes it safe to ship into a running group — the same argument
+/// [`FIELD_LAG`] makes for itself. A replica that has never heard of
+/// `cal` still stores these rows and still forwards them (sync is
+/// key-agnostic: `entries_since` diffs a version vector, it never reads a
+/// key), it just ignores them in `materialize` and keeps scheduling in
+/// calendar days. So an old peer is a *carrier* of a calendar it does not
+/// use, and nothing it writes can turn one off.
+pub fn holiday_field(day: &str) -> String {
+    format!("{HOLIDAY_PREFIX}{day}")
+}
+
+/// Inverse of [`holiday_field`]: the day a `holiday:` entry is about.
+///
+/// Hands back the date text unparsed, the way [`parse_log_key`] does — the
+/// caller decides what an unreadable day means, and for a calendar that is
+/// "skip the row", not "fail the read".
+pub fn parse_holiday_field(field: &str) -> Option<&str> {
+    field.strip_prefix(HOLIDAY_PREFIX)
+}
+
 /// Key of one day's observation of a task's progress:
 /// `log:<uuid>:<YYYY-MM-DD>`.
 ///
@@ -215,6 +275,20 @@ mod tests {
         // the other under last-writer-wins.
         assert_ne!(key, log_key(id, "2026-07-21"));
         assert_eq!(parse_log_key(&task_key(id)), None);
+    }
+
+    #[test]
+    fn holiday_fields_round_trip_and_stay_distinct_per_day() {
+        let field = holiday_field("2026-05-01");
+        assert_eq!(field, "holiday:2026-05-01");
+        assert_eq!(parse_holiday_field(&field), Some("2026-05-01"));
+        // Same property the log keys have, for the same reason: two days
+        // are two fields, so marking one holiday cannot overwrite another.
+        assert_ne!(field, holiday_field("2026-05-02"));
+        // The three scalar fields must never be mistaken for a day.
+        assert_eq!(parse_holiday_field(FIELD_CAL_MODE), None);
+        assert_eq!(parse_holiday_field(FIELD_CAL_WEEK), None);
+        assert_eq!(parse_holiday_field(FIELD_CAL_HOLIDAYS), None);
     }
 
     #[test]

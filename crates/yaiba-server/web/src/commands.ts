@@ -1,4 +1,10 @@
-import { diffDays, parseDateExpr } from "./dates";
+import {
+  addDays,
+  countWork,
+  diffDays,
+  parseDateExpr,
+  snapForward,
+} from "./dates";
 import { t } from "./i18n";
 import type { Lang } from "./lang";
 import { THEMES, type Theme } from "./theme";
@@ -8,6 +14,8 @@ import {
   DEFAULT_LAG,
   MAX_LAG_DAYS,
   type AppData,
+  type CalendarPatch,
+  type HolidaySet,
   type Scheduled,
   type Task,
   type TaskPatch,
@@ -101,6 +109,11 @@ export interface CommandResult {
   peer?: { merge?: string; leave?: boolean; showTicket?: boolean };
   /** Google Calendar actions the app performs against /api/gcal. */
   gcal?: { push?: boolean };
+  /**
+   * A change to the working calendar the app performs against
+   * /api/calendar. Never set by a bare `:cal`, which only reports.
+   */
+  cal?: CalendarPatch;
   /** Project actions the app performs against /api/projects. */
   project?: {
     switch?: string;
@@ -135,8 +148,16 @@ export interface CommandSpec {
    * not `:w`, and the abbreviation keeps working regardless.
    */
   aliases?: string[];
-  /** Candidates for the `n`-th argument (1-based); none by default. */
-  args?: (ctx: ArgContext, n: number) => string[];
+  /**
+   * Candidates for the `n`-th argument (1-based); none by default.
+   *
+   * `words` is the line as typed so far, `words[0]` being the command.
+   * A verb with sub-verbs needs it: `:cal region ` and `:cal holiday `
+   * are the second argument of the same command and take completely
+   * different words, and offering the union of every branch would be a
+   * menu that is mostly wrong answers.
+   */
+  args?: (ctx: ArgContext, n: number, words?: string[]) => string[];
 }
 
 /** Wrap a candidate list that only applies to the first argument. */
@@ -210,6 +231,36 @@ const FILTER_WORDS = [
   "status:done",
 ];
 
+/**
+ * The words `:cal` dispatches on.
+ *
+ * One list, read by the `switch` below *and* by completion, because the
+ * menu is a promise that the word works: `:gcal` keeps `login` out of
+ * its candidates for the same reason, and that one is only safe because
+ * a human wrote both halves. Here there are seven.
+ */
+const CAL_VERBS = [
+  "on",
+  "off",
+  "week",
+  "region",
+  "holiday",
+  "workday",
+  "clear",
+];
+
+/**
+ * The work weeks with names. A bare mask (`1111100`, Monday first) is
+ * always accepted — these are the two nobody should have to spell.
+ */
+const WEEK_WORDS: Record<string, boolean[]> = {
+  "mon-fri": [true, true, true, true, true, false, false],
+  "mon-sat": [true, true, true, true, true, true, false],
+};
+
+/** The built-in holiday tables `:cal region` can name. */
+const REGIONS: HolidaySet[] = ["none", "jp"];
+
 export const COMMANDS: CommandSpec[] = [
   { name: "write", aliases: ["w"] },
   { name: "quit", aliases: ["q"] },
@@ -274,6 +325,31 @@ export const COMMANDS: CommandSpec[] = [
   { name: "merge" },
   { name: "leave" },
   { name: "gcal", args: first(() => ["push"]) },
+  {
+    name: "cal",
+    // The second word depends on the first, so this reads `words`
+    // rather than only the position. A date is offered where a date is
+    // taken: the vocabulary is `parseDateExpr`'s, the same one `:due`
+    // completes into, minus `none` — clearing a mark is `:cal clear`,
+    // and offering a word that parses to null here would be a
+    // candidate that answers "bad date".
+    args: (_ctx, n, words) => {
+      if (n === 1) return CAL_VERBS;
+      if (n > 2) return [];
+      switch (words?.[1]) {
+        case "week":
+          return Object.keys(WEEK_WORDS);
+        case "region":
+          return REGIONS;
+        case "holiday":
+        case "workday":
+        case "clear":
+          return DATE_WORDS.filter((w) => w !== "none");
+        default:
+          return [];
+      }
+    },
+  },
   { name: "proj", aliases: ["project"], args: first((ctx) => ctx.projects) },
 ];
 
@@ -368,6 +444,13 @@ export interface PinStart {
  * This is the one implementation of that rule. `:start` runs it, and
  * the calendar picker, a cell paste, a bar drag and `.` / `,` all
  * commit through those, so the four gestures cannot drift.
+ *
+ * The gap a crossed edge is adjusted to is counted in the calendar's
+ * own units, because that is what the scheduler will do with it: a lag
+ * of 2 under `:cal on` means two *working* days, so measuring the drop
+ * in calendar days would write a number that lands the bar somewhere
+ * else on the next recompute. In `days` mode `countWork` is `diffDays`,
+ * so this is the arithmetic it always was.
  */
 export function pinStartOps(
   data: AppData,
@@ -379,7 +462,7 @@ export function pinStartOps(
     if (dep.to !== task.id) continue;
     const pred = data.schedule.tasks.find((s) => s.id === dep.from);
     if (!pred) continue;
-    const gap = diffDays(pred.end, date);
+    const gap = countWork(pred.end, date, data.calendar);
     if (gap < 0) {
       const title =
         data.tasks.find((task) => task.id === dep.from)?.title ?? dep.from;
@@ -414,6 +497,103 @@ export function pinStartOps(
           })
         : t("lag adjusted on {n} links", { n: adjust.length });
   return { ops, undoOps, note };
+}
+
+/**
+ * Where a bar dragged `days` columns from its own start actually lands.
+ *
+ * The gantt's axis is calendar days and stays that way — a column is a
+ * day, whatever the calendar thinks of it — so a drag hands over a
+ * calendar-day offset. What it lands on is another matter: a pin on a
+ * Sunday is raised to the Monday by the scheduler, so the preview has
+ * to show the Monday or the bar jumps on release.
+ *
+ * Exported because both halves of that sentence need it. `Gantt` draws
+ * the preview with it and `App` commits with it, which is stronger than
+ * the two agreeing to call the same primitives in the same order.
+ */
+export function moveLanding(
+  cal: AppData["calendar"],
+  start: string,
+  days: number,
+): string {
+  return snapForward(addDays(start, days), cal);
+}
+
+/**
+ * The duration a right-edge drag of `days` columns is asking for.
+ *
+ * Also a calendar-day offset, and this is where it stops being one: the
+ * span the user dragged out is `sched.end + days`, and the number
+ * stored is how many *working* days that is. Under `:cal off` it
+ * reduces to the duration plus the drag, which is the arithmetic this
+ * gesture has always done.
+ *
+ * Never below 1 — a bar is at least the day it starts on.
+ */
+export function resizeDuration(
+  cal: AppData["calendar"],
+  sched: Scheduled,
+  days: number,
+): number {
+  const end = addDays(sched.end, days);
+  return Math.max(countWork(sched.start, end, cal) + 1, 1);
+}
+
+/**
+ * The work week as a word: a name where there is one, else the mask
+ * itself, Monday first.
+ *
+ * The same spelling `:cal week` accepts, so what is reported can be
+ * typed back — the readout doubles as the syntax.
+ */
+function weekWord(week: boolean[]): string {
+  const mask = week.map((on) => (on ? "1" : "0")).join("");
+  for (const [name, days] of Object.entries(WEEK_WORDS)) {
+    if (days.map((on) => (on ? "1" : "0")).join("") === mask) return name;
+  }
+  return mask;
+}
+
+/** A work week as typed, or the refusal to show for it. */
+function parseWeek(word: string): boolean[] | string {
+  const named = WEEK_WORDS[word];
+  // Copied, not handed out: the table is a module constant, and the
+  // array leaves here inside a patch that outlives the call.
+  if (named) return [...named];
+  if (!/^[01]{7}$/.test(word)) {
+    return t("usage: :cal week mon-fri|mon-sat|1111100  (seven digits, monday first)");
+  }
+  const week = [...word].map((c) => c === "1");
+  // Refused here as well as at the server, because this is where it can
+  // be explained. A week with no working day is not a strict calendar,
+  // it is a plan with nowhere to put anything — the scheduler degrades
+  // it to "every day works", so accepting it would write a setting that
+  // then visibly does nothing.
+  if (!week.some(Boolean)) return t("a week with no working day is not a calendar");
+  return week;
+}
+
+/**
+ * What the calendar currently says, in one line.
+ *
+ * Printed by a bare `:cal` and again by `App` once a write has landed,
+ * so "what did I just do" and "what is it now" are answered by the same
+ * sentence. The counts are window-scoped — the server resolves a few
+ * years either side of today (see `Calendar.holidays`) — which is what
+ * "in view" says.
+ */
+export function calendarReport(cal: AppData["calendar"]): string {
+  return t(
+    "calendar: {mode} · week {week} · holidays {region} · {n} off / {m} worked in view",
+    {
+      mode: cal.mode,
+      week: weekWord(cal.week),
+      region: cal.region,
+      n: Object.keys(cal.holidays).length,
+      m: cal.workdays.length,
+    },
+  );
 }
 
 /** Resolve a 1-based row number as typed on the command line. */
@@ -613,7 +793,11 @@ export function runCommand(
           // date that survives the next recompute.
           const start = task.start ?? scheduled(data, task)?.start;
           if (!start) return t("“{title}” has no start to measure from", { title: task.title });
-          const days = diffDays(start, date) + 1;
+          // In the units the duration is stored in, which is what the
+          // calendar decides: `:end fri` under `:cal on` has to say 5,
+          // not 7, or the bar lands a week past the date that was
+          // typed. `days` mode makes this `diffDays` again.
+          const days = countWork(start, date, data.calendar) + 1;
           if (days < 1) return t("{d} is before the start ({start})", { d: date, start });
           return { start, duration_days: days };
         },
@@ -983,7 +1167,7 @@ export function runCommand(
       if (arg) return { error: t("usage: :leave  (it takes no argument)") };
       return { peer: { leave: true } };
 
-    // ---- the calendar --------------------------------------------
+    // ---- google calendar -----------------------------------------
     //
     // `push` is spelled out rather than being what a bare `:gcal` does,
     // because this is the one command that writes somewhere yaiba does
@@ -1005,6 +1189,94 @@ export function runCommand(
         };
       }
       return { error: t("usage: :gcal push") };
+
+    // ---- the working calendar --------------------------------------
+    //
+    // A bare `:cal` reports and writes nothing — the lesson `:gcal`
+    // already carries, and a sharper one here: every verb below moves
+    // every bar in the project, so the word somebody types to find out
+    // what the calendar *is* cannot be the word that changes it.
+    //
+    // Dates go through `parseDateExpr`, the same one `:due` uses, so
+    // `:cal holiday fri` and `:cal holiday 5/1` mean here what they
+    // mean everywhere else. A second date grammar for the calendar
+    // would be two answers to one question.
+    //
+    // Each verb sends only the key it changes. The calendar syncs, so
+    // echoing back the fields you did not touch would overwrite a
+    // peer's edit made between the read and the write.
+    case "cal": {
+      const [verb, ...rest] = arg.split(/\s+/).filter(Boolean);
+      if (!verb) return { message: calendarReport(data.calendar) };
+      switch (verb) {
+        case "on":
+        case "off": {
+          if (rest.length) return { error: t("usage: :cal on  (or :cal off)") };
+          const mode = verb === "on" ? "workdays" : "days";
+          return {
+            cal: { mode },
+            message:
+              mode === "workdays"
+                ? t("durations count working days")
+                : t("durations count calendar days"),
+          };
+        }
+        case "week": {
+          const week = parseWeek(rest.join(""));
+          if (typeof week === "string") return { error: week };
+          return { cal: { week }, message: t("work week: {week}", { week: weekWord(week) }) };
+        }
+        case "region": {
+          const region = rest[0];
+          if (rest.length !== 1 || !REGIONS.includes(region as HolidaySet)) {
+            return { error: t("usage: :cal region {list}", { list: REGIONS.join("|") }) };
+          }
+          return {
+            cal: { region: region as HolidaySet },
+            // Naming what it does rather than the code it took: turning
+            // a table off leaves the days somebody marked by hand, and
+            // "region: none" would read as losing those too.
+            message:
+              region === "none"
+                ? t("no holiday table — marked days stay")
+                : t("holiday table: {region}", { region }),
+          };
+        }
+        case "holiday":
+        case "workday":
+        case "clear": {
+          // Only `holiday` takes a name, and it takes the rest of the
+          // line as one — a holiday is called 憲法記念日, not 憲法.
+          const [dateArg, ...words] = rest;
+          const name = words.join(" ");
+          if (!dateArg || (name && verb !== "holiday")) {
+            return { error: t("usage: :cal holiday ⟨date⟩ [name] · :cal workday ⟨date⟩ · :cal clear ⟨date⟩") };
+          }
+          const date = parseDateExpr(dateArg, data.today);
+          if (!date) return { error: t("bad date: {d}", { d: dateArg }) };
+          if (verb === "clear") {
+            // `null`, not a missing key: the patch leaves out what it
+            // does not mean, so the only way to say "forget this day"
+            // is to send the erasure. LWW has no delete.
+            return { cal: { days: { [date]: null } }, message: t("{d} is back to the week", { d: date }) };
+          }
+          if (verb === "workday") {
+            return { cal: { days: { [date]: false } }, message: t("{d} is a working day", { d: date }) };
+          }
+          return {
+            cal: { days: { [date]: name || true } },
+            message: name
+              ? t("{d} is off: {name}", { d: date, name })
+              : t("{d} is off", { d: date }),
+          };
+        }
+        default:
+          // Writes nothing, and lists what would have. A near miss —
+          // `:cal mon-fri`, `:cal jp` — is likelier than a bare verb,
+          // and either way the calendar is left as it was.
+          return { error: t("usage: :cal {list}  (bare :cal reports)", { list: CAL_VERBS.join("|") }) };
+      }
+    }
 
     // ---- projects ------------------------------------------------
     case "proj":

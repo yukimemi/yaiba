@@ -1,12 +1,19 @@
 //! Dependency-graph scheduling: forward/backward pass over a DAG of
 //! finish-to-start edges, yielding bar positions, slack and the
 //! critical path that the gantt view draws.
+//!
+//! Every date step goes through the project's [`Calendar`], which is what
+//! makes "five days" mean five *working* days when a project asks for it.
+//! There is deliberately no `if mode` anywhere below: the calendar in its
+//! default `Days` mode answers exactly as the plain saturating arithmetic
+//! this file used to do inline, so one code path serves both.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use chrono::{Duration, NaiveDate};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
+use crate::calendar::Calendar;
 use crate::model::{Dep, Status, Task, TaskId, clamp_lag, default_lag};
 
 /// One task's computed placement on the timeline.
@@ -70,43 +77,10 @@ pub struct Schedule {
     pub critical_path: Vec<TaskId>,
 }
 
-/// Normalised span of a task: at least one calendar day.
+/// Normalised span of a task: at least one day, counted in whatever the
+/// calendar counts in.
 fn duration_of(task: &Task) -> i64 {
     task.duration_days.max(1)
-}
-
-/// `date + days`, saturating at the ends of the calendar.
-///
-/// `NaiveDate + Duration` and `Duration::days` both **panic** out of
-/// range, and this function runs on every read of the state — so a single
-/// absurd number anywhere in the graph would stop the project being
-/// readable at all, which is the one failure this file is written to
-/// avoid (see the note on degrading rather than throwing).
-///
-/// Lags are clamped before they get here, but `duration_days` is not
-/// bounded anywhere and never has been, so this guards both. Saturating
-/// rather than ignoring: a bar pinned at the end of the calendar is
-/// obviously wrong on screen, where a silently dropped constraint looks
-/// like the scheduler forgot an edge.
-fn plus_days(date: NaiveDate, days: i64) -> NaiveDate {
-    Duration::try_days(days)
-        .and_then(|d| date.checked_add_signed(d))
-        .unwrap_or(if days < 0 {
-            NaiveDate::MIN
-        } else {
-            NaiveDate::MAX
-        })
-}
-
-/// `date - days`, saturating. See [`plus_days`].
-fn minus_days(date: NaiveDate, days: i64) -> NaiveDate {
-    Duration::try_days(days)
-        .and_then(|d| date.checked_sub_signed(d))
-        .unwrap_or(if days < 0 {
-            NaiveDate::MAX
-        } else {
-            NaiveDate::MIN
-        })
 }
 
 /// The leaves each task stands for when an edge names it.
@@ -415,7 +389,13 @@ fn levels(tasks: &[Task]) -> HashMap<TaskId, i64> {
 /// window**. No task's dates depend on it, which is what makes `:asof` a
 /// line you move across a fixed plan rather than a re-plan — see the
 /// forward pass.
-pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
+///
+/// `cal` is what every date step is counted in. In its default `Days`
+/// mode it is plain calendar arithmetic and this function behaves exactly
+/// as it did before calendars existed; in `Workdays` mode the same code
+/// walks working days instead, so durations, lags and slack are all
+/// counted in days somebody is at work.
+pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate, cal: &Calendar) -> Schedule {
     if tasks.is_empty() {
         return Schedule {
             tasks: Vec::new(),
@@ -473,7 +453,12 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
         // a task with predecessors: `max` below keeps their constraint,
         // so a successor can be pushed past its own creation day but
         // never pulled back before it.
-        let mut start = task.start.unwrap_or_else(|| task.created_day());
+        //
+        // Snapped forward, which is what makes a pin a floor rather than
+        // a claim: pinned to a Sunday on a working-day calendar, the task
+        // starts on the Monday and the chart says so. In `Days` mode the
+        // snap is the identity, so nothing moves.
+        let mut start = cal.snap_forward(task.start.unwrap_or_else(|| task.created_day()));
         for p in preds.get(id).into_iter().flatten() {
             // A dependency on a summary contributes nothing: only leaves
             // carry dates at this point.
@@ -483,10 +468,10 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
                 // `0` lets the two share a date, which is the whole point
                 // of the field.
                 let days = lag.get(&(*p, *id)).copied().unwrap_or_else(default_lag);
-                start = start.max(plus_days(*pred_end, days));
+                start = start.max(cal.advance(*pred_end, days));
             }
         }
-        let end = plus_days(start, duration_of(task) - 1);
+        let end = cal.advance(start, duration_of(task) - 1);
         es.insert(*id, start);
         ef.insert(*id, end);
     }
@@ -527,15 +512,19 @@ pub fn schedule(tasks: &[Task], deps: &[Dep], today: NaiveDate) -> Schedule {
                 // the forward pass no longer honours, and the critical
                 // path would disagree with the dates on screen.
                 let days = lag.get(&(*id, *s)).copied().unwrap_or_else(default_lag);
-                finish = finish.min(minus_days(*succ_start, days));
+                finish = finish.min(cal.retreat(*succ_start, days));
             }
         }
-        ls.insert(*id, minus_days(finish, duration_of(task) - 1));
+        ls.insert(*id, cal.retreat(finish, duration_of(task) - 1));
     }
 
+    // Counted through the calendar, so "slack 3d" means three days
+    // somebody could have worked rather than three squares two of which
+    // are a weekend. The *sign* is what decides the critical path, and
+    // `count` keeps it either way round.
     let mut slack: HashMap<TaskId, i64> = ls
         .iter()
-        .filter_map(|(id, late)| es.get(id).map(|early| (*id, (*late - *early).num_days())))
+        .filter_map(|(id, late)| es.get(id).map(|early| (*id, cal.count(*early, *late))))
         .collect();
     // A done task counts as complete whatever its percentage field says.
     // Without this a finished task rolls up as 0%, which drags its
@@ -766,7 +755,7 @@ mod tests {
     fn chains_tasks_back_to_back() {
         let tasks = vec![task(1, 2, Some(day(1))), task(2, 3, None), task(3, 1, None)];
         let deps = vec![dep(1, 2), dep(2, 3)];
-        let s = schedule(&tasks, &deps, day(1));
+        let s = schedule(&tasks, &deps, day(1), &Calendar::default());
 
         assert_eq!((find(&s, 1).start, find(&s, 1).end), (day(1), day(2)));
         assert_eq!((find(&s, 2).start, find(&s, 2).end), (day(3), day(5)));
@@ -786,7 +775,7 @@ mod tests {
             task(4, 1, None),
         ];
         let deps = vec![dep(1, 2), dep(1, 3), dep(2, 4), dep(3, 4)];
-        let s = schedule(&tasks, &deps, day(1));
+        let s = schedule(&tasks, &deps, day(1), &Calendar::default());
 
         assert!(find(&s, 2).critical, "long branch is on the critical path");
         assert!(!find(&s, 3).critical, "short branch has slack");
@@ -797,7 +786,7 @@ mod tests {
     #[test]
     fn honours_a_pinned_start_later_than_its_predecessor() {
         let tasks = vec![task(1, 1, Some(day(1))), task(2, 1, Some(day(10)))];
-        let s = schedule(&tasks, &[dep(1, 2)], day(1));
+        let s = schedule(&tasks, &[dep(1, 2)], day(1), &Calendar::default());
         assert_eq!(find(&s, 2).start, day(10));
     }
 
@@ -807,7 +796,7 @@ mod tests {
         // that get done in one sitting. Before the lag existed the second
         // one was always pushed to tomorrow, with no way to say otherwise.
         let tasks = vec![task(1, 1, Some(day(1))), task(2, 1, None)];
-        let s = schedule(&tasks, &[dep_lag(1, 2, 0)], day(1));
+        let s = schedule(&tasks, &[dep_lag(1, 2, 0)], day(1), &Calendar::default());
 
         assert_eq!(find(&s, 1).end, day(1));
         assert_eq!(find(&s, 2).start, day(1), "same calendar day, not the next");
@@ -822,10 +811,10 @@ mod tests {
         // because the edge asks for the next day and the pin is a floor.
         let tasks = vec![task(1, 1, Some(day(1))), task(2, 1, Some(day(1)))];
 
-        let pushed = schedule(&tasks, &[dep(1, 2)], day(1));
+        let pushed = schedule(&tasks, &[dep(1, 2)], day(1), &Calendar::default());
         assert_eq!(find(&pushed, 2).start, day(2), "default spacing still wins");
 
-        let kept = schedule(&tasks, &[dep_lag(1, 2, 0)], day(1));
+        let kept = schedule(&tasks, &[dep_lag(1, 2, 0)], day(1), &Calendar::default());
         assert_eq!(find(&kept, 2).start, day(1), "zero lag honours the pin");
     }
 
@@ -834,7 +823,7 @@ mod tests {
         // Not just 0 vs 1: the field is a number, and a wait — parts
         // arriving, paint drying — is the other thing it expresses.
         let tasks = vec![task(1, 2, Some(day(1))), task(2, 1, None)];
-        let s = schedule(&tasks, &[dep_lag(1, 2, 5)], day(1));
+        let s = schedule(&tasks, &[dep_lag(1, 2, 5)], day(1), &Calendar::default());
 
         assert_eq!(find(&s, 1).end, day(2));
         assert_eq!(find(&s, 2).start, day(7), "five days after the finish");
@@ -864,7 +853,7 @@ mod tests {
             task(4, 1, None),
         ];
         let deps = vec![dep(1, 2), dep(2, 4), dep_lag(1, 3, 0), dep_lag(3, 4, 0)];
-        let s = schedule(&tasks, &deps, day(1));
+        let s = schedule(&tasks, &deps, day(1), &Calendar::default());
 
         // The long way: 1 ends day 1, 2 the day after, 4 the day after that.
         assert_eq!(find(&s, 2).start, day(2));
@@ -888,13 +877,18 @@ mod tests {
         // and the store clamps it, but a peer on any version can write one,
         // so the arithmetic saturates as the last line of defence.
         let tasks = vec![task(1, 1, Some(day(1))), task(2, 1, None)];
-        let s = schedule(&tasks, &[dep_lag(1, 2, i64::MAX)], day(1));
+        let s = schedule(
+            &tasks,
+            &[dep_lag(1, 2, i64::MAX)],
+            day(1),
+            &Calendar::default(),
+        );
         assert!(find(&s, 2).start > day(1), "placed far out, not panicking");
 
         // Same for a duration, which has never been bounded anywhere.
         let mut huge = task(3, i64::MAX, Some(day(1)));
         huge.duration_days = i64::MAX;
-        let s = schedule(&[huge], &[], day(1));
+        let s = schedule(&[huge], &[], day(1), &Calendar::default());
         assert!(find(&s, 3).end >= find(&s, 3).start);
     }
 
@@ -904,7 +898,7 @@ mod tests {
         // "A finishes before B starts" cannot carry — it would need a
         // different kind of edge, not a smaller number.
         let tasks = vec![task(1, 3, Some(day(1))), task(2, 1, None)];
-        let s = schedule(&tasks, &[dep_lag(1, 2, -5)], day(1));
+        let s = schedule(&tasks, &[dep_lag(1, 2, -5)], day(1), &Calendar::default());
 
         assert_eq!(find(&s, 1).end, day(3));
         assert_eq!(find(&s, 2).start, day(3), "no earlier than the finish");
@@ -917,12 +911,12 @@ mod tests {
         let mut tasks = vec![task(1, 1, Some(day(1))), task(2, 1, None)];
         let deps = vec![dep_lag(1, 2, 0)];
 
-        let s = schedule(&tasks, &deps, day(1));
+        let s = schedule(&tasks, &deps, day(1), &Calendar::default());
         assert_eq!(find(&s, 2).start, find(&s, 1).start, "same day");
         assert!(find(&s, 2).blocked, "still waiting on unfinished work");
 
         tasks[0].status = Status::Done;
-        let s = schedule(&tasks, &deps, day(1));
+        let s = schedule(&tasks, &deps, day(1), &Calendar::default());
         assert!(!find(&s, 2).blocked);
     }
 
@@ -931,11 +925,11 @@ mod tests {
         let mut tasks = vec![task(1, 1, Some(day(1))), task(2, 1, None)];
         let deps = vec![dep(1, 2)];
 
-        let s = schedule(&tasks, &deps, day(1));
+        let s = schedule(&tasks, &deps, day(1), &Calendar::default());
         assert!(find(&s, 2).blocked);
 
         tasks[0].status = Status::Done;
-        let s = schedule(&tasks, &deps, day(1));
+        let s = schedule(&tasks, &deps, day(1), &Calendar::default());
         assert!(!find(&s, 2).blocked);
     }
 
@@ -943,7 +937,7 @@ mod tests {
     fn overdue_flag_compares_against_the_computed_finish() {
         let mut tasks = vec![task(1, 5, Some(day(1)))];
         tasks[0].due = Some(day(3));
-        let s = schedule(&tasks, &[], day(1));
+        let s = schedule(&tasks, &[], day(1), &Calendar::default());
         assert!(find(&s, 1).overdue);
     }
 
@@ -953,14 +947,14 @@ mod tests {
         // no `due` anywhere here, so `overdue` cannot answer it.
         let tasks = vec![task(1, 2, Some(day(1)))];
 
-        let s = schedule(&tasks, &[], day(10));
+        let s = schedule(&tasks, &[], day(10), &Calendar::default());
         assert!(
             find(&s, 1).late,
             "finished on the 2nd, still open on the 10th"
         );
         assert!(!find(&s, 1).overdue, "and nobody ever typed a due date");
 
-        let s = schedule(&tasks, &[], day(2));
+        let s = schedule(&tasks, &[], day(2), &Calendar::default());
         assert!(
             !find(&s, 1).late,
             "the last day of the work is not late yet"
@@ -971,7 +965,7 @@ mod tests {
     fn a_done_task_is_never_late() {
         let mut tasks = vec![task(1, 2, Some(day(1)))];
         tasks[0].status = Status::Done;
-        let s = schedule(&tasks, &[], day(10));
+        let s = schedule(&tasks, &[], day(10), &Calendar::default());
         assert!(!find(&s, 1).late);
     }
 
@@ -989,7 +983,7 @@ mod tests {
         tasks[1].parent = Some(id(1));
         tasks[2].parent = Some(id(1));
 
-        let s = schedule(&tasks, &[], day(10));
+        let s = schedule(&tasks, &[], day(10), &Calendar::default());
         assert!(find(&s, 2).late, "the leaf that overran");
         assert!(!find(&s, 3).late, "the one that has not started");
         assert!(find(&s, 1).late, "so the summary says so too");
@@ -999,7 +993,7 @@ mod tests {
         );
 
         tasks[1].status = Status::Done;
-        let s = schedule(&tasks, &[], day(10));
+        let s = schedule(&tasks, &[], day(10), &Calendar::default());
         assert!(!find(&s, 1).late, "and stops when the work is finished");
     }
 
@@ -1008,15 +1002,16 @@ mod tests {
         // The one flag here measured against `today`, so `:asof` carries
         // it: read last month, work finishing next week is not late.
         let tasks = vec![task(1, 2, Some(day(20)))];
-        assert!(!find(&schedule(&tasks, &[], day(1)), 1).late);
-        assert!(find(&schedule(&tasks, &[], day(28)), 1).late);
+        let cal = Calendar::default();
+        assert!(!find(&schedule(&tasks, &[], day(1), &cal), 1).late);
+        assert!(find(&schedule(&tasks, &[], day(28), &cal), 1).late);
     }
 
     #[test]
     fn a_cycle_degrades_instead_of_hanging() {
         let tasks = vec![task(1, 1, Some(day(1))), task(2, 1, Some(day(1)))];
         let deps = vec![dep(1, 2), dep(2, 1)];
-        let s = schedule(&tasks, &deps, day(1));
+        let s = schedule(&tasks, &deps, day(1), &Calendar::default());
         assert_eq!(s.tasks.len(), 2, "every task still gets a placement");
     }
 
@@ -1025,7 +1020,7 @@ mod tests {
         // The tombstone for task 2 arrived but its inbound edge hasn't
         // been garbage collected yet.
         let tasks = vec![task(1, 1, Some(day(1)))];
-        let s = schedule(&tasks, &[dep(2, 1)], day(1));
+        let s = schedule(&tasks, &[dep(2, 1)], day(1), &Calendar::default());
         assert_eq!(find(&s, 1).start, day(1));
     }
 
@@ -1061,7 +1056,7 @@ mod tests {
         let mut b = child(3, 1, 2);
         b.start = Some(day(10));
 
-        let s = schedule(&[parent, a, b], &[], day(1));
+        let s = schedule(&[parent, a, b], &[], day(1), &Calendar::default());
         let root = find(&s, 1);
         assert_eq!((root.start, root.end), (day(4), day(11)));
         assert!(root.summary);
@@ -1081,7 +1076,12 @@ mod tests {
         short_todo.start = Some(day(1));
         short_todo.progress = 0;
 
-        let s = schedule(&[parent, long_done, short_todo], &[], day(1));
+        let s = schedule(
+            &[parent, long_done, short_todo],
+            &[],
+            day(1),
+            &Calendar::default(),
+        );
         assert_eq!(find(&s, 1).progress, 90);
     }
 
@@ -1098,7 +1098,12 @@ mod tests {
         let mut pending = child(3, 1, 4);
         pending.start = Some(day(1));
 
-        let s = schedule(&[parent, finished, pending], &[], day(1));
+        let s = schedule(
+            &[parent, finished, pending],
+            &[],
+            day(1),
+            &Calendar::default(),
+        );
         assert_eq!(find(&s, 2).progress, 100, "the done leaf itself");
         assert_eq!(find(&s, 1).progress, 50, "and its half of the parent");
     }
@@ -1111,7 +1116,7 @@ mod tests {
         let mut leaf = child(3, 2, 4);
         leaf.start = Some(day(5));
 
-        let s = schedule(&[root, mid, leaf], &[], day(1));
+        let s = schedule(&[root, mid, leaf], &[], day(1), &Calendar::default());
         assert_eq!(find(&s, 1).level, 0);
         assert_eq!(find(&s, 2).level, 1);
         assert_eq!(find(&s, 3).level, 2);
@@ -1129,7 +1134,12 @@ mod tests {
         first.start = Some(day(1));
         let second = child(3, 1, 2);
 
-        let s = schedule(&[parent, first, second], &[dep(2, 3)], day(1));
+        let s = schedule(
+            &[parent, first, second],
+            &[dep(2, 3)],
+            day(1),
+            &Calendar::default(),
+        );
         assert_eq!(find(&s, 2).end, day(2));
         assert_eq!(find(&s, 3).start, day(3));
         assert_eq!(find(&s, 1).end, day(4), "the summary covers both");
@@ -1153,7 +1163,7 @@ mod tests {
         // dates of its own for the constraint to land on.
         let mut tasks = summary_fixture();
         tasks[1].start = None; // let the children float
-        let s = schedule(&tasks, &[dep(4, 1)], day(1));
+        let s = schedule(&tasks, &[dep(4, 1)], day(1), &Calendar::default());
 
         assert_eq!(find(&s, 4).end, day(1));
         assert_eq!(find(&s, 2).start, day(2), "child waits for 4");
@@ -1167,7 +1177,7 @@ mod tests {
         // waits for that and not for whichever child happens to be first.
         let mut tasks = summary_fixture();
         tasks[2].duration_days = 5; // 3 is now the long one
-        let s = schedule(&tasks, &[dep(1, 4)], day(1));
+        let s = schedule(&tasks, &[dep(1, 4)], day(1), &Calendar::default());
 
         assert_eq!(find(&s, 2).end, day(1));
         assert_eq!(find(&s, 3).end, day(5));
@@ -1186,7 +1196,7 @@ mod tests {
         let y = child(7, 5, 1);
         tasks.extend([second, x, y]);
 
-        let s = schedule(&tasks, &[dep(1, 5)], day(1));
+        let s = schedule(&tasks, &[dep(1, 5)], day(1), &Calendar::default());
         assert_eq!(find(&s, 1).end, day(3), "first bracket closes on day 3");
         assert_eq!(find(&s, 6).start, day(4));
         assert_eq!(find(&s, 7).start, day(4));
@@ -1205,7 +1215,7 @@ mod tests {
         let mut tasks = summary_fixture();
         tasks[1].start = None;
         tasks[1].duration_days = 3;
-        let s = schedule(&tasks, &[dep(4, 1)], day(1));
+        let s = schedule(&tasks, &[dep(4, 1)], day(1), &Calendar::default());
 
         assert_eq!(find(&s, 2).slack_days, 0);
         assert!(find(&s, 2).critical);
@@ -1220,7 +1230,7 @@ mod tests {
         // to every leaf it now stands for.
         let mut tasks = summary_fixture();
         tasks[1].start = None;
-        let s = schedule(&tasks, &[dep_lag(4, 1, 0)], day(1));
+        let s = schedule(&tasks, &[dep_lag(4, 1, 0)], day(1), &Calendar::default());
 
         assert_eq!(find(&s, 4).end, day(1));
         assert_eq!(find(&s, 2).start, day(1));
@@ -1278,7 +1288,7 @@ mod tests {
             ("direct first", vec![direct, via_summary]),
             ("summary first", vec![via_summary, direct]),
         ] {
-            let s = schedule(&tasks, &deps, day(1));
+            let s = schedule(&tasks, &deps, day(1), &Calendar::default());
             assert_eq!(find(&s, 4).end, day(1));
             assert_eq!(
                 find(&s, 2).start,
@@ -1297,13 +1307,13 @@ mod tests {
         // summary too, which is where the flag was coming from before.
         let mut tasks = summary_fixture();
         tasks[1].start = None;
-        let s = schedule(&tasks, &[dep(4, 1)], day(1));
+        let s = schedule(&tasks, &[dep(4, 1)], day(1), &Calendar::default());
         assert!(find(&s, 2).blocked);
         assert!(find(&s, 3).blocked);
         assert!(find(&s, 1).blocked, "and so the bracket reads blocked");
 
         tasks[3].status = Status::Done; // 4 is finished
-        let s = schedule(&tasks, &[dep(4, 1)], day(1));
+        let s = schedule(&tasks, &[dep(4, 1)], day(1), &Calendar::default());
         assert!(!find(&s, 2).blocked);
         assert!(!find(&s, 1).blocked);
     }
@@ -1318,12 +1328,18 @@ mod tests {
             &[parent.clone(), blocker.clone(), inner.clone()],
             &[dep(2, 3)],
             day(1),
+            &Calendar::default(),
         );
         assert!(find(&s, 3).blocked, "the leaf waits on an unfinished task");
         assert!(find(&s, 1).blocked, "and so the summary does too");
 
         blocker.status = Status::Done;
-        let s = schedule(&[parent, blocker, inner], &[dep(2, 3)], day(1));
+        let s = schedule(
+            &[parent, blocker, inner],
+            &[dep(2, 3)],
+            day(1),
+            &Calendar::default(),
+        );
         assert!(!find(&s, 1).blocked);
     }
 
@@ -1335,7 +1351,7 @@ mod tests {
         a.parent = Some(id(2));
         b.parent = Some(id(1));
 
-        let s = schedule(&[a, b], &[], day(1));
+        let s = schedule(&[a, b], &[], day(1), &Calendar::default());
         assert_eq!(s.tasks.len(), 2, "both still render");
         assert_eq!(find(&s, 1).level, 0);
         assert_eq!(find(&s, 2).level, 0);
@@ -1347,14 +1363,14 @@ mod tests {
         let mut orphan = task(1, 2, Some(day(3)));
         orphan.parent = Some(id(99));
 
-        let s = schedule(&[orphan], &[], day(1));
+        let s = schedule(&[orphan], &[], day(1), &Calendar::default());
         assert_eq!(find(&s, 1).level, 0);
         assert!(!find(&s, 1).summary);
     }
 
     #[test]
     fn empty_project_is_a_single_day_at_today() {
-        let s = schedule(&[], &[], day(4));
+        let s = schedule(&[], &[], day(4), &Calendar::default());
         assert_eq!((s.start, s.end), (day(4), day(4)));
     }
 
@@ -1365,7 +1381,7 @@ mod tests {
         // fall to the oldest pin in the plan and sort above everything in
         // flight — and it must not follow the reference date either.
         let tasks = vec![task(1, 2, Some(day(1))), born(2, 1, None, day(20))];
-        let s = schedule(&tasks, &[], day(20));
+        let s = schedule(&tasks, &[], day(20), &Calendar::default());
 
         assert_eq!(find(&s, 2).start, day(20), "born where it was typed");
         assert_eq!(find(&s, 2).end, day(20));
@@ -1381,7 +1397,7 @@ mod tests {
         // pinned, so under the old anchor every one of these moved.
         let tasks = vec![born(1, 2, None, day(4))];
         for viewed_on in [day(4), day(11), day(25)] {
-            let s = schedule(&tasks, &[], viewed_on);
+            let s = schedule(&tasks, &[], viewed_on, &Calendar::default());
             assert_eq!(
                 (find(&s, 1).start, find(&s, 1).end),
                 (day(4), day(5)),
@@ -1397,7 +1413,7 @@ mod tests {
         // line, where the old floor would have moved it up to day 20 and
         // shown a plan that was never made.
         let tasks = vec![task(1, 2, Some(day(1))), task(2, 1, None)];
-        let s = schedule(&tasks, &[dep(1, 2)], day(20));
+        let s = schedule(&tasks, &[dep(1, 2)], day(20), &Calendar::default());
 
         assert_eq!(find(&s, 1).end, day(2));
         assert_eq!(find(&s, 2).start, day(3), "the day after its predecessor");
@@ -1408,7 +1424,7 @@ mod tests {
         // The floor is a floor, not a pin: the creation day loses to a
         // predecessor that finishes after it.
         let tasks = vec![task(1, 5, Some(day(10))), born(2, 1, None, day(2))];
-        let s = schedule(&tasks, &[dep(1, 2)], day(2));
+        let s = schedule(&tasks, &[dep(1, 2)], day(2), &Calendar::default());
 
         assert_eq!(find(&s, 2).start, day(15), "pushed off day 2");
     }
@@ -1419,7 +1435,7 @@ mod tests {
         // statement, and recording that something began on the 5th has to
         // survive being read on the 20th.
         let tasks = vec![task(1, 2, Some(day(5)))];
-        let s = schedule(&tasks, &[], day(20));
+        let s = schedule(&tasks, &[], day(20), &Calendar::default());
 
         assert_eq!((find(&s, 1).start, find(&s, 1).end), (day(5), day(6)));
     }
@@ -1432,7 +1448,8 @@ mod tests {
         // backwards either.
         let tasks = vec![born(1, 1, None, day(6))];
         for viewed_on in [day(3), day(6), day(9)] {
-            assert_eq!(find(&schedule(&tasks, &[], viewed_on), 1).start, day(6));
+            let s = schedule(&tasks, &[], viewed_on, &Calendar::default());
+            assert_eq!(find(&s, 1).start, day(6));
         }
     }
 
@@ -1441,7 +1458,12 @@ mod tests {
         // Nothing pinned anywhere: the whole chain hangs off the anchor,
         // which is what a project typed from scratch looks like.
         let tasks = vec![task(1, 2, None), task(2, 1, None), task(3, 1, None)];
-        let s = schedule(&tasks, &[dep(1, 2), dep(2, 3)], day(10));
+        let s = schedule(
+            &tasks,
+            &[dep(1, 2), dep(2, 3)],
+            day(10),
+            &Calendar::default(),
+        );
 
         assert_eq!((find(&s, 1).start, find(&s, 1).end), (day(1), day(2)));
         assert_eq!(find(&s, 2).start, day(3));
@@ -1456,7 +1478,7 @@ mod tests {
         // to nobody. Reachable now that an unpinned task can sit earlier
         // than anything anyone pinned.
         let tasks = vec![task(1, 1, Some(day(10))), born(2, 1, None, day(2))];
-        let s = schedule(&tasks, &[], day(20));
+        let s = schedule(&tasks, &[], day(20), &Calendar::default());
 
         assert_eq!(find(&s, 2).start, day(2));
         assert!(s.start <= day(2), "window opened at {}", s.start);
@@ -1467,8 +1489,125 @@ mod tests {
         // The line is drawn at `today`, so it has to be in frame. A plan
         // entirely in the future would otherwise open the chart past it.
         let tasks = vec![born(1, 1, Some(day(25)), day(25))];
-        let s = schedule(&tasks, &[], day(20));
+        let s = schedule(&tasks, &[], day(20), &Calendar::default());
 
         assert_eq!(s.start, day(20));
+    }
+
+    // ---- working days ------------------------------------------------
+    //
+    // August 2026 opens on a Saturday, so in these tests `day(1)` and
+    // `day(2)` are a weekend, `day(3)` is the first Monday and `day(8)` /
+    // `day(9)` are the weekend a five-day span trips over.
+
+    fn workdays() -> Calendar {
+        Calendar {
+            mode: crate::calendar::CalendarMode::Workdays,
+            ..Calendar::default()
+        }
+    }
+
+    #[test]
+    fn a_duration_in_working_days_steps_over_the_weekend() {
+        let tasks = vec![task(1, 5, Some(day(3)))];
+
+        // Monday to Friday: five days of work, five squares.
+        let s = schedule(&tasks, &[], day(3), &workdays());
+        assert_eq!((find(&s, 1).start, find(&s, 1).end), (day(3), day(7)));
+
+        // Starting on the Thursday, the same five days now reach into the
+        // following week — which is the whole point of the mode.
+        let later = vec![task(1, 5, Some(day(6)))];
+        let s = schedule(&later, &[], day(3), &workdays());
+        assert_eq!((find(&s, 1).start, find(&s, 1).end), (day(6), day(12)));
+
+        // And the default calendar still counts squares, weekend included.
+        let s = schedule(&later, &[], day(3), &Calendar::default());
+        assert_eq!((find(&s, 1).start, find(&s, 1).end), (day(6), day(10)));
+    }
+
+    #[test]
+    fn a_lag_is_counted_in_working_days_too() {
+        // The default one-day spacing means "the next working day", so a
+        // task finishing on the Friday hands over on the Monday.
+        let tasks = vec![task(1, 1, Some(day(7))), task(2, 1, None)];
+        let s = schedule(&tasks, &[dep(1, 2)], day(3), &workdays());
+
+        assert_eq!(find(&s, 1).end, day(7), "Friday");
+        assert_eq!(find(&s, 2).start, day(10), "Monday, not Saturday");
+
+        // A zero lag still means the same day, and that day is a working
+        // one, so nothing is snapped anywhere.
+        let s = schedule(&tasks, &[dep_lag(1, 2, 0)], day(3), &workdays());
+        assert_eq!(find(&s, 2).start, day(7));
+    }
+
+    #[test]
+    fn a_pin_on_a_weekend_is_a_floor_not_a_start_date() {
+        // Pinned to the Saturday. The pin is kept — it is what the user
+        // typed — but the work begins when work can begin.
+        let tasks = vec![task(1, 1, Some(day(15)))];
+        let s = schedule(&tasks, &[], day(3), &workdays());
+
+        assert_eq!(find(&s, 1).start, day(17), "the Monday");
+        assert_eq!(
+            tasks[0].start,
+            Some(day(15)),
+            "the stored pin is untouched: the schedule moved, not the plan"
+        );
+    }
+
+    #[test]
+    fn a_marked_holiday_pushes_the_finish_out() {
+        let mut cal = workdays();
+        // An ordinary Wednesday the office is closed.
+        cal.marks.insert(
+            day(5),
+            crate::calendar::DayMark::Holiday("創立記念日".into()),
+        );
+        let tasks = vec![task(1, 5, Some(day(3)))];
+
+        let s = schedule(&tasks, &[], day(3), &cal);
+        assert_eq!(
+            (find(&s, 1).start, find(&s, 1).end),
+            (day(3), day(10)),
+            "five working days, one of them taken out of the middle"
+        );
+    }
+
+    #[test]
+    fn slack_is_counted_in_working_days() {
+        // Two tasks feeding one, the long branch critical.
+        //
+        // The float on the short branch is the *same integer* in either
+        // mode, and that is not the point — the graph is linear in steps,
+        // so a comparison of the two numbers says nothing. What differs is
+        // the unit, and the unit is only visible when the number is turned
+        // back into a date: five days of float past a Monday is the Monday
+        // after next on a working-day calendar, and a Saturday nobody
+        // works on if you count squares.
+        let tasks = vec![
+            task(1, 6, Some(day(3))),
+            task(2, 1, Some(day(3))),
+            task(3, 1, None),
+        ];
+        let deps = vec![dep(1, 3), dep(2, 3)];
+        let cal = workdays();
+
+        let s = schedule(&tasks, &deps, day(3), &cal);
+        assert!(find(&s, 1).critical, "the long branch");
+
+        let short = find(&s, 2);
+        assert_eq!(short.slack_days, 5, "five days somebody could work");
+        assert_eq!(
+            cal.advance(short.start, short.slack_days),
+            day(10),
+            "the last day it could start, resolved by the project's calendar"
+        );
+        assert_eq!(
+            Calendar::default().advance(short.start, short.slack_days),
+            day(8),
+            "the same number counted in squares lands on a Saturday"
+        );
     }
 }

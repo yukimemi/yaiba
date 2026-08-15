@@ -560,6 +560,7 @@ mod tests {
 
     #[test]
     fn a_summary_gets_no_event_of_its_own() {
+        use yaiba_core::calendar::Calendar;
         use yaiba_core::graph::schedule;
         use yaiba_core::model::Dep;
 
@@ -571,7 +572,12 @@ mod tests {
         tasks[1].duration_days = 3;
 
         let deps: Vec<Dep> = Vec::new();
-        let events = desired(&tasks, &schedule(&tasks, &deps, day("2026-08-09")));
+        // The default calendar counts plain days, so the dates below are
+        // the ones this test has always asserted.
+        let events = desired(
+            &tasks,
+            &schedule(&tasks, &deps, day("2026-08-09"), &Calendar::default()),
+        );
 
         assert_eq!(events.len(), 1, "the parent's span duplicates the child's");
         assert_eq!(events[0].task, child);

@@ -7,6 +7,7 @@
 //! in the background, a partial response would be stale the moment it
 //! was built anyway.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -16,9 +17,12 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use chrono::{Local, NaiveDate};
+use chrono::{Local, Months, NaiveDate};
 use serde::{Deserialize, Serialize};
-use yaiba_core::{Dep, Error, NewTask, NodeId, Schedule, Store, Task, TaskId, TaskPatch, schedule};
+use yaiba_core::{
+    Calendar, CalendarMode, DayMark, Dep, Error, HolidaySet, NewTask, NodeId, Schedule, Store,
+    Task, TaskId, TaskPatch, schedule,
+};
 
 /// One project the server has open: its database, its change signal, and
 /// its replication.
@@ -341,6 +345,85 @@ pub struct StateResponse {
     /// This replica's id — shown in the UI so you can tell whose peer
     /// list you are looking at.
     node_id: NodeId,
+    /// The working calendar, already resolved to dates. See
+    /// [`CalendarView`].
+    calendar: CalendarView,
+}
+
+/// The calendar as the client draws it: the settings, plus the days they
+/// work out to over a bounded window.
+///
+/// Resolved here rather than in the browser for the same reason `schedule`
+/// is: a holiday table — substitute holidays, the equinox approximation,
+/// whatever a region needs — is one answer to one question, and a
+/// TypeScript copy of it would be a second, one that disagrees with the
+/// dates the bars are drawn at the first time either side is fixed.
+#[derive(Serialize)]
+pub struct CalendarView {
+    mode: CalendarMode,
+    /// Seven flags, **Monday first**, in the same order the store holds
+    /// them. Not rotated for a locale: the client indexes it by weekday
+    /// number, and an order that depended on language would be a bug that
+    /// only appears in one.
+    week: [bool; 7],
+    /// Which built-in holiday table applies, by name. Called `region`
+    /// rather than `holidays` because the resolved map below has the
+    /// better claim to that word, and `jp: true` would have been the
+    /// wrong shape besides: the table is one option among however many
+    /// get added, not a yes/no about Japan.
+    region: HolidaySet,
+    /// Day off → its name, empty when nobody named it. Holidays and
+    /// hand-marked closures only — **weekends are not listed**, because
+    /// the client has `week` and can shade them itself. Listing them would
+    /// put well over a thousand dates in every state response to say what
+    /// seven booleans already say.
+    ///
+    /// A holiday that lands on a weekend *is* listed, though: it is a
+    /// weekend either way, but only this map knows its name for the day
+    /// cell's tooltip.
+    holidays: BTreeMap<NaiveDate, String>,
+    /// Days worked despite the week mask or the holiday table — the
+    /// make-up Saturday.
+    workdays: Vec<NaiveDate>,
+}
+
+/// How far either side of `today` the calendar is resolved.
+///
+/// Bounded because the resolution is a *preview*: the client needs shading
+/// and tooltips for the range a person can scroll to, not for every year
+/// the equinox formula covers. Asymmetric because plans point forwards —
+/// a year back covers looking at what happened, three years on covers any
+/// plan long enough to care about holidays. Outside the window the client
+/// falls back to the week mask alone, which is honest rather than wrong:
+/// the scheduler on this side always uses the full calendar, so the dates
+/// stay right even where the shading stops.
+const CALENDAR_BACK: Months = Months::new(12);
+const CALENDAR_FORWARD: Months = Months::new(36);
+
+impl CalendarView {
+    /// Resolve `cal` into dates around `today`.
+    fn resolve(cal: &Calendar, today: NaiveDate) -> Self {
+        // Saturating rather than unwrapping: `today` comes from the
+        // system clock or from `:asof`, and a machine set to year 262143
+        // must not take the state endpoint down with it.
+        let from = today
+            .checked_sub_months(CALENDAR_BACK)
+            .unwrap_or(NaiveDate::MIN);
+        let to = today
+            .checked_add_months(CALENDAR_FORWARD)
+            .unwrap_or(NaiveDate::MAX);
+        Self {
+            mode: cal.mode,
+            week: cal.week,
+            region: cal.holidays,
+            // `off_days` answers exactly what belongs here — the closures
+            // the week mask cannot explain, named. Walking the window with
+            // `is_working` instead would both bury the response in weekends
+            // and lose the name of a holiday that falls on one.
+            holidays: cal.off_days(from, to).into_iter().collect(),
+            workdays: cal.working_overrides(from, to),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -367,6 +450,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/deps", post(add_dep))
         .route("/api/deps/{from}/{to}", axum::routing::delete(remove_dep))
+        // No GET of its own: the calendar is part of every state response,
+        // so a second way to read it would be a second thing that can be
+        // stale.
+        .route("/api/calendar", axum::routing::put(put_calendar))
         .route("/api/peers", get(get_peers))
         .route("/api/peers/merge", post(merge_peer))
         .route("/api/peers/leave", post(leave_peers))
@@ -949,7 +1036,10 @@ fn respond_at(store: &Store, asof: Option<NaiveDate>) -> ApiResult<Json<StateRes
     // Scheduling against the as-of date is what makes the whole view
     // consistent: bars, slack and the progress line all agree on which
     // day "now" is.
-    let schedule = schedule(&snapshot.tasks, &snapshot.deps, today);
+    let schedule = schedule(&snapshot.tasks, &snapshot.deps, today, &snapshot.calendar);
+    // Resolved against the same `today` the bars are, so the shading and
+    // the dates can never disagree about which window is being looked at.
+    let calendar = CalendarView::resolve(&snapshot.calendar, today);
     Ok(Json(StateResponse {
         tasks: snapshot.tasks,
         deps: snapshot.deps,
@@ -959,6 +1049,7 @@ fn respond_at(store: &Store, asof: Option<NaiveDate>) -> ApiResult<Json<StateRes
         // `:asof today` supplies one and is still the live view.
         as_of: today != Local::now().date_naive(),
         node_id: store.node_id(),
+        calendar,
     }))
 }
 
@@ -971,7 +1062,10 @@ async fn push_gcal(State(state): State<AppState>) -> ApiResult<Json<crate::gcal:
     // Read everything the run needs, then drop the lock. The push awaits
     // on the network, and a `std::sync::Mutex` held across an await would
     // put every other request behind Google's rate limiter.
-    let (token, calendar, tasks, deps) = {
+    // `calendar` here is the *Google* calendar this project pushes to;
+    // `cal` is the working calendar the dates are counted in. Two
+    // different things that unavoidably share a word.
+    let (token, calendar, tasks, deps, cal) = {
         let store = lock(&project);
         let token = state
             .credentials_path()
@@ -988,13 +1082,19 @@ async fn push_gcal(State(state): State<AppState>) -> ApiResult<Json<crate::gcal:
             })?;
         let calendar = store.meta(crate::gcal::oauth::KEY_CALENDAR)?;
         let snapshot = store.snapshot()?;
-        (token, calendar, snapshot.tasks, snapshot.deps)
+        (
+            token,
+            calendar,
+            snapshot.tasks,
+            snapshot.deps,
+            snapshot.calendar,
+        )
     };
 
     // Today's schedule, not an as-of one: a calendar is what is going to
     // happen, and `:asof` is a way of looking at what was.
     let today = Local::now().date_naive();
-    let plan = schedule(&tasks, &deps, today);
+    let plan = schedule(&tasks, &deps, today, &cal);
     let title = crate::gcal::calendar_title(&project.name);
 
     let outcome =
@@ -1134,6 +1234,179 @@ async fn remove_dep(
     };
     project.notify.notify_one();
     response
+}
+
+/// Patch for `PUT /api/calendar`. An omitted key is left alone.
+///
+/// Patch rather than replace because the four parts are set from four
+/// different places — `:cal on`, `:cal week`, `:cal region`, `:cal holiday`
+/// — and a whole-document PUT would make each of them read the calendar
+/// first and re-send the rest, which is a lost update waiting for two
+/// people to type at once.
+#[derive(Deserialize)]
+struct CalendarPatch {
+    /// Taken as a plain string and parsed by hand, so an unknown mode is
+    /// the same `{"error": …}` 400 as every other refusal on this route.
+    /// Typed as `Option<CalendarMode>` it was serde's derive that refused
+    /// it, which is a 422 of `text/plain` — a caller cannot parse the
+    /// errors from one endpoint two different ways, and the client renders
+    /// the server's own sentence. `CalendarMode::ALL` keeps the valid
+    /// values spelled in one place regardless.
+    #[serde(default)]
+    mode: Option<String>,
+    /// Taken as a list rather than `[bool; 7]` so a wrong length is a 400
+    /// naming the problem, not an extractor rejection naming a type.
+    #[serde(default)]
+    week: Option<Vec<bool>>,
+    /// Which built-in holiday table to use: `"none"` or `"jp"`. Parsed by
+    /// hand for the same reason as `mode`.
+    #[serde(default)]
+    region: Option<String>,
+    /// Date → `"name"` | `true` (unnamed day off) | `false` (worked
+    /// anyway) | `null` (no opinion, back to the week mask and the
+    /// holiday table).
+    ///
+    /// A whole map, not one day per request. This is the general escape
+    /// hatch the built-in tables are only a shortcut for: somewhere with
+    /// no table of its own posts its year in one call, and gets data that
+    /// means the same thing on every version rather than a region name
+    /// that needs the right binary to read.
+    ///
+    /// A key present with `null` is how a mark is *removed*, which is why
+    /// this is a map of values rather than of marks: absence and null have
+    /// to stay different things, the way `TaskPatch` keeps them apart for
+    /// the dates.
+    #[serde(default)]
+    days: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+/// Change the working calendar.
+///
+/// Everything is validated before anything is written. The four settings
+/// are four CRDT rows and therefore four commits, so a refusal discovered
+/// halfway through would leave a calendar nobody asked for — and unlike a
+/// rejected task edit, a half-applied calendar moves every bar in the
+/// plan.
+///
+/// The refusals here are stricter than the store's, on purpose. A
+/// [`Calendar`] that reads a week of all `false` treats it as *every* day
+/// working, because it may have arrived from a peer and a scheduler that
+/// cannot place a bar is worse than one that ignores a nonsense mask. This
+/// route is the other side of that: a person typing "no working days" has
+/// made a mistake and wants to hear about it, and nothing is lost by
+/// saying so — the degradation stays as the safety net it was written to
+/// be, rather than becoming the way the setting is normally reached.
+async fn put_calendar(
+    State(state): State<AppState>,
+    Json(patch): Json<CalendarPatch>,
+) -> ApiResult<Json<StateResponse>> {
+    // Both enums are parsed before anything is written, and both name the
+    // values they would have accepted: an unknown one is a typo, and a
+    // refusal that does not say what was allowed sends the caller to the
+    // source. `ALL` lives on the types, so this cannot drift from them.
+    let mode = match patch.mode.as_deref() {
+        Some(raw) => Some(CalendarMode::strict(raw).ok_or_else(|| {
+            ApiError::message(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "{raw} is not a mode — {}",
+                    names(&CalendarMode::ALL.map(CalendarMode::as_str))
+                ),
+            )
+        })?),
+        None => None,
+    };
+    let region = match patch.region.as_deref() {
+        Some(raw) => Some(HolidaySet::strict(raw).ok_or_else(|| {
+            ApiError::message(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "{raw} is not a region this build knows — {}. Mark the dates \
+                     themselves with `days` for anywhere else",
+                    names(&HolidaySet::ALL.map(HolidaySet::as_str))
+                ),
+            )
+        })?),
+        None => None,
+    };
+
+    let week = match patch.week {
+        Some(week) => {
+            let week: [bool; 7] = week.try_into().map_err(|week: Vec<bool>| {
+                ApiError::message(
+                    StatusCode::BAD_REQUEST,
+                    format!("week must be 7 days starting Monday — got {}", week.len()),
+                )
+            })?;
+            if !week.contains(&true) {
+                return Err(ApiError::message(
+                    StatusCode::BAD_REQUEST,
+                    "week must have at least one working day — with none, no task can be scheduled",
+                ));
+            }
+            Some(week)
+        }
+        None => None,
+    };
+
+    // Parsed into store terms up front, so a typo in the last date of a
+    // long list costs nothing.
+    let mut marks: Vec<(NaiveDate, Option<DayMark>)> = Vec::new();
+    for (day, value) in patch.days.unwrap_or_default() {
+        let date: NaiveDate = day.parse().map_err(|_| {
+            ApiError::message(
+                StatusCode::BAD_REQUEST,
+                format!("{day} is not a date — days are keyed YYYY-MM-DD"),
+            )
+        })?;
+        let mark = match value {
+            serde_json::Value::String(name) => Some(DayMark::Holiday(name)),
+            serde_json::Value::Bool(true) => Some(DayMark::Holiday(String::new())),
+            serde_json::Value::Bool(false) => Some(DayMark::Working),
+            serde_json::Value::Null => None,
+            other => {
+                return Err(ApiError::message(
+                    StatusCode::BAD_REQUEST,
+                    format!("{day} must be a name, true, false or null — got {other}"),
+                ));
+            }
+        };
+        marks.push((date, mark));
+    }
+
+    let project = state.active();
+    let response = {
+        let mut store = lock(&project);
+        if let Some(mode) = mode {
+            store.set_calendar_mode(mode)?;
+        }
+        if let Some(week) = week {
+            store.set_work_week(week)?;
+        }
+        if let Some(region) = region {
+            store.set_holiday_set(region)?;
+        }
+        // Every named day in one pass under one lock, which is what makes
+        // posting a whole year's holidays a single request rather than
+        // fifty racing ones.
+        for (date, mark) in marks {
+            store.mark_day(date, mark)?;
+        }
+        respond(&store)
+    };
+    // Bumped, unlike `put_ui`: the calendar is in the CRDT log, so there
+    // is something for the sync layer to push — and a peer left counting
+    // in the old week would draw a different plan from the same tasks.
+    project.notify.notify_one();
+    response
+}
+
+/// The values a refusal should quote, as `a or b`.
+///
+/// Fed from the enums' own `ALL`, so a variant added tomorrow turns up in
+/// the message without anybody remembering to come back here.
+fn names(values: &[&str]) -> String {
+    values.join(" or ")
 }
 
 /// A poisoned mutex means an earlier handler panicked mid-transaction.
@@ -1576,5 +1849,187 @@ mod handler_tests {
         let (status, body) = send(app, "GET", "/api/ui", None).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(body.contains(r#""filter":"tag:dev""#), "{body}");
+    }
+
+    /// A server nobody has configured has to answer with today's
+    /// behaviour, or the upgrade moves bars on its own.
+    #[tokio::test]
+    async fn the_state_starts_in_calendar_day_mode() {
+        let (status, body) = send(server(&["work"]), "GET", "/api/state", None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(r#""mode":"days""#), "{body}");
+        assert!(body.contains(r#""region":"none""#), "{body}");
+        assert!(
+            body.contains(r#""week":[true,true,true,true,true,false,false]"#),
+            "seven flags, Monday first: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_calendar_round_trips_through_the_route() {
+        // Dates relative to today, because the response only resolves a
+        // window around it — a fixed 2026 in here would be a test that
+        // starts failing in 2029 for no reason anybody could guess.
+        let (saturday, tuesday) = a_saturday_and_a_weekday();
+        let app = server(&["work"]);
+        let (status, body) = send(
+            app.clone(),
+            "PUT",
+            "/api/calendar",
+            Some(&format!(
+                r#"{{"mode":"workdays","week":[true,true,true,true,true,false,false],
+                     "region":"jp","days":{{"{tuesday}":"創立記念日","{saturday}":false}}}}"#
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        // The write answers with the whole state, so this is also the
+        // assertion that the resolution went out with it.
+        assert!(body.contains(r#""mode":"workdays""#), "{body}");
+        assert!(body.contains(r#""region":"jp""#), "{body}");
+        assert!(
+            body.contains(&format!(r#""{tuesday}":"創立記念日""#)),
+            "{body}"
+        );
+        // A Saturday, so marking it worked really does override the week
+        // mask — which is the only kind `workdays` carries. A Working mark
+        // on a day the mask already works says nothing and is not sent.
+        assert!(
+            body.contains(&format!(r#""workdays":["{saturday}"]"#)),
+            "{body}"
+        );
+
+        // Patch semantics: naming only `region` must leave the rest alone.
+        let (status, body) = send(
+            app.clone(),
+            "PUT",
+            "/api/calendar",
+            Some(r#"{"region":"none"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(r#""mode":"workdays""#), "{body}");
+        assert!(body.contains(r#""region":"none""#), "{body}");
+        assert!(
+            body.contains(&format!(r#""workdays":["{saturday}"]"#)),
+            "{body}"
+        );
+
+        // `null` takes a mark away again. With no holiday table left on,
+        // clearing both marks empties the resolution entirely.
+        let (status, body) = send(
+            app,
+            "PUT",
+            "/api/calendar",
+            Some(&format!(
+                r#"{{"days":{{"{tuesday}":null,"{saturday}":null}}}}"#
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(r#""holidays":{}"#), "{body}");
+        assert!(body.contains(r#""workdays":[]"#), "{body}");
+    }
+
+    /// A Saturday in the coming week and the weekday three days after it,
+    /// both comfortably inside the resolution window whenever the suite
+    /// runs.
+    fn a_saturday_and_a_weekday() -> (NaiveDate, NaiveDate) {
+        use chrono::Datelike as _;
+        let today = Local::now().date_naive();
+        let saturday = (0..7)
+            .filter_map(|n| today.checked_add_days(chrono::Days::new(n)))
+            .find(|d| d.weekday() == chrono::Weekday::Sat)
+            .expect("one of the next seven days is a Saturday");
+        let tuesday = saturday
+            .checked_add_days(chrono::Days::new(3))
+            .expect("three days past a Saturday is in range");
+        (saturday, tuesday)
+    }
+
+    /// The general escape hatch, and the reason the built-in tables are a
+    /// shortcut rather than the mechanism: anywhere without a table of its
+    /// own posts its own holidays, and has to be able to do it in *one*
+    /// call rather than one per day.
+    #[tokio::test]
+    async fn a_whole_year_of_holidays_lands_in_one_request() {
+        let start = Local::now().date_naive();
+        let days: Vec<NaiveDate> = (0..24)
+            .filter_map(|n| start.checked_add_days(chrono::Days::new(n * 14)))
+            .collect();
+        let payload = days
+            .iter()
+            .map(|day| format!(r#""{day}":"closed {day}""#))
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let (status, body) = send(
+            server(&["work"]),
+            "PUT",
+            "/api/calendar",
+            Some(&format!(r#"{{"days":{{{payload}}}}}"#)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        for day in &days {
+            let expected = format!(r#""{day}":"closed {day}""#);
+            assert!(body.contains(&expected), "{expected} missing from {body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_week_that_is_not_seven_days_is_a_400() {
+        let (status, body) = send(
+            server(&["work"]),
+            "PUT",
+            "/api/calendar",
+            Some(r#"{"week":[true,true,true,true,true]}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(
+            body.contains("7 days"),
+            "the refusal names the shape: {body}"
+        );
+    }
+
+    /// The store degrades an all-`false` week to every day working, because
+    /// it may have come from a peer. A person typing it has made a mistake,
+    /// and this route is where that is said out loud.
+    #[tokio::test]
+    async fn a_week_with_no_working_days_is_a_400() {
+        let (status, body) = send(
+            server(&["work"]),
+            "PUT",
+            "/api/calendar",
+            Some(r#"{"week":[false,false,false,false,false,false,false]}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(
+            body.contains("at least one working day"),
+            "the refusal says why: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_day_that_is_not_a_date_is_a_400_and_writes_nothing() {
+        let app = server(&["work"]);
+        let (status, body) = send(
+            app.clone(),
+            "PUT",
+            "/api/calendar",
+            Some(r#"{"mode":"workdays","days":{"tomorrow":"創立記念日"}}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body.contains("YYYY-MM-DD"), "{body}");
+
+        // The mode in the same body must not have landed: validation
+        // happens before the first commit precisely so a refused patch
+        // leaves the calendar as it was.
+        let (status, body) = send(app, "GET", "/api/state", None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(r#""mode":"days""#), "{body}");
     }
 }

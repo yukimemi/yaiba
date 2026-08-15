@@ -223,6 +223,7 @@ bun scripts/check-rowmenu.ts
 bun scripts/check-flash.ts
 bun scripts/check-join.ts
 bun scripts/check-gcal.ts
+bun scripts/check-cal.ts
 node node_modules/vite/bin/vite.js build
 '''
 

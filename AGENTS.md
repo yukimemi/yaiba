@@ -1335,6 +1335,73 @@ deliberately does not bump `notify`).
   Two peers can concurrently close a dependency loop or re-parent into
   a cycle, so the renderer degrades rather than throwing.
 
+### A duration is counted in something, and the calendar is what
+
+`calendar.rs` holds the whole notion; `graph.rs` asks it for every date
+step and contains **no `if mode` at all**. That is the design, not a
+coincidence: `Calendar::default()` is `Days` mode, where `advance` is
+`plus_days`, `snap_forward` is the identity and `count` is
+`num_days()` — so one code path serves both, and the scheduler tests
+that predate calendars still assert the old behaviour by passing the
+default. If a branch on the mode ever appears in the scheduler, the
+degradation has stopped working and that is the bug to fix.
+
+- **It ships off, and that is load-bearing.** Turning it on moves every
+  finish date later, so an upgrade must not do it. This is the same rule
+  the `created_day` anchor is written under, one field along: nothing
+  about a plan may move on its own.
+- **The calendar is in the CRDT log, not in `meta`.** Every replica
+  computes the schedule itself from tasks and deps, so a calendar that
+  stayed local would mean two people reading different dates off the same
+  plan. `meta` is where the things that must *not* travel live (identity,
+  room key, folds) — a project setting that changes computed dates is the
+  opposite of that.
+- **One predicate, two consumers.** `is_working` is what shades the chart
+  *and* what the scheduler walks, and it means something in `Days` mode
+  too — the weekend stripes are it. A second predicate for shading is a
+  second answer to keep in step; the client's `isOffDay` is a rendering of
+  the resolved payload, not a reimplementation.
+- **The bundled table is a value, never a boolean.** It came within one
+  commit of shipping as `jp: bool`, which bakes "Japan or nothing" into
+  the type; the review question was literally "え、日本専用?". The general
+  mechanism is `DayMark` — mark any date, in bulk, through
+  `PUT /api/calendar` — and `HolidaySet::Jp` is a convenience on top for
+  the one country whose dates move by law. Another region is one variant
+  plus one function, with nothing stored or on the wire changing.
+- **The Japanese table is answered per date, not per year.** 振替休日 and
+  国民の休日 are derived from a handful of neighbouring days, so there is
+  no year cache to invalidate and nothing needing interior mutability
+  behind the `&self` the scheduler holds. 振替休日 walks *backwards* —
+  "is there a Sunday holiday behind me with only holidays in between" —
+  which is what makes Golden Week come out right. Two dates the Imperial
+  transition created (2019's 4/30 and 5/2) are deliberately **not**
+  listed: once 即位の日 is in the table the sandwich rule produces them,
+  and a listed date would be a second answer.
+- **A pin stays a floor.** `snap_forward` on the pinned start is what
+  makes a task pinned to a Sunday begin on the Monday *without* the
+  stored pin moving. The plan is what the user typed; the schedule is
+  what the calendar allows.
+- **Slack is counted through the calendar as well.** Otherwise "slack 3d"
+  means three squares, two of which nobody works. Only the *sign* decides
+  the critical path, so this is about the number meaning what it says.
+- **Everything saturates; nothing panics.** `duration_days` has never been
+  bounded, and a peer can send a week mask with no working day in it. An
+  empty mask degrades to "every day is worked" (otherwise no date could
+  ever be scheduled and every walk would run to the cap), and the walks
+  are capped at `MAX_WALK` and saturate — the same bargain `plus_days`
+  makes. Note the deliberate asymmetry: the **API refuses** an empty week
+  with a 400, while the **core accepts and degrades** it, because one is
+  a person typing and the other is a replica merging.
+- **`:asof` reads the calendar as it is now.** Same rule `snapshot_at`
+  already states for titles, dates and the breakdown: LWW keeps no
+  history for them, and inventing one is worse than the honest
+  limitation.
+- **The version skew is real and is documented rather than hidden.**
+  Because the table lives in the binary, a replica that knows a region
+  resolves later finishes than one that does not, until both upgrade.
+  Storing the resolved dates instead would trade that for a calendar that
+  goes stale the year after it was written, which is worse.
+
 ### `runKey` is the command layer, `onKey` is the event
 
 `App.tsx` splits the keyboard in two. `onKey` is about the *press* —

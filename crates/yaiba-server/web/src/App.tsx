@@ -3,7 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type PeersInfo, type ProjectsInfo } from "./api";
 import {
   assigneeNames,
+  calendarReport,
+  moveLanding,
   pinStartOps,
+  resizeDuration,
   runCommand,
   type Columns,
   type DateField,
@@ -33,7 +36,7 @@ import { SplitGrip } from "./components/SplitGrip";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { Strikes } from "./components/Strikes";
 import { TaskList } from "./components/TaskList";
-import { addDays, diffDays, toISO } from "./dates";
+import { addDays, advanceWork, diffDays, toISO } from "./dates";
 import {
   BURST_MS,
   depKey,
@@ -43,7 +46,7 @@ import {
   SLAIN_MS,
   type FlashKind,
 } from "./flash";
-import { DEFAULT_LAG } from "./types";
+import { DEFAULT_LAG, type CalendarPatch } from "./types";
 import {
   collapsedForDepth,
   dropOrder,
@@ -1075,6 +1078,36 @@ export function App() {
       .finally(() => {
         pushingGcal.current = false;
       });
+  };
+
+  /**
+   * Change the working calendar — every `:cal` verb that is not a
+   * question.
+   *
+   * A write, so it goes through `liveOnly`: the calendar is read live
+   * even under `:asof` (the CRDT keeps no history for it), so a change
+   * made while reading last month would land on the plan as it is now
+   * and move every bar on a screen that is not showing them.
+   *
+   * It cannot be undone with `u`. The undo stack replays task ops, and
+   * this is not one — it is closer to `:sort` than to an edit, except
+   * that it moves dates. The way back is the opposite verb, which is
+   * why every one of them has one, and why the confirmation reports the
+   * whole calendar rather than the change: what to type to undo it is
+   * then already on screen.
+   *
+   * Not merged into `run`: there are no ops, and the reply is the whole
+   * plan recomputed rather than the result of applying anything here.
+   */
+  const applyCalendar = (patch: CalendarPatch) => {
+    if (!liveOnly()) return;
+    void api
+      .putCalendar(patch)
+      .then((next) => {
+        setData(next);
+        say(calendarReport(next.calendar), "ok");
+      })
+      .catch((e: Error) => say(e.message, "error"));
   };
 
   const renameProject = (from: string, to: string) => {
@@ -2430,13 +2463,18 @@ export function App() {
    * a predecessor's lag adjusts the lag rather than sliding to tomorrow
    * on the recompute, and the note says so — the one edit a drag cannot
    * show coming, because the lag lives on the edge, not the bar.
+   *
+   * `moveLanding` rather than the drag offset alone: a bar dropped on a
+   * day nobody works is pinned to the next working one, and `Gantt`
+   * previews the release through the same function so the bar cannot
+   * move under the cursor as it is let go.
    */
   const onMoveBar = useCallback(
     (id: string, days: number) => {
       const task = visible.find((t) => t.id === id);
       const sched = bySchedule.get(id);
       if (!data || !task || !sched) return;
-      const next = addDays(sched.start, days);
+      const next = moveLanding(data.calendar, sched.start, days);
       const pin = pinStartOps(data, task, next);
       if (typeof pin === "string") {
         say(pin, "error");
@@ -2458,6 +2496,12 @@ export function App() {
    * and the commit goes through `pinStartOps` exactly as the drag does,
    * so a shift into a predecessor's lag adjusts the lag there too
    * rather than being silently raised.
+   *
+   * A *working* day later or earlier, when there is a working calendar.
+   * Snapping the calendar-day answer forward, which is what the drag
+   * does, would make `,` a key that does nothing on a Monday: back to
+   * Sunday, forward to Monday, no move and no message. `advanceWork`
+   * is `addDays` under `:cal off`, so the plain case is untouched.
    */
   const shiftStart = useCallback(
     (tasks: Task[], delta: number) => {
@@ -2469,7 +2513,11 @@ export function App() {
         const sched = bySchedule.get(task.id);
         // A summary's dates are its children's; there is no bar to move.
         if (!sched || sched.summary) continue;
-        const pin = pinStartOps(data, task, addDays(sched.start, delta));
+        const pin = pinStartOps(
+          data,
+          task,
+          advanceWork(sched.start, delta, data.calendar),
+        );
         if (typeof pin === "string") {
           say(pin, "error");
           return;
@@ -2491,11 +2539,26 @@ export function App() {
     [data, bySchedule, run],
   );
 
+  /**
+   * Drag a bar's right edge: change how long it is.
+   *
+   * The drag is measured in columns and the duration is stored in
+   * whatever the calendar counts, so the two are not the same number —
+   * pulling three columns past a Friday buys one working day. The
+   * conversion is `resizeDuration`, which `Gantt` also draws the
+   * preview with.
+   *
+   * The schedule rather than `task.duration_days`, because the span on
+   * screen is the one being dragged: they agree for a leaf with a
+   * duration, and where they do not, what the pointer is holding is the
+   * bar.
+   */
   const onResizeBar = useCallback(
     (id: string, days: number) => {
       const task = visible.find((t) => t.id === id);
-      if (!task) return;
-      const next = Math.max(task.duration_days + days, 1);
+      const sched = bySchedule.get(id);
+      if (!data || !task || !sched) return;
+      const next = resizeDuration(data.calendar, sched, days);
       if (next === task.duration_days) return;
       void run(
         [{ kind: "patch", id, patch: { duration_days: next } }],
@@ -2503,7 +2566,7 @@ export function App() {
         `${next}d`,
       );
     },
-    [visible, run],
+    [data, visible, bySchedule, run],
   );
 
   const onLinkBars = useCallback(
@@ -3668,6 +3731,7 @@ export function App() {
       setShowProjects(true);
     }
     if (result.gcal?.push) pushGcal();
+    if (result.cal) applyCalendar(result.cal);
     if (result.project?.pick) {
       // Opens however few projects there are. Switching is only one of the
       // things in here — create, rename and forget all live on the list
@@ -3813,6 +3877,7 @@ export function App() {
         projectEnd={data.schedule.end}
         peerCount={peers.peers.length}
         syncOn={peers.ticket !== null}
+        workdays={data.calendar.mode === "workdays"}
         reference={data.today}
         isAsOf={data.as_of}
         asofOpen={showAsof}
@@ -3900,6 +3965,7 @@ export function App() {
             deps={data.deps}
             cursor={cursor}
             today={data.today}
+            cal={data.calendar}
             lang={lang}
             zoom={zoom}
             rangeStart={rangeStart}
@@ -3954,6 +4020,7 @@ export function App() {
             bySchedule.get(pickingTask.id),
           )}
           today={data.today}
+          cal={data.calendar}
           lang={lang}
           anchor={picking.anchor}
           label={t(pickingColumn.head)}

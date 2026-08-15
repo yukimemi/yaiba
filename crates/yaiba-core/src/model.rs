@@ -9,6 +9,8 @@ use chrono::{DateTime, Local, NaiveDate, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
+use crate::calendar::Calendar;
+
 pub type TaskId = Uuid;
 
 /// Lifecycle of a single task.
@@ -79,7 +81,10 @@ pub struct Task {
     /// early as its dependencies allow.
     #[serde(default)]
     pub start: Option<NaiveDate>,
-    /// Calendar days the bar spans; always >= 1.
+    /// Days the bar spans; always >= 1. Working days when the project's
+    /// calendar is in workday mode, calendar days otherwise — the field
+    /// does not change, what a day *is* does. Which is the point: `5`
+    /// keeps meaning "five days of work" either way.
     pub duration_days: i64,
     #[serde(default)]
     pub due: Option<NaiveDate>,
@@ -212,13 +217,15 @@ where
 pub struct Dep {
     pub from: TaskId,
     pub to: TaskId,
-    /// Calendar days from `from`'s finish to the earliest `to` may start.
+    /// Days from `from`'s finish to the earliest `to` may start —
+    /// working days under a workday calendar, like every other span here.
+    /// So `1` is "the next *working* day", which is what somebody
+    /// spacing two tasks a day apart meant all along.
     ///
-    /// `1` is "the next day", which is what every edge meant before this
-    /// field existed — so it is the default, an absent value reads as it,
-    /// and no existing plan moves. `0` lets two linked tasks share a
-    /// date, which real plans do: B waits for A, and both are half-day
-    /// jobs done in one sitting.
+    /// `1` is what every edge meant before this field existed — so it is
+    /// the default, an absent value reads as it, and no existing plan
+    /// moves. `0` lets two linked tasks share a date, which real plans
+    /// do: B waits for A, and both are half-day jobs done in one sitting.
     ///
     /// Never negative. A negative lag would be an *overlap*, and the
     /// "A finishes before B starts" reading of this edge cannot carry
@@ -227,7 +234,7 @@ pub struct Dep {
     pub lag_days: i64,
 }
 
-/// What an edge with nothing said about it means: the next day.
+/// What an edge with nothing said about it means: the next working day.
 pub fn default_lag() -> i64 {
     1
 }
@@ -264,9 +271,15 @@ impl Dep {
     }
 }
 
-/// The materialised dataset — live tasks (tombstones excluded) and edges.
+/// The materialised dataset — live tasks (tombstones excluded), edges, and
+/// the working calendar the dates are counted in.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     pub tasks: Vec<Task>,
     pub deps: Vec<Dep>,
+    /// Part of the snapshot rather than a separate read, because every
+    /// consumer that has the tasks needs it: `schedule` cannot place a
+    /// single bar without knowing which days count.
+    #[serde(default)]
+    pub calendar: Calendar,
 }

@@ -6,6 +6,7 @@
  */
 
 import type { Lang } from "./lang";
+import type { Calendar } from "./types";
 
 export function parseISO(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);
@@ -31,9 +32,194 @@ export function diffDays(a: string, b: string): number {
   return Math.round(ms / 86_400_000);
 }
 
-export function isWeekend(iso: string): boolean {
-  const day = parseISO(iso).getDay();
-  return day === 0 || day === 6;
+/**
+ * Is `day` — a `Date.getDay()`, Sunday first — outside the work week?
+ *
+ * `Calendar.week` is **Monday** first, because that is how the server
+ * stores it and how a work week is read. `getDay()` is Sunday first.
+ * This shift is the only place the two orders meet, and it is a
+ * function rather than an inline `(d + 6) % 7` for exactly that reason:
+ * the classic way to get this wrong is to index `week` with a raw
+ * `getDay()` in a second place and be one day out for everybody whose
+ * week is not Monday to Friday.
+ *
+ * A mask that is not seven long, or that has no working day in it at
+ * all, is treated as no opinion rather than as "never work". A peer can
+ * sync a broken value, and the honest failure there is a calendar that
+ * says nothing — the alternative is a plan with nowhere to put any of
+ * its tasks. The server degrades the same way.
+ */
+export function isOffWeekday(day: number, cal: Calendar): boolean {
+  if (cal.week.length !== 7 || !cal.week.some(Boolean)) return false;
+  return !cal.week[(day + 6) % 7];
+}
+
+/**
+ * Is this a day nobody works — a weekend, a holiday, or a day somebody
+ * marked off?
+ *
+ * The server's `Calendar::is_working`, negated, and true in **both**
+ * modes: `mode` decides whether the scheduler counts these days, not
+ * whether they are shaded. Precedence is the server's — an explicit
+ * working day wins over a holiday, a holiday wins over the week mask —
+ * because both sides are reading the same three fields and disagreeing
+ * about the order would paint bars onto days the scheduler skipped.
+ *
+ * Outside the resolved window (see `Calendar.holidays`) only the week
+ * mask is known here, so a holiday years out reads as a working day.
+ * The scheduler is not fooled — it resolves the real table server-side
+ * — which is why this is a shading limit rather than a planning one.
+ *
+ * `workdays` is scanned rather than indexed: it holds hand-marked days,
+ * so it is empty on almost every plan and a Set per render would cost
+ * more than the scan it saves.
+ */
+export function isOffDay(iso: string, cal: Calendar): boolean {
+  if (cal.workdays.includes(iso)) return false;
+  if (iso in cal.holidays) return true;
+  return isOffWeekday(parseISO(iso).getDay(), cal);
+}
+
+/**
+ * What to call this day off, or null when it has no name.
+ *
+ * A weekend has none, and neither does a day marked off without one:
+ * `""` is stored for those, and a tooltip reading nothing is worse
+ * than no tooltip.
+ */
+export function holidayName(iso: string, cal: Calendar): string | null {
+  if (cal.workdays.includes(iso)) return null;
+  return cal.holidays[iso] || null;
+}
+
+/**
+ * How far the search for the next working day walks before giving up.
+ *
+ * The week mask cannot stall it — one with no working day is already
+ * degraded to "no opinion" above — so only an unbroken year of marked
+ * holidays could, which is a value a peer sent rather than one anybody
+ * typed. It saturates instead of looping, the same bargain the server
+ * makes: a wrong date is recoverable, a frozen tab is not.
+ */
+const MAX_SCAN = 400;
+
+/**
+ * The span `countWork` will measure before saturating: a hundred years,
+ * the bound `MAX_LAG_DAYS` already puts on an edge. Past it the answer
+ * is nonsense either way, and a loop counting three million days would
+ * take the frame with it.
+ */
+const MAX_SPAN = 36_500;
+
+/**
+ * The first working day at or after `iso` — `Calendar::snap_forward`.
+ *
+ * `days` mode returns the date untouched, and every function below
+ * degrades the same way. That is the whole reason these take a
+ * `Calendar` rather than a mode flag: no caller writes `if (mode)`, so
+ * no caller can forget to.
+ */
+export function snapForward(iso: string, cal: Calendar): string {
+  return snap(iso, cal, 1);
+}
+
+/** The last working day at or before `iso` — `Calendar::snap_back`. */
+export function snapBack(iso: string, cal: Calendar): string {
+  return snap(iso, cal, -1);
+}
+
+/**
+ * The nearest working day in the direction of travel.
+ *
+ * The direction is the whole of the difference between the two snaps,
+ * and it is threaded through every function below rather than being
+ * decided once at the top: a walk that snaps forward and then steps
+ * backwards lands a day out whenever it starts on a day nobody works.
+ * The server had exactly that bug and it was invisible until the round
+ * trip was checked from a Saturday.
+ */
+function snap(iso: string, cal: Calendar, dir: 1 | -1): string {
+  if (cal.mode === "days") return iso;
+  let cursor = iso;
+  for (let scanned = 0; scanned < MAX_SCAN && isOffDay(cursor, cal); scanned++) {
+    cursor = addDays(cursor, dir);
+  }
+  return cursor;
+}
+
+/**
+ * `n` working days from `iso` — `Calendar::advance`, which is also
+ * `retreat` seen from the other end when `n` is negative.
+ *
+ * `advanceWork(d, 0)` is `snapForward(d)`, so a one-day task starting
+ * on a Saturday finishes on the Monday. Backwards, the anchor is
+ * `snapBack`: both ends of a walk snap the way the walk is going, which
+ * is what makes the round trip below hold from any day rather than only
+ * from a working one.
+ */
+export function advanceWork(iso: string, n: number, cal: Calendar): string {
+  if (cal.mode === "days") return addDays(iso, n);
+  const dir = n < 0 ? -1 : 1;
+  let cursor = snap(iso, cal, dir);
+  for (let left = Math.abs(n); left > 0; left--) {
+    let scanned = 0;
+    do {
+      cursor = addDays(cursor, dir);
+      scanned++;
+    } while (isOffDay(cursor, cal) && scanned < MAX_SCAN);
+  }
+  return cursor;
+}
+
+/**
+ * Working days from `from` to `to` — `Calendar::count`, and the inverse
+ * of `advanceWork` in whichever direction it is asked:
+ *
+ * - `to >= from` → `advanceWork(d, countWork(d, x))` is `snapForward(x)`
+ * - `to < from`  → `advanceWork(d, countWork(d, x))` is `snapBack(x)`
+ *
+ * Two lines rather than one because a day off has two nearest working
+ * days and the answer depends on which way you were walking. Which way
+ * is decided from the dates as given, before either is snapped — a
+ * weekend that snaps forward past `from` would otherwise turn a step
+ * back into a step forward.
+ *
+ * The one place the second line stops: a count of zero. Nothing is
+ * walked, and `advanceWork(d, 0)` snaps *forward* by definition — a
+ * one-day task starting on a Saturday has to finish on the Monday.
+ * Two days that snap back to the same working day therefore count 0
+ * and land forwards. The server's `count` and `advance` do exactly the
+ * same thing at zero, and this is a mirror of them rather than a
+ * second opinion.
+ *
+ * Negative when `to` precedes `from`, so it reads as `diffDays` does —
+ * and *is* `diffDays` in `days` mode, which is what keeps `:end` and a
+ * pinned lag computing the numbers they always have.
+ *
+ * Counted a day at a time rather than by weeks-times-mask arithmetic:
+ * the marks and the holiday table punch holes in any closed form, and
+ * the spans this is asked about are a plan wide. It runs on a commit
+ * and on a drag preview, not on every row of every frame.
+ */
+export function countWork(from: string, to: string, cal: Calendar): number {
+  if (cal.mode === "days") return diffDays(from, to);
+  return to < from ? -steps(from, to, cal, -1) : steps(from, to, cal, 1);
+}
+
+/** Working days strictly between the two snapped ends, `to` included. */
+function steps(from: string, to: string, cal: Calendar, dir: 1 | -1): number {
+  const target = snap(to, cal, dir);
+  let cursor = snap(from, cal, dir);
+  // Bounded by the span itself — the loop cannot outrun the two dates —
+  // and then by a century, so a date typed with an extra digit costs a
+  // frame rather than the tab.
+  const span = Math.min(Math.abs(diffDays(cursor, target)), MAX_SPAN);
+  let n = 0;
+  for (let i = 0; i < span; i++) {
+    cursor = addDays(cursor, dir);
+    if (!isOffDay(cursor, cal)) n++;
+  }
+  return n;
 }
 
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];

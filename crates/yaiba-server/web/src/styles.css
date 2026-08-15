@@ -240,6 +240,14 @@ body::after {
   color: var(--rust);
 }
 
+/* The working-calendar readout. Dim like `--peers`, not lit like an
+   overdue count: it explains the arithmetic rather than reporting
+   trouble, and a plan is meant to be able to sit in this mode
+   indefinitely without the bar looking alarmed about it. */
+.hud__cal {
+  color: var(--ash-dim);
+}
+
 /* The reference date is always present, because everything on screen is
    measured from it. At now it is grey chrome you can ignore; viewing the
    past is a mode, and an easy one to forget you are in, so *that* state
@@ -1038,7 +1046,7 @@ button.row__date:focus-visible {
   color: var(--ash-dim);
 }
 
-.datepick__wd--weekend {
+.datepick__wd--off {
   color: var(--ash-dim);
   opacity: 0.7;
 }
@@ -1061,11 +1069,11 @@ button.row__date:focus-visible {
   color: var(--ash-dim);
 }
 
-.datepick__day--weekend {
+.datepick__day--off {
   color: var(--ash);
 }
 
-.datepick__day--outside.datepick__day--weekend {
+.datepick__day--outside.datepick__day--off {
   color: var(--ash-dim);
 }
 
@@ -1520,7 +1528,7 @@ button.row__date:focus-visible {
    first freezes while the other keeps going — row N against bar N is off
    by the difference for the whole of that stretch. It sits here rather
    than on `.gantt__body` because everything that spans the full height of
-   the chart (the weekend stripes, the today line) is absolutely
+   the chart (the off-day stripes, the today line) is absolutely
    positioned against the body, and padding on a containing block is
    inside the box those resolve `bottom: 0` against — they would grow into
    the empty tail. */
@@ -1561,7 +1569,7 @@ button.row__date:focus-visible {
   overflow: hidden;
 }
 
-.gantt__day--weekend {
+.gantt__day--off {
   color: var(--ash-dim);
   opacity: 0.55;
 }
@@ -1574,7 +1582,11 @@ button.row__date:focus-visible {
   position: relative;
 }
 
-.gantt__weekend {
+/* Weekends, holidays and days marked off, in one band. Named for what
+   it means rather than for the weekend it started as: with a holiday
+   table on, most of these columns are not weekends, and a class called
+   `--weekend` would have to be read as "and also the other thing". */
+.gantt__off {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -1582,11 +1594,11 @@ button.row__date:focus-visible {
 }
 
 /* The wash above is a tint of `--void` — 1.8% white over white is
-   invisible, and the weekend columns are the only vertical grid the
-   chart has in day view. Office mode shades the panel instead:
-   `--grid` is the light theme's own shade of it, the same tone the
-   list uses for row separators. */
-:root[data-theme="light"] .gantt__weekend {
+   invisible, and these columns are the only vertical grid the chart has
+   in day view. Office mode shades the panel instead: `--grid` is the
+   light theme's own shade of it, the same tone the list uses for row
+   separators. */
+:root[data-theme="light"] .gantt__off {
   background: var(--grid);
 }
 

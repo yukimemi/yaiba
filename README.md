@@ -586,6 +586,73 @@ as they are now. That is a real limitation rather than a papered-over
 one: the CRDT keeps only the latest value for those, and inventing a
 past for them would be worse than admitting there isn't one.
 
+## Working days, and days off
+
+A duration is counted in *something*. By default that something is
+calendar days: `:dur 5` is five squares on the chart, weekend included.
+Switch the project over and the same 5 means five days somebody is
+actually at work:
+
+```text
+:cal            what this project counts in, and what it counts as off
+:cal on         count durations in working days · :cal off back to calendar days
+:cal week mon-fri     which weekdays are worked · mon-sat · or a mask: 1111100
+```
+
+**It is off until you ask.** Turning it on moves every finish date later,
+which is not something an upgrade is allowed to do to a plan you already
+trust — so a project that has never heard of this schedules exactly as it
+did before.
+
+Once it is on, everything that counts days counts the same way: a
+dependency's lag of one day means *the next working day*, so a task
+finishing on Friday hands over on Monday, and a slack of `3d` is three
+days somebody could have worked rather than three squares two of which
+are a weekend. A pinned start stays a floor rather than becoming a
+promise: pin a task to a Sunday and it begins on the Monday, while the
+pin you typed is left exactly where you typed it.
+
+### Days off
+
+Any date can be named, and any date can be taken back:
+
+```text
+:cal holiday 12/29 年末休み    # a day the office is closed (the name is optional)
+:cal workday 8/15             # a Saturday everybody is in
+:cal clear 12/29              # no opinion either way — back to the week mask
+```
+
+That is the whole mechanism, and it is deliberately not tied to any
+country: mark the dates you don't work, from wherever you get them.
+`PUT /api/calendar` takes them in bulk, which is the honest import path
+for a national calendar this binary has never heard of.
+
+What ships built in is one table, because the dates it holds move around
+by law every year and typing them in annually would be miserable:
+
+```text
+:cal region jp     # 国民の祝日, with 振替休日 and 国民の休日 derived
+:cal region none   # nothing built in (the default)
+```
+
+It is a *region*, not a Japan switch — adding another one is a variant in
+an enum and a function beside it, and nothing stored or on the wire
+changes. Two bounds worth knowing, both of them stated in the code as
+well: the equinox dates are the standard approximation and hold for
+1980–2099, and because the table lives in the binary rather than in the
+data, two replicas on different versions can resolve the same project to
+different dates until both are upgraded.
+
+The chart shades every non-working day, holidays included, and names them
+in the header where they have a name. `:cal` on its own only reports —
+it never writes, so an early `⏎` cannot re-plan the project.
+
+The calendar belongs to the project and **syncs with your peers**, in the
+same CRDT log as the tasks. It has to: the schedule is computed by each
+replica from the same tasks and dependencies, so a calendar that stayed
+local would have two people looking at the same plan and reading
+different dates off it.
+
 ## Working with peers
 
 Each replica prints a ticket at startup, and `:ticket` copies it from
