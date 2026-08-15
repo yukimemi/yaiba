@@ -203,14 +203,41 @@ check(
  * White and black are not slots: white is super mode's blown highlight
  * and the flash along a severed edge, black is a shadow, and a mask needs
  * both as ink. Everything else in the app is a slot at some alpha.
+ *
+ * Spelled in both notations, since the matcher below takes both.
  */
-const INK: Record<string, true> = { "255,255,255": true, "0,0,0": true };
+const INK: Record<string, true> = {
+  "255,255,255": true,
+  "0,0,0": true,
+  "100%,100%,100%": true,
+  "0%,0%,0%": true,
+};
 
-const literals = [
-  ...css.matchAll(
-    /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(?:calc\((?:[^()]|\([^()]*\))*\)|[\d.]+)\s*)?\)/g,
-  ),
-].filter((m) => !INK[`${m[1]},${m[2]},${m[3]}`]);
+/**
+ * A numeric `rgb()` / `rgba()` literal, in either notation CSS Color 4
+ * defines: legacy `rgba(34, 211, 238, 0.1)` and modern
+ * `rgb(34 211 238 / 0.1)`, with percentages allowed for the components and
+ * a `calc()` for the alpha.
+ *
+ * The modern half is not hypothetical tidiness. This matched commas only,
+ * so the one spelling a reader of current CSS documentation would reach
+ * for was the one spelling that walked past the check — silently, which is
+ * the whole failure mode being guarded against. Caught in review.
+ *
+ * `rgb(from var(--edge) r g b / 0.1)` is not matched and must not be: the
+ * first component has to be a number, and `from` is not one.
+ */
+const COMPONENT = String.raw`[\d.]+%?`;
+const SEPARATOR = String.raw`\s*(?:,\s*|\s+)`;
+const ALPHA = String.raw`(?:calc\((?:[^()]|\([^()]*\))*\)|[\d.]+%?)`;
+const LITERAL = new RegExp(
+  String.raw`rgba?\(\s*(${COMPONENT})${SEPARATOR}(${COMPONENT})${SEPARATOR}(${COMPONENT})\s*(?:[,/]\s*${ALPHA}\s*)?\)`,
+  "g",
+);
+
+const literals = [...css.matchAll(LITERAL)].filter(
+  (m) => !INK[`${m[1]},${m[2]},${m[3]}`],
+);
 
 check(
   "no rule writes a colour as an rgb() literal",
