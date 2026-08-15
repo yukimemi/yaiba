@@ -1573,6 +1573,15 @@ button.row__date:focus-visible {
   background: rgba(255, 255, 255, 0.018);
 }
 
+/* The wash above is a tint of `--void` — 1.8% white over white is
+   invisible, and the weekend columns are the only vertical grid the
+   chart has in day view. Office mode shades the panel instead:
+   `--grid` is the light theme's own shade of it, the same tone the
+   list uses for row separators. */
+:root[data-theme="light"] .gantt__weekend {
+  background: var(--grid);
+}
+
 .gantt__today {
   position: absolute;
   top: 0;
