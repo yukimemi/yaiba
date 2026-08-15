@@ -548,14 +548,23 @@ by reading it:
   runs before its parent's, so neither can be the thing that writes it.
   This is the same bargain `applyTheme` has always made from inside
   `setTheme`.
-- **A hex field must ignore its own echo, and only its own.** `#cc0` on
-  the way to `#cc0077` is a valid three-digit hex, so it commits, comes
-  back as the new value, and lands in the field the caret is still in:
-  what appears is `#cccc00077`. Guarding on focus instead looks
-  equivalent and is not — a `×` on that same row is an outside change
-  arriving while the field still holds the caret, and it left the row
-  advertising a colour the palette no longer had. The row remembers what
-  it last wrote and skips exactly that.
+- **A hex field must ignore its own echo, and only its own — and the echo
+  has to come back in the form it was sent.** `#cc0` on the way to
+  `#cc0077` is a valid three-digit hex, so it commits, comes back as the
+  new value, and lands in the field the caret is still in: what appears is
+  `#cccc00077`. Guarding on focus instead looks equivalent and is not — a
+  `×` on that same row is an outside change arriving while the field still
+  holds the caret, and it left the row advertising a colour the palette no
+  longer had. So the row remembers what it last wrote and skips exactly
+  that — which only works while nothing in between rewrites the value.
+  It did: the read-back expanded `#cc0` to `#cccc00` for the sake of
+  `<input type="color">`, which takes six digits and shows black for
+  three, so the row could not recognise its own write and pasted the
+  expansion over the caret. **The same normalisation in two places is the
+  bug, not the mismatch**; the expansion now happens at the one control
+  that needs it and the palette is read back verbatim. Caught in review
+  after being shipped for it — see the typing note under *Verifying UI
+  changes by hand* for why the browser check missed it.
 
 And one that is about overlays in general: **a focus trap has to exclude
 `:disabled`.** The last control on the panel is a row's `×`, which is
@@ -1555,6 +1564,18 @@ bug listed here passed CI.
   `el.dispatchEvent(pointerdown); el.dispatchEvent(mousedown)` in one
   statement. "Could not reproduce with the mouse" is not evidence
   against a batching claim; dispatch the pair yourself before deciding.
+- **Type at a person's speed, or a controlled input will pass a test it
+  fails in use.** `page.keyboard.type` and `tab.type` at their default
+  delay put every character in before React flushes a passive effect, so a
+  field whose `useEffect` writes back over the caret behaves *perfectly*:
+  the effect runs once, after the last keystroke, when the value it would
+  paste is already what you typed. At 150ms a gap the same seven
+  characters produced `#cccc00077` on the very first try. This is the
+  opposite failure to the batching one above — there, automation splits
+  what a mouse fuses; here, it fuses what a keyboard splits — and both
+  mean the harness, not the app, decided the result. Any check of a
+  controlled field has to be typed with a delay and read *between*
+  keystrokes, not only at the end.
 - **A locked screen looks exactly like an app that ignores you.** With
   the machine locked — or the window minimised, or the tab in the
   background — an injector that goes through the OS has nowhere to

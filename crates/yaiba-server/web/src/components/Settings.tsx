@@ -75,7 +75,8 @@ export function Settings({
 
   /**
    * What each slot is drawn in right now — an override where there is
-   * one, the stylesheet's own value where there is not.
+   * one, the stylesheet's own value where there is not, *exactly as it is
+   * written*.
    *
    * Read off the element the overrides are written to rather than kept as
    * a table here, because a table would be a second copy of `:root` and
@@ -83,18 +84,22 @@ export function Settings({
    * `App` applies a palette in the same breath as it sets it, the way
    * `applyTheme` has always been called from inside `setTheme` — so by
    * the time this runs, the DOM already agrees with `palettes`.
+   *
+   * Nothing is normalised on the way through, and that is load-bearing.
+   * This expanded a three-digit value to six for the sake of
+   * `<input type="color">`, which takes `#rrggbb` and nothing else — and
+   * the expansion is a transform the hex field's own commit path does not
+   * apply, so `#cc0` typed en route to `#cc0077` came back as `#cccc00`,
+   * failed to match what the row knew it had just written, and was pasted
+   * over the caret: `#cccc00077`, the very bug the echo guard exists to
+   * prevent. The expansion belongs at the one control that needs it and
+   * nowhere else.
    */
   const shown = useMemo(() => {
     const style = getComputedStyle(document.documentElement);
     const out = {} as Record<Slot, string>;
     for (const { slot } of SLOTS) {
-      const raw = style.getPropertyValue(`--${slot}`).trim().toLowerCase();
-      // `<input type="color">` takes `#rrggbb` and nothing else: given
-      // `#fff` it silently shows black, which reads as the panel having
-      // lost the colour rather than as a notation it declined.
-      out[slot] = /^#[0-9a-f]{3}$/.test(raw)
-        ? `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}`
-        : raw;
+      out[slot] = style.getPropertyValue(`--${slot}`).trim().toLowerCase();
     }
     return out;
   }, [palettes, theme]);
@@ -239,13 +244,24 @@ function SlotRow({ spec, value, overridden, onSet }: RowProps) {
     setDraft(value);
   }, [value]);
 
+  /**
+   * The same colour in the one notation `<input type="color">` accepts.
+   *
+   * It takes `#rrggbb` and nothing else: given `#fff` it shows black,
+   * which reads as the panel having lost the colour rather than as a
+   * notation it declined. Expanded here and nowhere else — see `shown`.
+   */
+  const swatch = /^#[0-9a-f]{3}$/.test(value)
+    ? `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`
+    : value;
+
   return (
     <li className="settings__slot">
       <input
         type="color"
         className="settings__swatch"
         aria-label={t(spec.label)}
-        value={value}
+        value={swatch}
         onChange={(e) => onSet(spec.slot, e.target.value)}
       />
       <input
