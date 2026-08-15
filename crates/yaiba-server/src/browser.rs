@@ -10,7 +10,7 @@
 //! the launch would leave somebody watching a process that looks hung
 //! with no way to find the address it wanted them to visit.
 //!
-//! **On Windows this calls `ShellExecuteW` rather than spawning
+//! **On Windows this calls `ShellExecuteExW` rather than spawning
 //! `cmd /C start`,** and the reason is worth keeping. `start` is a `cmd`
 //! builtin whose entire job is to call `ShellExecute`, so going through
 //! `cmd` bought nothing and cost two things:
@@ -37,8 +37,18 @@
 //!   process-creation telemetry, which is not where a `client_id` and a
 //!   PKCE challenge belong.
 //!
-//! `ShellExecuteW` takes the URL as one opaque argument, so nothing
+//! `ShellExecuteExW` takes the URL as one opaque argument, so nothing
 //! parses it and no process appears between yaiba and the browser.
+//!
+//! **`Ex`, and `SEE_MASK_NOASYNC`, because of the thread it runs on.** A
+//! handler registered through `ddeexec` — the legacy file-association
+//! mechanism, still how some applications are wired — is driven over a
+//! DDE conversation, and `ShellExecute` leaves that conversation to the
+//! calling thread's message loop. This one is a bare `std::thread` with
+//! no loop, and it exits the moment the call returns, so an asynchronous
+//! conversation would have nobody to finish it. `SEE_MASK_NOASYNC` says
+//! to complete it before returning, which is exactly what the
+//! documentation asks of a caller that is about to terminate.
 
 /// Best-effort browser launch. A failure here is cosmetic — the URL is
 /// already on screen — so it warns instead of aborting anything.
@@ -49,8 +59,8 @@ pub fn open(url: &str) {
     open_other(url);
 }
 
-/// A NUL-terminated UTF-16 copy, which is what the `W` in `ShellExecuteW`
-/// asks for.
+/// A NUL-terminated UTF-16 copy, which is what the `W` in
+/// `ShellExecuteExW` asks for.
 #[cfg(target_os = "windows")]
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -58,11 +68,11 @@ fn wide(s: &str) -> Vec<u16> {
 
 #[cfg(target_os = "windows")]
 fn open_windows(url: &str) {
-    use windows_sys::Win32::Foundation::{S_FALSE, S_OK};
+    use windows_sys::Win32::Foundation::{GetLastError, S_FALSE, S_OK};
     use windows_sys::Win32::System::Com::{
-        COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize,
+        COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
     };
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::Shell::{SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW};
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
     let file = wide(url);
@@ -71,9 +81,9 @@ fn open_windows(url: &str) {
     // registered first.
     let verb = wide("open");
 
-    // On its own thread, because `ShellExecuteW` is synchronous and sits
-    // for as long as a cold browser takes to come up. Both callers are
-    // inside an async runtime, and the startup one is the line before
+    // On its own thread, because the call is synchronous and sits for as
+    // long as a cold browser takes to come up. Both callers are inside an
+    // async runtime, and the startup one is the line before
     // `axum::serve` — blocking there would hold the listener shut against
     // the browser it has just opened. `Command::spawn` returned
     // immediately, and this keeps that property.
@@ -87,8 +97,18 @@ fn open_windows(url: &str) {
         // browser registers a handler that does would have failed in the
         // field, where nobody could have reproduced it.
         //
+        // `COINIT_DISABLE_OLE1DDE` turns off OLE 1.0's DDE, which is
+        // obsolete and unrelated to the `ddeexec` conversation the mask
+        // below waits on. Microsoft names this exact pair as what to
+        // initialise with before `ShellExecuteEx`.
+        //
         // SAFETY: a fresh thread, so there is no apartment to disturb.
-        let com = unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32) };
+        let com = unsafe {
+            CoInitializeEx(
+                std::ptr::null(),
+                (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+            )
+        };
         // `S_OK` and `S_FALSE` both leave an initialisation for this
         // thread to balance. `RPC_E_CHANGED_MODE` says somebody already
         // chose the apartment and it is not ours to undo — unreachable on
@@ -98,28 +118,29 @@ fn open_windows(url: &str) {
         // is what this did until now, and the URL is on screen regardless.
         let balanced = com == S_OK || com == S_FALSE;
 
-        // SAFETY: both pointers are NUL-terminated UTF-16 buffers that
-        // live until the call returns, and `ShellExecuteW` does not
-        // retain either. A null `hwnd` means "no owner window", which is
-        // what a process with no window of its own has to pass.
-        let rc = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                verb.as_ptr(),
-                file.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                SW_SHOWNORMAL,
-            )
-        };
-        // Documented as an `HINSTANCE` for compatibility and never a real
-        // one: anything above 32 is success, anything at or below it is
-        // the reason for the failure.
-        let code = rc.addr();
-        if code <= 32 {
+        // SAFETY: an all-zero `SHELLEXECUTEINFOW` is a valid one — every
+        // field this leaves alone is documented as ignored when its flag
+        // is absent from `fMask`, and a null `hwnd` is what a process
+        // with no window of its own passes.
+        let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
+        info.fMask = SEE_MASK_NOASYNC;
+        info.lpVerb = verb.as_ptr();
+        info.lpFile = file.as_ptr();
+        info.nShow = SW_SHOWNORMAL;
+
+        // SAFETY: `info` is fully initialised above and outlives the
+        // call, as do the two UTF-16 buffers it points at; the callee
+        // retains none of them.
+        let launched = unsafe { ShellExecuteExW(&raw mut info) };
+        if launched == 0 {
+            // SAFETY: read on the same thread, immediately after the
+            // failure that set it.
+            let err = unsafe { GetLastError() };
             tracing::warn!(
-                "could not open a browser automatically (ShellExecuteW returned {code}); \
-                 the URL is on screen to open by hand"
+                "could not open a browser automatically (ShellExecuteExW failed, \
+                 GetLastError {err}, CoInitializeEx {com:#010x}); the URL is on \
+                 screen to open by hand"
             );
         }
         if balanced {
@@ -132,7 +153,7 @@ fn open_windows(url: &str) {
 
 #[cfg(not(target_os = "windows"))]
 fn open_other(url: &str) {
-    // Both take the URL as one argv entry, so — as with `ShellExecuteW`
+    // Both take the URL as one argv entry, so — as with `ShellExecuteExW`
     // — no shell ever parses it.
     #[cfg(target_os = "macos")]
     let spawned = std::process::Command::new("open").arg(url).spawn();
@@ -153,7 +174,7 @@ mod tests {
     /// `&` is the one that broke — `cmd` read it as a command separator.
     /// `"` is the one the quoting fix then had to turn away, because it
     /// would have closed the quotes and handed `cmd` the rest as
-    /// commands. Neither means anything to `ShellExecuteW`, and this is
+    /// commands. Neither means anything to `ShellExecuteExW`, and this is
     /// what would fail if somebody reintroduced a quoting step.
     #[test]
     fn the_url_reaches_the_shell_untouched() {
@@ -165,7 +186,7 @@ mod tests {
         assert_eq!(
             encoded.last(),
             Some(&0),
-            "ShellExecuteW reads until a NUL terminator"
+            "ShellExecuteExW reads until a NUL terminator"
         );
         assert!(
             !encoded[..encoded.len() - 1].contains(&0),

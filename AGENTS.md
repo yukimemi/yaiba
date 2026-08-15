@@ -1082,7 +1082,7 @@ it returns forever — is `SyncNode::start`, via iroh.
 ### yaiba never asks a shell to run anything
 
 `browser.rs` is the only place yaiba hands work to the operating system,
-and on Windows it calls `ShellExecuteW` rather than spawning
+and on Windows it calls `ShellExecuteExW` rather than spawning
 `cmd /C start`. The module header carries the full argument; the part
 that belongs here is the rule and the bill.
 
@@ -1095,7 +1095,7 @@ bought nothing and cost twice:
   saw was `http://localhost:8188`; `gcal login` handed it a consent URL
   and everything after `client_id` ran as commands of its own. v0.23.1
   patched that by quoting, which then had to *refuse* any URL containing
-  a quote. `ShellExecuteW` takes the string as one opaque argument, so
+  a quote. `ShellExecuteExW` takes the string as one opaque argument, so
   there is nothing to quote, escape or turn away.
 - **CrowdStrike quarantined a v0.23.0 binary for it.** An unsigned
   executable in a user-writable directory (`~/.cargo/bin`) spawning
