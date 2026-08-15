@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/yaiba-core", "crates/yaiba-server", "crates/yaiba-sync"]
 
 [workspace.package]
-version      = "0.24.0"
+version      = "0.24.1"
 edition      = "2024"
 # Floor set by iroh 1.0, which the sync layer depends on.
 rust-version = "1.91"
@@ -114,5 +114,5 @@ windows-sys         = { version = "0.61.2", features = [
 # `^0.16.0`, which 0.16.1 satisfies — so the pins could sit stale for as
 # long as nobody changed the minor, and then break the one release that
 # did. `check-versions.rs` is what stops them going stale again.
-yaiba-core          = { path = "crates/yaiba-core", version = "0.24.0" }
-yaiba-sync          = { path = "crates/yaiba-sync", version = "0.24.0" }
+yaiba-core          = { path = "crates/yaiba-core", version = "0.24.1" }
+yaiba-sync          = { path = "crates/yaiba-sync", version = "0.24.1" }
