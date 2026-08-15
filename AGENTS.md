@@ -1401,6 +1401,39 @@ degradation has stopped working and that is the bug to fix.
   resolves later finishes than one that does not, until both upgrade.
   Storing the resolved dates instead would trade that for a calendar that
   goes stale the year after it was written, which is worse.
+- **`yaiba cal` exists because a calendar arrives as a file.** `:cal` sets
+  one thing at a time, which is right for a keyboard and useless for a
+  year of company shutdown days. The CLI is a *client* of
+  `PUT /api/calendar` — same one-writer rule `mcp` and `gcal` follow — and
+  `--file` posts the whole map in **one** request. That is not only about
+  typing: the route validates every date before it writes any of them, so
+  a typo on line 40 changes nothing, where fifty requests would leave the
+  calendar halfway and no way to tell how far.
+  - The file format is two fields and no library. The split is on the
+    **first** comma or tab so a name may contain a comma
+    ("Christmas Eve, half day"); a leading BOM is stripped, because Excel
+    writes one and the first date otherwise arrives as
+    `\u{feff}2026-01-01` and is refused with a message that reads as
+    nonsense.
+  - `week` is parsed client-side and `region` is not, and the asymmetry is
+    deliberate: the API takes only the mask, so the words have to be
+    resolved somewhere, while the *list of regions* belongs to the build
+    that knows them and its refusal already names them. Second copies of
+    either would be the thing that goes stale.
+  - `WEEK_WORDS` therefore exists twice — Rust for the CLI, TypeScript for
+    `:cal week` — because the client is a separate program. What keeps the
+    two from drifting into two behaviours is that the **word never goes on
+    the wire**; both send the mask. Adding a word means adding it in both,
+    and both are pinned by tests.
+- **A globally installed `yaiba` will answer instead of the one you just
+  built.** `~/.cargo/bin/yaiba` is on `PATH`, so verifying a CLI change
+  from a worktree by typing `yaiba cal …` runs the *released* binary and
+  reports a subcommand that does not exist — or worse, silently runs an
+  older version of one that does. Invoke the absolute path to
+  `target/debug/yaiba.exe`, or `cargo run -p yaiba --`. This cost a
+  confusing half-hour on the `cal` subcommand: the string was visibly in
+  the freshly linked binary while `--help` kept insisting there was no
+  such command.
 
 ### `runKey` is the command layer, `onKey` is the event
 

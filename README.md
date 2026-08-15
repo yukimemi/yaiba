@@ -623,9 +623,38 @@ Any date can be named, and any date can be taken back:
 ```
 
 That is the whole mechanism, and it is deliberately not tied to any
-country: mark the dates you don't work, from wherever you get them.
-`PUT /api/calendar` takes them in bulk, which is the honest import path
-for a national calendar this binary has never heard of.
+country: mark the dates you don't work, from wherever you get them. A
+calendar usually *arrives* as a file rather than as something you type, so
+the same verbs exist on the command line and take one:
+
+```sh
+yaiba cal                              # what this project counts in
+yaiba cal on                           # ...and switch it over
+yaiba cal week mon-sat
+yaiba cal region jp
+yaiba cal holiday 2026-12-29 年末休み   # one day
+yaiba cal holiday --file days.csv      # or a year of them, in one request
+yaiba cal workday --file open.csv      # the days you are in anyway
+yaiba cal clear   --file days.csv      # and the way back out
+```
+
+The file is one `date[,name]` per line — `#` starts a comment, a tab works
+as well as a comma, and a name may contain commas because the split is on
+the first separator only. `--file -` reads stdin, so anything that can
+produce a list of dates can feed it:
+
+```sh
+curl -s https://example.test/holidays.csv | yaiba cal holiday --file -
+```
+
+**One request, so it either all lands or none of it does.** The server
+validates every line before writing any of them; a typo on line 40 leaves
+the calendar exactly as it was and says which date it choked on. Fifty
+separate requests would leave it halfway.
+
+Like `yaiba mcp` and `yaiba gcal`, this talks to a yaiba that is **already
+running** rather than starting one of its own — the server stays the only
+writer.
 
 What ships built in is one table, because the dates it holds move around
 by law every year and typing them in annually would be miserable:

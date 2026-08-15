@@ -548,6 +548,41 @@ pub fn week_mask(week: [bool; 7]) -> String {
         .collect()
 }
 
+/// The weeks that can be named instead of spelled as a mask.
+///
+/// **Must stay in step with `WEEK_WORDS` in the web's `commands.ts`.** One
+/// rule in two languages is the cost of the client being a separate
+/// program; what keeps them from drifting into two *behaviours* is that
+/// the word never goes on the wire — both sides send the mask, and the
+/// API only accepts the mask.
+pub const WEEK_WORDS: [(&str, [bool; 7]); 2] = [
+    ("mon-fri", WORK_WEEK_MON_FRI),
+    ("mon-sat", [true, true, true, true, true, true, false]),
+];
+
+/// A week from whatever a person typed: a name from [`WEEK_WORDS`] or a
+/// Monday-first mask.
+///
+/// One entry point so a caller never has to decide which of the two forms
+/// it was handed — `yaiba cal week mon-fri` and `yaiba cal week 1111100`
+/// are the same command with the same validation.
+pub fn parse_week_spec(spec: &str) -> Option<[bool; 7]> {
+    WEEK_WORDS
+        .iter()
+        .find(|(word, _)| *word == spec)
+        .map(|(_, week)| *week)
+        .or_else(|| parse_week_mask(spec))
+}
+
+/// The shortest honest way to say a week: its name where it has one, and
+/// the mask where it does not.
+pub fn week_word(week: [bool; 7]) -> String {
+    WEEK_WORDS
+        .iter()
+        .find(|(_, named)| *named == week)
+        .map_or_else(|| week_mask(week), |(word, _)| (*word).to_string())
+}
+
 /// Whether `date` is a Japanese public holiday, and what it is called.
 ///
 /// **Bounds, stated rather than implied.** The equinox approximations are
@@ -1057,5 +1092,28 @@ mod tests {
         assert_eq!(parse_week_mask("11111"), None);
         assert_eq!(parse_week_mask("1111x00"), None);
         assert_eq!(parse_week_mask(""), None);
+    }
+
+    #[test]
+    fn a_week_can_be_named_or_spelled() {
+        assert_eq!(parse_week_spec("mon-fri"), Some(WORK_WEEK_MON_FRI));
+        assert_eq!(
+            parse_week_spec("mon-sat"),
+            Some([true, true, true, true, true, true, false])
+        );
+        assert_eq!(parse_week_spec("1111100"), Some(WORK_WEEK_MON_FRI));
+        assert_eq!(parse_week_spec("tue-sat"), None, "not a word we know");
+
+        // Named where it has a name, spelled where it does not — which is
+        // what the CLI prints back and what the app shows in `:cal`.
+        assert_eq!(week_word(WORK_WEEK_MON_FRI), "mon-fri");
+        assert_eq!(week_word([true; 7]), "1111111");
+
+        // Every word round-trips, so the table cannot hold a mask its own
+        // name does not describe.
+        for (word, week) in WEEK_WORDS {
+            assert_eq!(parse_week_spec(word), Some(week));
+            assert_eq!(week_word(week), word);
+        }
     }
 }
