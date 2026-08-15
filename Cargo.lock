@@ -5244,7 +5244,7 @@ dependencies = [
 
 [[package]]
 name = "yaiba"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -5276,7 +5276,7 @@ dependencies = [
 
 [[package]]
 name = "yaiba-core"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5290,7 +5290,7 @@ dependencies = [
 
 [[package]]
 name = "yaiba-sync"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "iroh",
