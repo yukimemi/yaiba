@@ -557,8 +557,16 @@ body::after {
 }
 
 /* 1ch, like the fold beside it, because the heading row draws a space
-   here where a real row draws `▸` — and a cell sized by its content is a
-   cell that disagrees with the row above it. */
+   here where a real row draws `▌` — and a cell sized by its content is a
+   cell that disagrees with the row above it.
+
+   A vertical blade rather than a triangle on purpose: the fold marker
+   beside it is `▸` / `▾`, and a caret in the same shape would be
+   indistinguishable from a collapsed fold — which is what the caret used
+   to be, until a summary folded under the cursor read as two of the
+   same mark. The cursor line is already the 2px blade at the row's edge
+   and the wash behind it; this glyph is the blade at the fold's own
+   position, where the eye is looking. */
 .row__caret {
   flex: none;
   width: 1ch;
