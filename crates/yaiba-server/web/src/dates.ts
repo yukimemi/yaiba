@@ -93,23 +93,27 @@ export function holidayName(iso: string, cal: Calendar): string | null {
 }
 
 /**
- * How far the search for the next working day walks before giving up.
+ * Calendar days one walk may cover before it gives up and saturates.
  *
- * The week mask cannot stall it — one with no working day is already
- * degraded to "no opinion" above — so only an unbroken year of marked
- * holidays could, which is a value a peer sent rather than one anybody
- * typed. It saturates instead of looping, the same bargain the server
- * makes: a wrong date is recoverable, a frozen tab is not.
+ * **This is the server's `MAX_WALK`, and it has to be the same number.**
+ * `check-cal.ts` reads the constant out of `calendar.rs` and fails the
+ * build if the two drift, because a browser that stops earlier than the
+ * scheduler is a preview that disagrees with the commit — the one rule
+ * this whole feature leans on. It was two numbers here (400 for the snap,
+ * 36,500 for a count) and both were smaller than the server's, so an
+ * oversized `duration_days` could stop the preview 3,500 days short of
+ * where the bar actually lands, and a run of more than 400 marked
+ * holidays could stop a snap early with nothing on screen saying so.
+ *
+ * Reached only by absurd input: nothing anybody types walks a century,
+ * and the week mask cannot stall a walk because a mask with no working
+ * day degrades to "no opinion" above. Saturating rather than looping is
+ * the same bargain the server makes — a wrong date is recoverable, a
+ * frozen tab is not.
+ *
+ * Exported for the parity check and for nothing else.
  */
-const MAX_SCAN = 400;
-
-/**
- * The span `countWork` will measure before saturating: a hundred years,
- * the bound `MAX_LAG_DAYS` already puts on an edge. Past it the answer
- * is nonsense either way, and a loop counting three million days would
- * take the frame with it.
- */
-const MAX_SPAN = 36_500;
+export const MAX_WALK = 40_000;
 
 /**
  * The first working day at or after `iso` — `Calendar::snap_forward`.
@@ -141,7 +145,7 @@ export function snapBack(iso: string, cal: Calendar): string {
 function snap(iso: string, cal: Calendar, dir: 1 | -1): string {
   if (cal.mode === "days") return iso;
   let cursor = iso;
-  for (let scanned = 0; scanned < MAX_SCAN && isOffDay(cursor, cal); scanned++) {
+  for (let scanned = 0; scanned < MAX_WALK && isOffDay(cursor, cal); scanned++) {
     cursor = addDays(cursor, dir);
   }
   return cursor;
@@ -174,7 +178,7 @@ export function advanceWork(iso: string, n: number, cal: Calendar): string {
   // at the same kind of ceiling, so the preview and the commit agree even
   // on the absurd input neither of them can place.
   let walked = 0;
-  while (left > 0 && walked < MAX_SPAN) {
+  while (left > 0 && walked < MAX_WALK) {
     walked++;
     cursor = addDays(cursor, dir);
     if (!isOffDay(cursor, cal)) left--;
@@ -224,7 +228,7 @@ function steps(from: string, to: string, cal: Calendar, dir: 1 | -1): number {
   // Bounded by the span itself — the loop cannot outrun the two dates —
   // and then by a century, so a date typed with an extra digit costs a
   // frame rather than the tab.
-  const span = Math.min(Math.abs(diffDays(cursor, target)), MAX_SPAN);
+  const span = Math.min(Math.abs(diffDays(cursor, target)), MAX_WALK);
   let n = 0;
   for (let i = 0; i < span; i++) {
     cursor = addDays(cursor, dir);

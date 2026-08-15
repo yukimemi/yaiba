@@ -44,6 +44,7 @@ import {
   addDays,
   advanceWork,
   countWork,
+  MAX_WALK,
   diffDays,
   holidayName,
   isOffDay,
@@ -464,19 +465,37 @@ for (const from of ["2026-05-01", "2026-05-02", "2026-05-06", "2026-05-09"]) {
 // iterations and took the process with it — and it is reachable twice
 // over: `duration_days` has never been bounded anywhere, and the count
 // typed in front of `.` is whatever the fingers said.
+//
+// The other half is the *number*. A browser that gives up earlier than
+// the scheduler is a preview that disagrees with the commit, so the two
+// ceilings have to be one ceiling — which is asserted against the Rust
+// source below rather than promised in a comment. It was two smaller
+// numbers here (400 and 36,500) against the server's 40,000, which is
+// exactly the drift this reads for.
 {
   const far = advanceWork("2026-05-01", 1_000_000_000, WORK);
   const back = advanceWork("2026-05-01", -1_000_000_000, WORK);
   const span = diffDays("2026-05-01", far);
   check(
     "an absurd advance saturates rather than hanging",
-    span > 0 && span <= 36_600 ? "bounded" : `walked ${span}`,
-    "bounded",
+    span === MAX_WALK ? "at the ceiling" : `walked ${span}`,
+    "at the ceiling",
   );
   check(
     "and the same backwards",
-    back < "2026-05-01" ? "bounded" : `landed ${back}`,
-    "bounded",
+    diffDays(back, "2026-05-01") === MAX_WALK ? "at the ceiling" : `landed ${back}`,
+    "at the ceiling",
+  );
+
+  const rust = readFileSync(
+    new URL("../../../yaiba-core/src/calendar.rs", import.meta.url),
+    "utf8",
+  );
+  const declared = /const MAX_WALK: i64 = ([0-9_]+);/.exec(rust)?.[1];
+  check(
+    "and the ceiling is the server's, to the day",
+    String(Number(declared?.replaceAll("_", ""))),
+    String(MAX_WALK),
   );
 }
 
