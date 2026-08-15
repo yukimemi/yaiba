@@ -79,6 +79,7 @@ const groups = (): Group[] => [
       ["gd", t("date columns ⇄ compact")],
       ["gt", t("office mode ⇄ neon mode")],
       ["gs", t("super mode ⇄ neon mode")],
+      ["gc", t("colours — presets, and every slot")],
     ],
   },
   {
@@ -245,6 +246,7 @@ const groups = (): Group[] => [
       [":theme ⟨t⟩", t("dark / light / super — bare toggles office")],
       [":office", t("straight to office mode")],
       [":super", t("every effect at maximum — bare toggles")],
+      [":colors", t("the same panel — :settings works too")],
       [":lang ⟨l⟩", t("en / ja — bare toggles")],
     ],
   },

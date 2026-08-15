@@ -98,6 +98,9 @@ const JA: Record<string, string> = {
   "super mode — every effect at maximum (gs)":
     "スーパーモード — 演出を全部いちばん強く (gs)",
   "back to neon mode (gs)": "ネオンモードに戻す (gs)",
+  "◍ colours": "◍ 配色",
+  "colours — every slot, and a few presets (gc)":
+    "配色 — 全スロットとプリセット (gc)",
   "node {id} · :ticket to share, :join <ticket> to open theirs beside yours":
     "ノード {id} · 共有は :ticket、相手を別プロジェクトで開くのは :join <チケット>",
   "started with --no-sync": "--no-sync で起動しています",
@@ -622,6 +625,33 @@ const JA: Record<string, string> = {
   "straight to office mode": "そのままオフィスモードへ",
   "every effect at maximum — bare toggles": "演出全開（引数なしで切替）",
   "en / ja — bare toggles": "en / ja（引数なしで切替）",
+  "colours — presets, and every slot": "配色 — プリセットと全スロット",
+  "the same panel — :settings works too": "同じパネル（:settings でも）",
+  // ---- the colour settings ----------------------------------------
+  //
+  // 地 for the ground: the two colour blocks the stylesheet keeps, and
+  // the word a painter would use for what a picture is painted on.
+  colours: "配色",
+  neon: "ネオン",
+  office: "オフィス",
+  preset: "プリセット",
+  "a preset writes all twelve · × puts one back · esc close — the glow lives on gs, not here":
+    "プリセットは12色すべてを書き換えます · × で1色を既定に戻す · esc で閉じる — 発光の強さは gs です",
+  "back to the stylesheet's own": "既定の色に戻す",
+  // The twelve slots. Each one says what the colour *does*: a label
+  // naming the hue would be a lie the moment somebody changed it.
+  background: "背景",
+  "panels, the bar, popovers": "パネル・バー・ポップオーバー",
+  "grid lines": "罫線",
+  "grid lines, the stronger ones": "罫線（強）",
+  "the blade — cursor, focus, structure": "刃 — カーソル・フォーカス・構造",
+  "the blade, quieter — rails and edges": "刃（弱） — レールと依存線",
+  "the critical path, and nothing else": "クリティカルパス専用",
+  "overdue, and nothing else": "遅延専用",
+  "done, and progress": "完了と進捗",
+  text: "文字",
+  "text, quieter": "文字（弱）",
+  "text and marks, quietest": "文字と記号（最弱）",
   "Edits save as they happen. Dates accept today / tom / mon / +3d / 8-14. On the : line, tab completes and s-tab walks back. Press ? or esc to close.":
     "編集はその場で保存されます。日付は today / tom / mon / +3d / 8-14 のように書けます。: の行では tab が補完し、s-tab が戻ります。? か esc で閉じます。",
 };

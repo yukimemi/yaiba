@@ -488,6 +488,97 @@ signal, as the overdue bar's is, office mode needs it re-stated
 stronger; the overdue rules at the end of the gantt block are the
 pattern to copy.
 
+### The meanings are the rule, the hues are the user's
+
+`gc` opens a panel over the twelve colour slots and every one of them is
+editable, which turns the section above from a style guide into an
+invariant with a build check behind it (`check-theme.ts`, 96 assertions).
+What a user replaces is a *value*; what they cannot touch is what a
+colour means, so "magenta is the critical path" survives being made
+green — there is still exactly one colour that means critical path.
+
+- **No rule outside the two palette blocks may write a palette colour.**
+  `rgba(34, 211, 238, 0.06)` and `rgb(from var(--edge) r g b / 0.06)` are
+  the same pixels until somebody moves `--edge`, and then the glow keeps
+  the old hue while the thing glowing changes — in one rule out of a
+  hundred, invisible in every screenshot of the default theme. 98 of them
+  were converted in one pass; the two spellings are
+  `rgb(from var(--slot) r g b / a)` for a slot at some alpha and
+  `color-mix(in srgb, var(--a) N%, var(--b))` for one lifted into
+  another. White and black stay literal and are not slots: white is super
+  mode's blown highlight and the sever flash, black is a shadow, and a
+  mask needs both as ink.
+- **An undeclared `var()` draws something plausible and wrong.** It is
+  invalid at computed-value time, so `color` inherits and `background`
+  falls back to transparent — which is why `.rowmenu` spent three
+  variables (`--fg`, `--fg-dim`, `--sel`) that `:root` has never
+  declared, with the lit row showing a border and no fill, and nobody
+  noticed. The check now fails on one; the exceptions are the handful
+  JavaScript sets inline, each listed with what sets it.
+- **Overrides are per *ground*, not per theme.** `:root` carries the
+  colours `dark` and `super` share and `:root[data-theme="light"]`
+  replaces them, so those are the two things a palette can be attached
+  to — and keeping them apart is the only honest answer to the alpha trap
+  above. `super` is not a third ground; a third one would mean a second
+  copy of the twelve.
+- **They are inline properties on `<html>`, so only one ground's may be
+  on the element at a time.** Inline outranks every selector, including
+  office mode's own block — a leftover neon `--void` would beat it. That
+  makes `applyPalette` part of *switching the theme* rather than a
+  reaction to it, and it removes as deliberately as it sets.
+- **`--glow` is not a slot.** It is the whole of office mode, so a
+  palette able to set it could light the neon back up on the one screen
+  that has to survive being shared. Loudness lives on `gs`. The check
+  asserts both halves: not in `SLOTS`, still `0` in the office block.
+- **A preset is ground-tagged, and the built-in is `colors: null`.**
+  Spelling the default out would be a second copy of `:root` to keep in
+  step; `null` means *clear the overrides*, and the panel highlights it by
+  deriving the active preset from the colours rather than remembering a
+  name — a remembered name goes stale the moment one slot is nudged,
+  which is the common case.
+
+Two bugs the panel itself produced, both found by driving it rather than
+by reading it:
+
+- **The palette is applied inside the setter, not from an effect.** The
+  panel shows the default of a slot nobody has touched by reading it back
+  off `<html>` — the alternative being a table here that is a copy of
+  `:root` — so the DOM has to agree with the state before the next render
+  looks. A `useEffect` runs a frame late, and a *child's* layout effect
+  runs before its parent's, so neither can be the thing that writes it.
+  This is the same bargain `applyTheme` has always made from inside
+  `setTheme`.
+- **A hex field must ignore its own echo, and only its own — and the echo
+  has to come back in the form it was sent.** `#cc0` on the way to
+  `#cc0077` is a valid three-digit hex, so it commits, comes back as the
+  new value, and lands in the field the caret is still in: what appears is
+  `#cccc00077`. Guarding on focus instead looks equivalent and is not — a
+  `×` on that same row is an outside change arriving while the field still
+  holds the caret, and it left the row advertising a colour the palette no
+  longer had. So the row remembers what it last wrote and skips exactly
+  that — which only works while nothing in between rewrites the value.
+  It did: the read-back expanded `#cc0` to `#cccc00` for the sake of
+  `<input type="color">`, which takes six digits and shows black for
+  three, so the row could not recognise its own write and pasted the
+  expansion over the caret. **The same normalisation in two places is the
+  bug, not the mismatch**; the expansion now happens at the one control
+  that needs it and the palette is read back verbatim. Caught in review
+  after being shipped for it — see the typing note under *Verifying UI
+  changes by hand* for why the browser check missed it.
+
+And one that is about overlays in general: **a focus trap has to exclude
+`:disabled`.** The last control on the panel is a row's `×`, which is
+disabled whenever that colour is the stylesheet's own — the usual case —
+so a trap that counted it was watching for a boundary the caret can never
+reach, and `Tab` walked out onto the HUD. That is the `RowMenu` failure
+(`AGENTS.md` already has it under `runKey`) reached by a different route:
+`App` stands its own handler down for the panel, so a keyboard that
+escapes it is a keyboard with nothing listening for `esc`. The panel needs
+no `onBlur` close, though, and must not have one — it covers the screen,
+so every outside press lands on its backdrop, and the native colour picker
+is a window of its own whose opening would otherwise close the panel
+underneath it.
+
 ### The MCP server is a client, not a second writer
 
 `yaiba mcp` (`mcp.rs`) serves the plan to an agent over stdio. It reaches
@@ -1473,6 +1564,18 @@ bug listed here passed CI.
   `el.dispatchEvent(pointerdown); el.dispatchEvent(mousedown)` in one
   statement. "Could not reproduce with the mouse" is not evidence
   against a batching claim; dispatch the pair yourself before deciding.
+- **Type at a person's speed, or a controlled input will pass a test it
+  fails in use.** `page.keyboard.type` and `tab.type` at their default
+  delay put every character in before React flushes a passive effect, so a
+  field whose `useEffect` writes back over the caret behaves *perfectly*:
+  the effect runs once, after the last keystroke, when the value it would
+  paste is already what you typed. At 150ms a gap the same seven
+  characters produced `#cccc00077` on the very first try. This is the
+  opposite failure to the batching one above — there, automation splits
+  what a mouse fuses; here, it fuses what a keyboard splits — and both
+  mean the harness, not the app, decided the result. Any check of a
+  controlled field has to be typed with a delay and read *between*
+  keystrokes, not only at the end.
 - **A locked screen looks exactly like an app that ignores you.** With
   the machine locked — or the window minimised, or the tab in the
   background — an injector that goes through the OS has nowhere to
