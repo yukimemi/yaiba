@@ -456,6 +456,30 @@ for (const from of ["2026-05-01", "2026-05-02", "2026-05-06", "2026-05-09"]) {
   check("days mode is the calendar arithmetic, unchanged", bad.join(" ") || "identical", "identical");
 }
 
+// An absurd count saturates instead of hanging, which is the server's
+// bargain too (`plus_days`, and `Calendar::walk`'s cap).
+//
+// **This check completing is half the assertion.** Before the walk was
+// bounded by its total rather than per step, this call ran a billion
+// iterations and took the process with it — and it is reachable twice
+// over: `duration_days` has never been bounded anywhere, and the count
+// typed in front of `.` is whatever the fingers said.
+{
+  const far = advanceWork("2026-05-01", 1_000_000_000, WORK);
+  const back = advanceWork("2026-05-01", -1_000_000_000, WORK);
+  const span = diffDays("2026-05-01", far);
+  check(
+    "an absurd advance saturates rather than hanging",
+    span > 0 && span <= 36_600 ? "bounded" : `walked ${span}`,
+    "bounded",
+  );
+  check(
+    "and the same backwards",
+    back < "2026-05-01" ? "bounded" : `landed ${back}`,
+    "bounded",
+  );
+}
+
 // ---- the two gestures whose preview must be the commit ----------------
 //
 // `Gantt` draws with these and `App` commits with them, so what is

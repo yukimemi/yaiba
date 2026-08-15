@@ -161,12 +161,23 @@ export function advanceWork(iso: string, n: number, cal: Calendar): string {
   if (cal.mode === "days") return addDays(iso, n);
   const dir = n < 0 ? -1 : 1;
   let cursor = snap(iso, cal, dir);
-  for (let left = Math.abs(n); left > 0; left--) {
-    let scanned = 0;
-    do {
-      cursor = addDays(cursor, dir);
-      scanned++;
-    } while (isOffDay(cursor, cal) && scanned < MAX_SCAN);
+  let left = Math.abs(n);
+  // Bounded by the calendar days *walked in total*, not by the days
+  // walked looking for each next one. A per-step cap leaves the whole
+  // walk unbounded, and `n` here is not small by construction:
+  // `duration_days` has never been bounded anywhere (a peer or the API
+  // can set it to anything, which is why the server saturates rather
+  // than trusting it), and the count typed in front of `.` is whatever
+  // the fingers said. Unbounded, `999999999.` freezes the tab.
+  //
+  // `Calendar::walk` on the server counts exactly this way and saturates
+  // at the same kind of ceiling, so the preview and the commit agree even
+  // on the absurd input neither of them can place.
+  let walked = 0;
+  while (left > 0 && walked < MAX_SPAN) {
+    walked++;
+    cursor = addDays(cursor, dir);
+    if (!isOffDay(cursor, cal)) left--;
   }
   return cursor;
 }
