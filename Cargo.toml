@@ -90,7 +90,7 @@ toml                = "1.1.4"
 tower-http          = { version = "0.7.0", features = ["cors", "trace"] }
 tracing             = "0.1.44"
 tracing-subscriber  = { version = "0.3.23", features = ["env-filter"] }
-uuid                = { version = "1.24.0", features = ["v4", "v7", "serde"] }
+uuid                = { version = "1.24.1", features = ["v4", "v7", "serde"] }
 
 # The workspace's own crates. Here for the reason the block exists: they
 # carry a `version` because all three are published, and crates.io wants
