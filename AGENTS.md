@@ -560,6 +560,15 @@ the same arrangement `mcp` is in, one section up.
   the refusals after.** A run that half landed looks exactly like one
   that landed, so the message drops from `ok` to `info` whenever anything
   was refused — the same bargain `pasteCells` makes.
+- **A push is a write, so it goes through `liveOnly` — and the reason is
+  not the usual one.** Nothing stale reaches the store: the server reads a
+  live snapshot and schedules it against today, so a push from an
+  `:asof` view would write a *correct* calendar. What would be wrong is
+  the belief. Scrub to last Friday, press push, and events nobody else
+  knows are provisional land on a calendar a team is reading. It shipped
+  for review without the guard, on the reading that `liveOnly` is about
+  stale values; the invariant is the one `liveOnly`'s own comment states —
+  *every* write path calls it.
 - **A second push is refused while one is in flight.** Event ids are
   derived from task ids, so the loser's inserts collide rather than
   duplicating anything — which is the problem: it would report a list of

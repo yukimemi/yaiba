@@ -1025,6 +1025,14 @@ export function App() {
    * Google and takes seconds — every other command in this app answers
    * within a frame, so a silent pause reads as the command not existing.
    *
+   * It is a write, so it goes through `liveOnly` like every other one —
+   * and this is the one where the reason is not the usual one. Nothing
+   * stale reaches the store: the server reads a live snapshot and
+   * schedules it against today, so the calendar would be *correct*. What
+   * would be wrong is the belief. Scrubbing to last Friday and pressing
+   * push writes a plan that is not the one on screen, and the events land
+   * where somebody else can see them before anyone notices.
+   *
    * Refusals are counted separately and the message drops from `ok` to
    * `info` when there are any, the same bargain `pasteCells` makes: a run
    * that half landed looks exactly like one that landed, and the events
@@ -1033,6 +1041,7 @@ export function App() {
    * counts stay legible when a long list ellipsises.
    */
   const pushGcal = () => {
+    if (!liveOnly()) return;
     if (pushingGcal.current) {
       say(t("already pushing — give it a moment"), "error");
       return;
