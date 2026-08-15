@@ -1079,6 +1079,42 @@ it returns forever — is `SyncNode::start`, via iroh.
   a public key; which transport answers is not part of the ticket, so
   relay-only and direct replicas pair up in either direction.
 
+### yaiba never asks a shell to run anything
+
+`browser.rs` is the only place yaiba hands work to the operating system,
+and on Windows it calls `ShellExecuteW` rather than spawning
+`cmd /C start`. The module header carries the full argument; the part
+that belongs here is the rule and the bill.
+
+**A URL — or any other value — must never reach a command interpreter.**
+`start` is a `cmd` builtin that calls `ShellExecute`, so the detour
+bought nothing and cost twice:
+
+- **`cmd` parses what it is given.** It splits on `&`, and an OAuth URL
+  is mostly `&`. The launcher was correct for as long as the only URL it
+  saw was `http://localhost:8188`; `gcal login` handed it a consent URL
+  and everything after `client_id` ran as commands of its own. v0.23.1
+  patched that by quoting, which then had to *refuse* any URL containing
+  a quote. `ShellExecuteW` takes the string as one opaque argument, so
+  there is nothing to quote, escape or turn away.
+- **CrowdStrike quarantined a v0.23.0 binary for it.** An unsigned
+  executable in a user-writable directory (`~/.cargo/bin`) spawning
+  `cmd.exe` with a long external URL is T1218 proxy execution, and while
+  the URL was unquoted `cmd` was visibly trying to execute
+  `response_type=code` and a base64 PKCE challenge as commands — which
+  is a command injection to anything watching. The OAuth parameters also
+  went into process-creation telemetry, which is not where a `client_id`
+  and a PKCE challenge belong.
+
+**Verify it on the process tree, not the browser window.** A browser
+opening proves nothing about how: `Get-CimInstance Win32_Process -Filter
+"ParentProcessId=<pid>"` must come back empty. That the *right* URL
+arrived is a separate question and needs a listener of your own —
+the startup URL has no `&` in it, so it is the one case that never
+broke, and testing with it proves nothing. Point the launcher at a
+local echo server with a full OAuth query and read back what the
+browser actually requested.
+
 ### Whose CA roots iroh trusts, and why not `platform-verifier`
 
 `ca_tls_config` in `yaiba-sync` hands iroh the machine's own CA roots

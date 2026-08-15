@@ -91,6 +91,14 @@ tower-http          = { version = "0.7.0", features = ["cors", "trace"] }
 tracing             = "0.1.44"
 tracing-subscriber  = { version = "0.3.23", features = ["env-filter"] }
 uuid                = { version = "1.24.1", features = ["v4", "v7", "serde"] }
+# The Windows browser launcher, and nothing else — see `browser.rs` for
+# why `cmd /C start` had to go. Already in the tree half a dozen times
+# over at this exact version, so the features are the only cost.
+windows-sys         = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 # The workspace's own crates. Here for the reason the block exists: they
 # carry a `version` because all three are published, and crates.io wants
