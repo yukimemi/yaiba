@@ -58,6 +58,10 @@ fn wide(s: &str) -> Vec<u16> {
 
 #[cfg(target_os = "windows")]
 fn open_windows(url: &str) {
+    use windows_sys::Win32::Foundation::{S_FALSE, S_OK};
+    use windows_sys::Win32::System::Com::{
+        COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize,
+    };
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -74,6 +78,26 @@ fn open_windows(url: &str) {
     // the browser it has just opened. `Command::spawn` returned
     // immediately, and this keeps that property.
     std::thread::spawn(move || {
+        // `ShellExecute` can hand the URL to a Shell extension, and some
+        // of those require a single-threaded apartment — so initialise
+        // one, which is free here because this thread exists for the one
+        // call and nothing else in the process shares its apartment.
+        // The ordinary `http` handler does not need it, which is why the
+        // by-hand verification passed without it; a machine whose default
+        // browser registers a handler that does would have failed in the
+        // field, where nobody could have reproduced it.
+        //
+        // SAFETY: a fresh thread, so there is no apartment to disturb.
+        let com = unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32) };
+        // `S_OK` and `S_FALSE` both leave an initialisation for this
+        // thread to balance. `RPC_E_CHANGED_MODE` says somebody already
+        // chose the apartment and it is not ours to undo — unreachable on
+        // a thread this new, and handled rather than asserted because the
+        // cost of being wrong is an unbalanced `CoUninitialize`. Failing
+        // outright is not worth aborting the launch over: uninitialised
+        // is what this did until now, and the URL is on screen regardless.
+        let balanced = com == S_OK || com == S_FALSE;
+
         // SAFETY: both pointers are NUL-terminated UTF-16 buffers that
         // live until the call returns, and `ShellExecuteW` does not
         // retain either. A null `hwnd` means "no owner window", which is
@@ -97,6 +121,11 @@ fn open_windows(url: &str) {
                 "could not open a browser automatically (ShellExecuteW returned {code}); \
                  the URL is on screen to open by hand"
             );
+        }
+        if balanced {
+            // SAFETY: balances exactly the initialisation above, on the
+            // same thread, after the last call that could need it.
+            unsafe { CoUninitialize() };
         }
     });
 }
