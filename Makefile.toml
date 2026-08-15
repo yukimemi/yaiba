@@ -222,6 +222,7 @@ bun scripts/check-pin.ts
 bun scripts/check-rowmenu.ts
 bun scripts/check-flash.ts
 bun scripts/check-join.ts
+bun scripts/check-gcal.ts
 node node_modules/vite/bin/vite.js build
 '''
 

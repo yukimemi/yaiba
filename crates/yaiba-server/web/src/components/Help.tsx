@@ -208,6 +208,17 @@ const groups = (): Group[] => [
     ],
   },
   {
+    title: t("CALENDAR"),
+    keys: [
+      [":gcal push", t("write this project's plan to Google Calendar")],
+      // A shell command in a keys column, because it is the half that
+      // cannot be typed here: the consent screen needs a browser and a
+      // listener on this machine. Without it a first `:gcal push` is a
+      // refusal, and this is where somebody looks for what to do about it.
+      ["yaiba gcal login", t("first, in a terminal — once per machine")],
+    ],
+  },
+  {
     title: t("PROJECTS"),
     keys: [
       [":proj", t("pick one — click the name in the bar too")],

@@ -275,6 +275,20 @@ const JA: Record<string, string> = {
     "離脱しました · 切断する相手はいませんでした · チケットが変わりました",
   "joined · {name}": "参加しました · {name}",
 
+  // ---- the calendar ----------------------------------------------
+  // 「書き込む」rather than プッシュ: the CLI's word is `push`, but what
+  // the sentence describes is one direction — the plan is the source and
+  // the calendar is written to match it.
+  "pushing the plan to your calendar…": "予定をカレンダーに書き込んでいます…",
+  "the calendar already says what the plan says":
+    "カレンダーはすでに計画どおりです",
+  "calendar · {added} added, {updated} updated, {removed} removed":
+    "カレンダー · 追加 {added} · 更新 {updated} · 削除 {removed}",
+  // `{n} refused` is not repeated here: the cell paste already owns that
+  // line, and it says the same thing for the same reason — a partial run
+  // has to name what it could not do.
+  "already pushing — give it a moment": "書き込み中です — 少し待ってください",
+
   // ---- undo labels, which the two lines above quote ---------------
   "new task": "新規タスク",
   "delete {n}": "{n} 件削除",
@@ -319,6 +333,9 @@ const JA: Record<string, string> = {
   "usage: :join <ticket>": "使い方: :join <チケット>",
   "usage: :merge <ticket>": "使い方: :merge <チケット>",
   "usage: :leave  (it takes no argument)": "使い方: :leave（引数はありません）",
+  "usage: :gcal push": "使い方: :gcal push",
+  "run `yaiba gcal login` in a terminal — it needs a browser, once per machine":
+    "端末で `yaiba gcal login` を実行してください — ブラウザが必要で、マシンごとに1回だけです",
   "usage: :proj {verb} ⟨name⟩": "使い方: :proj {verb} ⟨名前⟩",
   "not a command: {name}  (try :help)":
     "コマンドではありません: {name}（:help を参照）",
@@ -387,6 +404,7 @@ const JA: Record<string, string> = {
   BREAKDOWN: "階層",
   "DATE PICKER": "日付ピッカー",
   PEERS: "ピア",
+  CALENDAR: "カレンダー",
   PROJECTS: "プロジェクト",
   OWNER: "担当",
   // The colon is kept: these four groups are what you type on the `:`
@@ -580,6 +598,10 @@ const JA: Record<string, string> = {
     "両方のタスクを混ぜて1つにする（取り消せません）",
   "cut this project loose from its peers":
     "このプロジェクトをピアから切り離す",
+  "write this project's plan to Google Calendar":
+    "このプロジェクトの計画を Google カレンダーに書き込む",
+  "first, in a terminal — once per machine":
+    "最初に端末で — マシンごとに1回だけ",
   "pick one — click the name in the bar too":
     "選ぶ — 上部バーの名前をクリックしても開きます",
   "switch straight to it": "そのまま切り替える",

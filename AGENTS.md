@@ -528,6 +528,53 @@ Four things that were wrong first and are worth keeping right:
 `#[tool_handler]`: the bare form works, but the field then reads as dead
 code and `clippy -D warnings` fails the build.
 
+### The calendar has two halves, and only one of them can be a `:` command
+
+`POST /api/gcal/push` is the whole feature; `yaiba gcal push` and
+`:gcal push` are two clients of it, and neither reimplements anything —
+the same arrangement `mcp` is in, one section up.
+
+- **`login` cannot follow it, and the refusal is the feature.** The
+  consent screen wants a browser and a listener on the machine somebody
+  is sitting at, and the credential it returns is the *person's* rather
+  than the project's (`credentials.toml`, no database touched), so there
+  is nothing to POST and no route to POST it to. `:gcal login` therefore
+  answers with the terminal command to run instead of falling through to
+  "not a command", which would read as the whole feature being missing —
+  which is exactly how it read before `:gcal push` existed.
+- **`push` is spelled out, and a bare `:gcal` is a usage error.** This is
+  the one command whose effect lands somewhere yaiba does not own — a
+  calendar other people may be looking at, and one whose events it
+  removes as well as adds. `:proj` can afford to open a picker on a bare
+  word because a picker asks; there is nothing to ask here, so a bare
+  verb that reached the route would be a write on an early ⏎.
+  `check-gcal.ts` holds both of those, and holds completion to offering
+  only the verb that works.
+- **`Outcome::quiet()` is duplicated in `pushGcal`, deliberately and
+  visibly.** The predicate is four fields wide and serialising a computed
+  bool would put a second answer on the wire; what matters is that both
+  copies count `refused` — an outcome of all zeros *and* three refusals
+  is not quiet, and saying "the calendar already says what the plan says"
+  above a list of failures is how the CLI got this wrong first.
+- **The status line is one ellipsised line, so the counts go first and
+  the refusals after.** A run that half landed looks exactly like one
+  that landed, so the message drops from `ok` to `info` whenever anything
+  was refused — the same bargain `pasteCells` makes.
+- **A push is a write, so it goes through `liveOnly` — and the reason is
+  not the usual one.** Nothing stale reaches the store: the server reads a
+  live snapshot and schedules it against today, so a push from an
+  `:asof` view would write a *correct* calendar. What would be wrong is
+  the belief. Scrub to last Friday, press push, and events nobody else
+  knows are provisional land on a calendar a team is reading. It shipped
+  for review without the guard, on the reading that `liveOnly` is about
+  stale values; the invariant is the one `liveOnly`'s own comment states —
+  *every* write path calls it.
+- **A second push is refused while one is in flight.** Event ids are
+  derived from task ids, so the loser's inserts collide rather than
+  duplicating anything — which is the problem: it would report a list of
+  failures for work the first run was doing correctly. Nothing on screen
+  changes during a push, so pressing it twice is the obvious thing to do.
+
 ### Where the blade is drawn, and how it is put away
 
 Completion was the only effect for a long time: `x` swept a stroke across

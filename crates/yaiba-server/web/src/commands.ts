@@ -99,6 +99,8 @@ export interface CommandResult {
   ui?: UiPatch;
   /** Peer-to-peer actions the app performs against /api/peers. */
   peer?: { merge?: string; leave?: boolean; showTicket?: boolean };
+  /** Google Calendar actions the app performs against /api/gcal. */
+  gcal?: { push?: boolean };
   /** Project actions the app performs against /api/projects. */
   project?: {
     switch?: string;
@@ -271,6 +273,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "join" },
   { name: "merge" },
   { name: "leave" },
+  { name: "gcal", args: first(() => ["push"]) },
   { name: "proj", aliases: ["project"], args: first((ctx) => ctx.projects) },
 ];
 
@@ -979,6 +982,29 @@ export function runCommand(
     case "leave":
       if (arg) return { error: t("usage: :leave  (it takes no argument)") };
       return { peer: { leave: true } };
+
+    // ---- the calendar --------------------------------------------
+    //
+    // `push` is spelled out rather than being what a bare `:gcal` does,
+    // because this is the one command that writes somewhere yaiba does
+    // not own: a calendar other people may be looking at, and one whose
+    // events are removed as well as added. `:proj` can afford to open a
+    // picker on a bare word; a bare word here would be a write.
+    //
+    // `login` is named so it can be *refused* usefully. It is the half
+    // that cannot live here at all — the consent screen wants a browser
+    // and a listener on this machine, and the credential it returns is
+    // the person's rather than the project's, so it never touches a
+    // database and there is no route to POST it to. Falling through to
+    // "not a command" would read as the whole feature being missing.
+    case "gcal":
+      if (arg === "push") return { gcal: { push: true } };
+      if (arg === "login") {
+        return {
+          error: t("run `yaiba gcal login` in a terminal — it needs a browser, once per machine"),
+        };
+      }
+      return { error: t("usage: :gcal push") };
 
     // ---- projects ------------------------------------------------
     case "proj":
