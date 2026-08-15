@@ -261,7 +261,7 @@ export function TaskList({
         {"  ".repeat(Math.min(draftLevel, 8))}
       </span>
       <span className="row__fold"> </span>
-      <span className="row__caret">▸</span>
+      <span className="row__caret">▌</span>
       <span className="row__box">[ ]</span>
       {/* In the same box a saved row puts its title in, though this row
           draws no columns after it for anything to misalign with. The
@@ -486,7 +486,7 @@ export function TaskList({
                   >
                     {sched?.summary ? (collapsed.has(task.id) ? "▸" : "▾") : " "}
                   </span>
-                  <span className="row__caret">▸</span>
+                  <span className="row__caret">▌</span>
                   <span
                     className="row__box row__box--clickable"
                     title={t("complete / reopen")}
