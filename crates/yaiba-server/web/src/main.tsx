@@ -4,11 +4,17 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { applyLang, initialLang } from "./lang";
 import { applySplit, initialSplit } from "./split";
-import { applyTheme, initialTheme } from "./theme";
+import { applyPalette, applyTheme, initialTheme, loadPalettes } from "./theme";
 import "./styles.css";
 
 // Before the first render, so a light-theme user never sees a dark flash.
-applyTheme(initialTheme());
+const theme = initialTheme();
+applyTheme(theme);
+// The palette rides with it, for that reason and one more: the overrides
+// are inline custom properties on `<html>`, so without this a reload
+// would paint the stylesheet's own colours first and flash the *default*
+// palette at anybody who has changed one.
+applyPalette(theme, loadPalettes());
 // `<html lang>` before anything is drawn, for the same reason: it is the
 // document's, not a component's.
 applyLang(initialLang());

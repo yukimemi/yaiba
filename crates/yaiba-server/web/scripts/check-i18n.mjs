@@ -71,6 +71,11 @@ for (const m of columns.matchAll(/return "([^"]*)";/g)) used.add(m[1]);
 const menu = readFileSync(join(SRC, "rowMenu.ts"), "utf8");
 for (const m of menu.matchAll(/label:\s*"([^"]*)"/g)) used.add(m[1]);
 
+// And the colour slots' labels, held as data in `theme.ts` and rendered
+// through `t(spec.label)` by the settings panel — same trick, same reason.
+const slots = readFileSync(join(SRC, "theme.ts"), "utf8");
+for (const m of slots.matchAll(/label:\s*"([^"]*)"/g)) used.add(m[1]);
+
 // The catalogue's own keys: quoted, or bare where the key is an
 // identifier (`crit:`, `due:`).
 const catalogue = readFileSync(join(SRC, "i18n.ts"), "utf8");

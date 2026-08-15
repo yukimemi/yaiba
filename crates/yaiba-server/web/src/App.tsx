@@ -29,6 +29,7 @@ import { Hud } from "./components/Hud";
 import { OwnerPicker } from "./components/OwnerPicker";
 import { RowMenu, type RowMenuAt } from "./components/RowMenu";
 import { isCmdline, type MenuAction } from "./rowMenu";
+import { Settings } from "./components/Settings";
 import { SplitGrip } from "./components/SplitGrip";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { Strikes } from "./components/Strikes";
@@ -73,7 +74,20 @@ import { modeHint, type Mode } from "./mode";
 import { t } from "./i18n";
 import { applyLang, initialLang, type Lang } from "./lang";
 import { applySplit, clampSplit, initialSplit } from "./split";
-import { applyTheme, initialTheme, type Theme } from "./theme";
+import {
+  applyPalette,
+  applyTheme,
+  ground,
+  initialTheme,
+  loadPalettes,
+  savePalettes,
+  themeFor,
+  type Ground,
+  type Palettes,
+  type Preset,
+  type Slot,
+  type Theme,
+} from "./theme";
 import {
   initialViewState,
   saveViewState,
@@ -381,6 +395,20 @@ export function App() {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>(savedView.sort);
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  /**
+   * The colours each ground is drawn in, where they are not the
+   * stylesheet's own — see `theme.ts`. Global, like the theme above it:
+   * it names no task, so it travels across projects.
+   */
+  const [palettes, setPalettes] = useState<Palettes>(loadPalettes);
+  /**
+   * Mirrored for `applyUi`, which is a `useCallback` with no deps and so
+   * closes over nothing: a theme change has to re-apply the palette, and
+   * the copy it captured at mount would be the palette you started the
+   * session with.
+   */
+  const palettesRef = useRef(palettes);
+  const [showSettings, setShowSettings] = useState(false);
   /** The language the weekday names are written in — nothing else. */
   const [lang, setLang] = useState<Lang>(initialLang);
   /**
@@ -2205,6 +2233,12 @@ export function App() {
                 : "super"
               : ui.theme!;
         applyTheme(next);
+        // The two grounds keep separate colours, and the overrides live
+        // as inline properties on `<html>` which outrank every rule in
+        // the stylesheet — so office mode's own palette is only reachable
+        // once the neon overrides come *off*. That makes this call part
+        // of switching the theme rather than a reaction to it.
+        applyPalette(next, palettesRef.current);
         say(
           next === "light"
             ? t("office mode")
@@ -2250,6 +2284,7 @@ export function App() {
     if (ui.filter !== undefined) setFilter(ui.filter);
     if (ui.sort) setSort(ui.sort);
     if (ui.help) setShowHelp(true);
+    if (ui.settings) setShowSettings(true);
     if (ui.quit) {
       // Only works for script-opened tabs; say so instead of failing
       // silently.
@@ -2257,6 +2292,60 @@ export function App() {
       say(t("close the tab to quit — the server keeps running"), "info");
     }
   }, []);
+
+  /**
+   * Set one slot on the ground the theme is currently showing, or clear
+   * it back to the stylesheet's own.
+   *
+   * The write happens inside the updater, the way `applyTheme` has always
+   * been called from inside `setTheme`. Not a flourish: the panel reads
+   * the colours back off `<html>` so it can show a slot nobody has
+   * touched, so the DOM has to agree with the state before the next
+   * render looks at it — an effect would run a frame late, and a
+   * *child's* effect would run before this component's.
+   *
+   * Functional rather than closing over `palettes`, because the swatch
+   * fires on every step of a drag through the OS colour picker: two
+   * changes in one tick would otherwise both build on the same copy and
+   * the first would be lost.
+   */
+  const setSlot = (slot: Slot, hex: string | null) => {
+    const on = ground(theme);
+    setPalettes((prev) => {
+      const next: Palettes = { ...prev, [on]: { ...prev[on] } };
+      if (hex) next[on][slot] = hex;
+      else delete next[on][slot];
+      palettesRef.current = next;
+      savePalettes(next);
+      applyPalette(theme, next);
+      return next;
+    });
+  };
+
+  /**
+   * A preset is all twelve slots at once, and the built-in one is the
+   * absence of them — `colors: null` clears the ground rather than
+   * writing a copy of `:root` back over itself.
+   */
+  const pickPreset = (preset: Preset) => {
+    setPalettes((prev) => {
+      const next: Palettes = {
+        ...prev,
+        [preset.ground]: { ...(preset.colors ?? {}) },
+      };
+      palettesRef.current = next;
+      savePalettes(next);
+      applyPalette(theme, next);
+      return next;
+    });
+  };
+
+  /**
+   * Show the other ground, which means moving the theme to it: a panel
+   * editing colours that are not on screen is a panel you cannot use.
+   * Through `applyUi`, so the switch is the same one `gt` makes.
+   */
+  const showGround = (on: Ground) => applyUi({ theme: themeFor(on, theme) });
 
   const commitLink = useCallback(
     (row: Task | null, remove: boolean) => {
@@ -3373,6 +3462,10 @@ export function App() {
         applyUi({ theme: "super-toggle" });
         break;
 
+      case "gc":
+        setShowSettings(true);
+        break;
+
       case "R":
         void load();
         say(t("reloaded"), "ok");
@@ -3395,7 +3488,7 @@ export function App() {
     const activeMode = modeRef.current;
     // The palette and the date picker each run their own input and own
     // every key while up, exactly as insert / command / search do.
-    if (showProjects || picking || pickingOwner) return;
+    if (showProjects || showSettings || picking || pickingOwner) return;
     // The row menu is the same bargain — it runs its own keyboard while
     // it is up, and hands back `esc`.
     if (rowMenu) return;
@@ -3830,6 +3923,7 @@ export function App() {
         }}
         onToggleTheme={() => applyUi({ theme: "toggle" })}
         onToggleSuper={() => applyUi({ theme: "super-toggle" })}
+        onOpenColours={() => setShowSettings(true)}
         lang={lang}
         onToggleLang={() => applyUi({ lang: "toggle" })}
         focusTitle={
@@ -3992,6 +4086,16 @@ export function App() {
         />
       )}
 
+      {showSettings && (
+        <Settings
+          theme={theme}
+          palettes={palettes}
+          onSet={setSlot}
+          onPreset={pickPreset}
+          onGround={showGround}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
       {showHelp && <Help onClose={() => setShowHelp(false)} />}
       {showProjects && (
         <ProjectPalette

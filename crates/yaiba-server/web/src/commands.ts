@@ -69,6 +69,15 @@ export interface UiPatch {
   filter?: string;
   sort?: SortKey;
   help?: boolean;
+  /**
+   * Open the colour settings.
+   *
+   * The panel is the whole of the feature and this only opens it: a
+   * `:color <slot> <hex>` grammar was the first shape and it is the wrong
+   * one — twelve slot names and a hex code is a thing to look up, where
+   * the point of a palette is that you can see what you are doing.
+   */
+  settings?: boolean;
   quit?: boolean;
 }
 
@@ -263,6 +272,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "theme", args: first(() => THEMES) },
   { name: "office" },
   { name: "super", args: first(() => ["on", "off"]) },
+  { name: "colors", aliases: ["colours", "settings"] },
   { name: "lang", args: first(() => ["en", "ja"]) },
   { name: "asof", aliases: ["as"], args: first(() => DATE_WORDS) },
   { name: "only" },
@@ -887,6 +897,13 @@ export function runCommand(
       if (!arg) return { ui: { theme: "super-toggle" } };
       return { error: t("usage: :super on|off  (bare :super toggles)") };
     }
+    // Colours are the one appearance setting with no `:` grammar of their
+    // own — see `UiPatch.settings`. Bare, because everything it could take
+    // an argument for is a control in the panel.
+    case "colors":
+    case "colours":
+    case "settings":
+      return { ui: { settings: true } };
     case "lang": {
       // Same as `:theme`: applyUi says what the setting became, in the
       // language it became.

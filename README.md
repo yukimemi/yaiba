@@ -134,6 +134,7 @@ yaiba self-update --check    # just tell me whether one exists
 | `co` | hand the row over — the panel lists the names already in use |
 | `gt` | office mode ⇄ neon · `:theme` and `:lang` say it by name |
 | `gs` | super mode ⇄ neon — every effect at maximum · `:super` |
+| `gc` | the colours — presets, and every slot by hand · `:colors` |
 | `h` `l` | out / in — a fold, or a cell once `gd` is up · `⏎` `i` `I` `a` `A` `cc` edit it |
 | `>>` `<<` | nest under the row above / move back out |
 | `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |
@@ -182,6 +183,36 @@ mode's motion off and leaves nothing frozen on screen.
 
 The choice is remembered, and a fresh install follows your OS
 preference.
+
+### The colours are yours
+
+The three modes above decide how loud the screen is. What each colour
+*is* is a separate question, and `gc` opens the panel that answers it:
+twelve named slots, a hex field and a swatch on each, and a handful of
+presets to start from.
+
+```text
+gc              the colour panel · :colors, or ◍ in the bar
+ネオン / オフィス   which of the two grounds you are editing — the tab
+                switches the theme with it, since editing colours you
+                cannot see is not editing
+yaiba           the built-in palette: the way back from any preset
+gruvbox nord dracula tokyo          on the neon ground
+solarized · gruvbox light           on the office one
+```
+
+What you are replacing is the *value* of a slot, never what it means.
+Cyan is the blade, magenta is the critical path and amber is overdue —
+that rule is the reason a row can say something in a colour instead of a
+word, so the panel lets you pick which magenta and not which meaning.
+Two things are deliberately out of reach for the same reason: the glow,
+which is the whole of office mode and lives on `gs`, and anything that is
+not a colour.
+
+The two grounds keep separate palettes, because a fill mixed for a
+near-black background washes out to nothing over white. `×` puts one slot
+back; the `yaiba` preset puts the ground back. It is remembered next to
+the theme, so it survives a reload and follows you across projects.
 
 The UI has a language too, and that one starts in English:
 

@@ -4,6 +4,24 @@
  * The palette is deliberately narrow: cyan is the blade (cursor, focus,
  * structure), magenta is reserved *only* for the critical path, amber
  * only for overdue. If a colour shows up, it means something.
+ *
+ * Those *meanings* are the rule. The hues are not: the settings panel
+ * (`gc`) lets a user replace the value of any slot in the two blocks
+ * below, so no rule anywhere else may write a palette colour as a
+ * literal. Two spellings carry the whole stylesheet —
+ *
+ *     rgb(from var(--edge) r g b / 0.06)
+ *     color-mix(in srgb, var(--edge) 12%, var(--void))
+ *
+ * — one slot at some alpha, and one slot lifted into another.
+ * `rgba(34, 211, 238, 0.06)` is the same pixels today and neon cyan
+ * forever afterwards: the glow would keep the old hue while the thing
+ * glowing changed colour, which is the one bug a screenshot of the
+ * default theme can never show. `check-theme.ts` fails the build on one.
+ *
+ * White and black stay literal on purpose — they are not slots. White is
+ * super mode's blown highlight and the flash along a severed edge, black
+ * is a shadow, and a mask needs the two of them as ink and nothing else.
  */
 
 :root {
@@ -122,7 +140,7 @@ body::after {
   opacity: var(--glow);
   background: repeating-linear-gradient(
     0deg,
-    rgba(34, 211, 238, 0.06) 0 1px,
+    rgb(from var(--edge) r g b / 0.06) 0 1px,
     transparent 1px 3px
   );
   mix-blend-mode: overlay;
@@ -150,7 +168,7 @@ body::after {
   gap: 18px;
   padding: 6px var(--gutter);
   border-bottom: 1px solid var(--grid-strong);
-  background: linear-gradient(180deg, #070b13, var(--void));
+  background: linear-gradient(180deg, var(--panel), var(--void));
 }
 
 .hud__mark {
@@ -160,14 +178,14 @@ body::after {
   letter-spacing: 0.34em;
   font-weight: 700;
   color: var(--edge);
-  text-shadow: 0 0 calc(12px * var(--glow)) rgba(34, 211, 238, 0.55);
+  text-shadow: 0 0 calc(12px * var(--glow)) rgb(from var(--edge) r g b / 0.55);
 }
 
 .hud__kanji {
   letter-spacing: 0;
   font-size: 15px;
   color: var(--blood);
-  text-shadow: 0 0 calc(14px * var(--glow)) rgba(244, 114, 182, 0.5);
+  text-shadow: 0 0 calc(14px * var(--glow)) rgb(from var(--blood) r g b / 0.5);
 }
 
 /* Office mode drops the kanji entirely. In neon mode the blade is the
@@ -342,6 +360,7 @@ body::after {
    than a form control parked in the middle of the status bar. */
 .hud__theme,
 .hud__super,
+.hud__colours,
 .hud__lang {
   padding: 0;
   border: none;
@@ -354,12 +373,15 @@ body::after {
 
 .hud__theme:hover,
 .hud__super:hover,
+.hud__colours:hover,
 .hud__lang:hover {
   color: var(--edge);
 }
 
 /* Quieter than the theme: office mode is a thing you flip during a
-   meeting, the calendar's language is set once and then forgotten. */
+   meeting, the calendar's language and the palette are set once and then
+   forgotten. */
+.hud__colours,
 .hud__lang {
   color: var(--ash-dim);
 }
@@ -375,7 +397,7 @@ body::after {
 
 .hud__super.is-on {
   color: var(--edge);
-  text-shadow: 0 0 calc(10px * var(--glow)) rgba(34, 211, 238, 0.6);
+  text-shadow: 0 0 calc(10px * var(--glow)) rgb(from var(--edge) r g b / 0.6);
 }
 
 .hud__peers {
@@ -384,7 +406,7 @@ body::after {
 
 .hud__peers[data-live="true"] {
   color: var(--edge);
-  text-shadow: 0 0 calc(10px * var(--glow)) rgba(34, 211, 238, 0.6);
+  text-shadow: 0 0 calc(10px * var(--glow)) rgb(from var(--edge) r g b / 0.6);
 }
 
 /* ---- panes ------------------------------------------------------- */
@@ -456,7 +478,7 @@ body::after {
 .panes__grip--dragging {
   background: var(--edge);
   outline: none;
-  box-shadow: 0 0 calc(8px * var(--glow)) rgba(34, 211, 238, 0.5);
+  box-shadow: 0 0 calc(8px * var(--glow)) rgb(from var(--edge) r g b / 0.5);
 }
 
 /* ---- task rows --------------------------------------------------- */
@@ -699,7 +721,7 @@ body::after {
 }
 
 .row--late .row__title {
-  text-shadow: 0 0 calc(10px * var(--glow)) rgba(251, 191, 36, 0.4);
+  text-shadow: 0 0 calc(10px * var(--glow)) rgb(from var(--rust) r g b / 0.4);
 }
 
 /* A finished row keeps neither, the same call
@@ -850,7 +872,7 @@ button.row__new:focus-visible {
 
 .row__meta--overdue {
   color: var(--rust);
-  text-shadow: 0 0 calc(10px * var(--glow)) rgba(251, 191, 36, 0.4);
+  text-shadow: 0 0 calc(10px * var(--glow)) rgb(from var(--rust) r g b / 0.4);
 }
 
 .row__prio {
@@ -961,7 +983,7 @@ button.row__date:focus-visible {
    do: the panel you have open and the cell you are standing in both
    outrank a range you are still dragging. */
 .row__cell--sel {
-  background: rgba(244, 114, 182, 0.1);
+  background: rgb(from var(--blood) r g b / 0.1);
 }
 
 /* The cell the open calendar belongs to. Without it the panel floats
@@ -983,7 +1005,7 @@ button.row__date:focus-visible {
   background: var(--panel);
   border: 1px solid var(--edge-dim);
   box-shadow:
-    0 0 0 1px rgba(34, 211, 238, calc(0.12 * var(--glow))),
+    0 0 0 1px rgb(from var(--edge) r g b / calc(0.12 * var(--glow))),
     0 12px 40px rgba(0, 0, 0, calc(0.6 * var(--glow)));
   outline: none;
   line-height: 20px;
@@ -1135,14 +1157,14 @@ button.row__date:focus-visible {
 .row__crit {
   flex: none;
   color: var(--blood);
-  text-shadow: 0 0 calc(8px * var(--glow)) rgba(244, 114, 182, 0.5);
+  text-shadow: 0 0 calc(8px * var(--glow)) rgb(from var(--blood) r g b / 0.5);
 }
 
 .row--cursor {
   background: linear-gradient(
     90deg,
-    rgba(34, 211, 238, 0.14),
-    rgba(34, 211, 238, 0.02) 60%,
+    rgb(from var(--edge) r g b / 0.14),
+    rgb(from var(--edge) r g b / 0.02) 60%,
     transparent
   );
 }
@@ -1159,7 +1181,7 @@ button.row__date:focus-visible {
 }
 
 .row--selected {
-  background: rgba(244, 114, 182, 0.1);
+  background: rgb(from var(--blood) r g b / 0.1);
 }
 
 /* The row in the air. Dimmed rather than hidden: a gap where it used to
@@ -1263,9 +1285,9 @@ button.row__date:focus-visible {
   background: linear-gradient(
     104deg,
     transparent 0 42%,
-    rgba(34, 211, 238, 0.9) 49%,
+    rgb(from var(--edge) r g b / 0.9) 49%,
     #fff 50%,
-    rgba(244, 114, 182, 0.9) 51%,
+    rgb(from var(--blood) r g b / 0.9) 51%,
     transparent 58% 100%
   );
   animation: cut 340ms ease-out forwards;
@@ -1293,9 +1315,9 @@ button.row__date:focus-visible {
   background: linear-gradient(
     104deg,
     transparent 0 42%,
-    rgba(34, 211, 238, 0.9) 49%,
+    rgb(from var(--edge) r g b / 0.9) 49%,
     #fff 50%,
-    rgba(34, 211, 238, 0.9) 51%,
+    rgb(from var(--edge) r g b / 0.9) 51%,
     transparent 58% 100%
   );
   animation: cut 200ms ease-out forwards;
@@ -1325,8 +1347,8 @@ button.row__date:focus-visible {
   background: linear-gradient(
     76deg,
     transparent 0 44%,
-    rgba(34, 211, 238, 0.75) 50%,
-    rgba(34, 211, 238, 0.25) 54%,
+    rgb(from var(--edge) r g b / 0.75) 50%,
+    rgb(from var(--edge) r g b / 0.25) 54%,
     transparent 60% 100%
   );
   animation: draw 300ms ease-out forwards;
@@ -1402,7 +1424,7 @@ button.row__date:focus-visible {
   background: var(--panel);
   border: 1px solid var(--edge-dim);
   box-shadow:
-    0 0 0 1px rgba(34, 211, 238, calc(0.12 * var(--glow))),
+    0 0 0 1px rgb(from var(--edge) r g b / calc(0.12 * var(--glow))),
     0 12px 40px rgba(0, 0, 0, calc(0.6 * var(--glow)));
   outline: none;
   line-height: 20px;
@@ -1609,7 +1631,7 @@ button.row__date:focus-visible {
 }
 
 .gantt__row--cursor {
-  background: rgba(34, 211, 238, 0.07);
+  background: rgb(from var(--edge) r g b / 0.07);
 }
 
 .gantt__bar {
@@ -1617,7 +1639,7 @@ button.row__date:focus-visible {
   top: 4px;
   height: calc(var(--row-h) - 9px);
   border-radius: 2px;
-  background: rgba(34, 211, 238, 0.16);
+  background: rgb(from var(--edge) r g b / 0.16);
   border: 1px solid var(--edge-dim);
   overflow: hidden;
 }
@@ -1729,13 +1751,13 @@ button.row__date:focus-visible {
 
 .gantt__bar--critical {
   border-color: var(--blood);
-  background: rgba(244, 114, 182, 0.14);
-  box-shadow: 0 0 calc(12px * var(--glow)) rgba(244, 114, 182, 0.28);
+  background: rgb(from var(--blood) r g b / 0.14);
+  box-shadow: 0 0 calc(12px * var(--glow)) rgb(from var(--blood) r g b / 0.28);
 }
 
 .gantt__bar--done {
   border-color: var(--jade);
-  background: rgba(52, 211, 153, 0.12);
+  background: rgb(from var(--jade) r g b / 0.12);
 }
 
 .gantt__bar--blocked {
@@ -1772,27 +1794,27 @@ button.row__date:focus-visible {
    but lighting it up would cry alarm over something already finished. */
 .gantt__bar--overdue:not(.gantt__bar--done),
 .gantt__bar--late:not(.gantt__bar--done) {
-  background: rgba(251, 191, 36, 0.14);
-  box-shadow: 0 0 calc(12px * var(--glow)) rgba(251, 191, 36, 0.28);
+  background: rgb(from var(--rust) r g b / 0.14);
+  box-shadow: 0 0 calc(12px * var(--glow)) rgb(from var(--rust) r g b / 0.28);
 }
 
 .gantt__fill {
   position: absolute;
   inset: 0 auto 0 0;
-  background: rgba(34, 211, 238, 0.34);
+  background: rgb(from var(--edge) r g b / 0.34);
 }
 
 .gantt__bar--critical .gantt__fill {
-  background: rgba(244, 114, 182, 0.34);
+  background: rgb(from var(--blood) r g b / 0.34);
 }
 
 .gantt__bar--done .gantt__fill {
-  background: rgba(52, 211, 153, 0.3);
+  background: rgb(from var(--jade) r g b / 0.3);
 }
 
 .gantt__bar--overdue:not(.gantt__bar--done) .gantt__fill,
 .gantt__bar--late:not(.gantt__bar--done) .gantt__fill {
-  background: rgba(251, 191, 36, 0.34);
+  background: rgb(from var(--rust) r g b / 0.34);
 }
 
 /* Late *and* on the critical path: both signals stay up. The border was
@@ -1802,15 +1824,15 @@ button.row__date:focus-visible {
    bar has to say. */
 .gantt__bar--critical.gantt__bar--overdue:not(.gantt__bar--done),
 .gantt__bar--critical.gantt__bar--late:not(.gantt__bar--done) {
-  background: rgba(244, 114, 182, 0.14);
-  box-shadow: 0 0 calc(12px * var(--glow)) rgba(244, 114, 182, 0.28);
+  background: rgb(from var(--blood) r g b / 0.14);
+  box-shadow: 0 0 calc(12px * var(--glow)) rgb(from var(--blood) r g b / 0.28);
 }
 
 .gantt__bar--critical.gantt__bar--overdue:not(.gantt__bar--done)
   .gantt__fill,
 .gantt__bar--critical.gantt__bar--late:not(.gantt__bar--done)
   .gantt__fill {
-  background: rgba(244, 114, 182, 0.34);
+  background: rgb(from var(--blood) r g b / 0.34);
 }
 
 /* The triple combo re-asserts the summary's solid critical bar — a
@@ -1829,6 +1851,14 @@ button.row__date:focus-visible {
    perceptually the page background. The border, the `+Nd` and the HUD
    stat were always `--rust` and never had the problem.
 
+   The fills were written as neon amber outright, which was the same
+   colour `--rust` held on the ground they were tuned for and a different
+   one here — office mode's amber is #a15c00, and it is what the overdue
+   *title* on the same row has always used. Naming the slot instead is
+   what makes the bar and the text say overdue in one colour, and it is
+   stronger on white rather than weaker: the whole reason these two rules
+   exist.
+
    Scoped with `:not(.gantt__bar--critical)`: the `[data-theme]` prefix
    would otherwise out-specify the critical+overdue compound rule above
    and paint the combo bar amber here, the same collision the compound
@@ -1837,7 +1867,7 @@ button.row__date:focus-visible {
   .gantt__bar--overdue:not(.gantt__bar--done):not(.gantt__bar--critical),
 :root[data-theme="light"]
   .gantt__bar--late:not(.gantt__bar--done):not(.gantt__bar--critical) {
-  background: rgba(251, 191, 36, 0.45);
+  background: rgb(from var(--rust) r g b / 0.45);
 }
 
 :root[data-theme="light"]
@@ -1846,7 +1876,7 @@ button.row__date:focus-visible {
 :root[data-theme="light"]
   .gantt__bar--late:not(.gantt__bar--done):not(.gantt__bar--critical)
   .gantt__fill {
-  background: rgba(251, 191, 36, 0.6);
+  background: rgb(from var(--rust) r g b / 0.6);
 }
 
 .gantt__label {
@@ -1874,7 +1904,7 @@ button.row__date:focus-visible {
   stroke: var(--steel);
   stroke-width: 1.6;
   stroke-linejoin: round;
-  filter: drop-shadow(0 0 calc(4px * var(--glow)) rgba(203, 213, 225, 0.4));
+  filter: drop-shadow(0 0 calc(4px * var(--glow)) rgb(from var(--steel) r g b / 0.4));
 }
 
 /* In office mode `--steel` is near-black, and a near-black zigzag at
@@ -1940,12 +1970,12 @@ button.row__date:focus-visible {
 /* The bar a release would land on. */
 .gantt__bar--drop {
   border-color: var(--edge);
-  background: rgba(34, 211, 238, 0.32);
-  box-shadow: 0 0 calc(10px * var(--glow)) rgba(34, 211, 238, 0.55);
+  background: rgb(from var(--edge) r g b / 0.32);
+  box-shadow: 0 0 calc(10px * var(--glow)) rgb(from var(--edge) r g b / 0.55);
 }
 
 :root[data-theme="light"] .gantt__bar--drop {
-  background: rgba(11, 92, 173, 0.22);
+  background: rgb(from var(--edge) r g b / 0.22);
 }
 
 /* The clickable width of a dependency. `pointer-events: stroke` opts
@@ -2020,7 +2050,7 @@ button.row__date:focus-visible {
 .gantt__link--critical {
   stroke: var(--blood);
   stroke-width: 1.4;
-  filter: drop-shadow(0 0 3px rgba(244, 114, 182, 0.7));
+  filter: drop-shadow(0 0 3px rgb(from var(--blood) r g b / 0.7));
 }
 
 .gantt__link--focus {
@@ -2134,7 +2164,7 @@ button.row__date:focus-visible {
   background: var(--panel);
   border: 1px solid var(--grid-strong);
   box-shadow:
-    0 0 calc(14px * var(--glow)) rgba(34, 211, 238, 0.14),
+    0 0 calc(14px * var(--glow)) rgb(from var(--edge) r g b / 0.14),
     0 -8px 24px rgba(0, 0, 0, calc(0.55 * var(--glow)));
 }
 
@@ -2156,7 +2186,7 @@ button.row__date:focus-visible {
   z-index: 50;
   display: grid;
   place-items: center;
-  background: rgba(5, 7, 13, 0.86);
+  background: rgb(from var(--void) r g b / 0.86);
   backdrop-filter: blur(2px);
 }
 
@@ -2168,7 +2198,7 @@ button.row__date:focus-visible {
   background: var(--panel);
   border: 1px solid var(--edge-dim);
   box-shadow:
-    0 0 0 1px rgba(34, 211, 238, 0.12),
+    0 0 0 1px rgb(from var(--edge) r g b / 0.12),
     0 20px 70px rgba(0, 0, 0, 0.7);
 }
 
@@ -2226,7 +2256,7 @@ button.row__date:focus-visible {
    would be wrong the moment office mode turned it red. */
 .help__key--crit {
   color: var(--blood);
-  text-shadow: 0 0 calc(8px * var(--glow)) rgba(244, 114, 182, 0.5);
+  text-shadow: 0 0 calc(8px * var(--glow)) rgb(from var(--blood) r g b / 0.5);
 }
 
 .help__key--note {
@@ -2235,7 +2265,7 @@ button.row__date:focus-visible {
 
 .help__key--due {
   color: var(--rust);
-  text-shadow: 0 0 calc(10px * var(--glow)) rgba(251, 191, 36, 0.4);
+  text-shadow: 0 0 calc(10px * var(--glow)) rgb(from var(--rust) r g b / 0.4);
 }
 
 .help__desc {
@@ -2262,7 +2292,7 @@ button.row__date:focus-visible {
   background: linear-gradient(
     100deg,
     transparent 45%,
-    rgba(34, 211, 238, 0.5) 50%,
+    rgb(from var(--edge) r g b / 0.5) 50%,
     transparent 55%
   );
   background-size: 300% 100%;
@@ -2298,7 +2328,7 @@ button.row__date:focus-visible {
   background: linear-gradient(
     100deg,
     transparent 45%,
-    rgba(34, 211, 238, 0.4) 50%,
+    rgb(from var(--edge) r g b / 0.4) 50%,
     transparent 55%
   );
   background-size: 300% 100%;
@@ -2398,7 +2428,7 @@ button.row__date:focus-visible {
   display: grid;
   place-items: start center;
   padding-top: 12vh;
-  background: rgba(5, 7, 13, 0.7);
+  background: rgb(from var(--void) r g b / 0.7);
   backdrop-filter: blur(2px);
 }
 
@@ -2407,7 +2437,7 @@ button.row__date:focus-visible {
   background: var(--panel);
   border: 1px solid var(--edge-dim);
   box-shadow:
-    0 0 0 1px rgba(34, 211, 238, calc(0.12 * var(--glow))),
+    0 0 0 1px rgb(from var(--edge) r g b / calc(0.12 * var(--glow))),
     0 20px 70px rgba(0, 0, 0, calc(0.7 * var(--glow)));
 }
 
@@ -2605,7 +2635,7 @@ button.row__date:focus-visible {
 .hud__project:hover,
 .hud__project:focus-visible {
   border-color: var(--edge-dim);
-  box-shadow: 0 0 0 1px rgba(34, 211, 238, calc(0.25 * var(--glow)));
+  box-shadow: 0 0 0 1px rgb(from var(--edge) r g b / calc(0.25 * var(--glow)));
   outline: none;
 }
 
@@ -2637,7 +2667,7 @@ button.row__date:focus-visible {
   background: var(--panel);
   border: 1px solid var(--edge-dim);
   box-shadow:
-    0 0 0 1px rgba(34, 211, 238, calc(0.12 * var(--glow))),
+    0 0 0 1px rgb(from var(--edge) r g b / calc(0.12 * var(--glow))),
     0 12px 40px rgba(0, 0, 0, calc(0.6 * var(--glow)));
   outline: none;
   line-height: 20px;
@@ -2668,7 +2698,7 @@ button.row__date:focus-visible {
 .rowmenu__glyph {
   width: 1.4ch;
   text-align: center;
-  color: var(--fg-dim);
+  color: var(--ash-dim);
 }
 
 .rowmenu__label {
@@ -2696,7 +2726,7 @@ button.row__date:focus-visible {
   padding: 2px 8px;
   border: 1px solid transparent;
   background: none;
-  color: var(--fg-dim);
+  color: var(--ash);
   font: inherit;
   cursor: pointer;
 }
@@ -2706,12 +2736,12 @@ button.row__date:focus-visible {
  * hovers are the same rectangle. */
 .rowmenu__on {
   border-color: var(--edge-dim);
-  background: var(--sel);
-  color: var(--fg);
+  background: var(--grid-strong);
+  color: var(--steel);
 }
 
 .rowmenu__side {
-  color: var(--fg);
+  color: var(--steel);
 }
 
 .rowmenu__hint {
@@ -2733,7 +2763,7 @@ button.row__date:focus-visible {
   justify-content: space-between;
   gap: 12px;
   padding: 2px 10px;
-  color: var(--fg-dim);
+  color: var(--ash-dim);
   font-size: 0.85em;
 }
 
@@ -2746,11 +2776,193 @@ button.row__date:focus-visible {
  * than the lowercase beside it, where the filled `▲` / `▼` on the rows
  * above are legible at exactly that size. `1.5em` of the footer is the
  * point where the arrow reads as the key it names rather than as a
- * speck, and `--fg` against the footer's `--fg-dim` does the rest. */
+ * speck, and `--steel` against the footer's `--ash-dim` does the rest. */
 .rowmenu__shift {
   font-size: 1.5em;
   line-height: 1;
-  color: var(--fg);
+  color: var(--steel);
+}
+
+/* ---- the settings panel ------------------------------------------
+ *
+ * The colours, edited in the colours. Every rule here spends the same
+ * slots it is editing, so the panel is its own preview: pick a preset and
+ * the panel changes with the app behind it, which is the whole reason the
+ * ground tabs switch the theme rather than previewing it in a swatch.
+ */
+
+.settings {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  display: grid;
+  place-items: start center;
+  padding-top: 8vh;
+  background: rgb(from var(--void) r g b / 0.7);
+  backdrop-filter: blur(2px);
+}
+
+.settings__panel {
+  width: min(560px, 94vw);
+  max-height: 84vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
+  box-shadow:
+    0 0 0 1px rgb(from var(--edge) r g b / calc(0.12 * var(--glow))),
+    0 20px 70px rgba(0, 0, 0, calc(0.7 * var(--glow)));
+  outline: none;
+}
+
+.settings__head,
+.settings__presets {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--grid-strong);
+}
+
+.settings__sigil {
+  flex: 1;
+  color: var(--edge);
+  font-weight: 700;
+}
+
+.settings__grounds {
+  display: flex;
+  gap: 4px;
+}
+
+.settings__label {
+  color: var(--ash-dim);
+}
+
+/* One shape for both rows of buttons: a word in a box that lights when it
+   is the one in force. `is-on` is the state, not a hue of its own — the
+   blade already means "this is where you are". */
+.settings__ground,
+.settings__preset {
+  font: inherit;
+  padding: 0 8px;
+  color: var(--ash);
+  background: var(--panel);
+  border: 1px solid var(--grid-strong);
+  cursor: pointer;
+}
+
+.settings__ground:hover,
+.settings__preset:hover,
+.settings__ground:focus-visible,
+.settings__preset:focus-visible {
+  color: var(--edge);
+  border-color: var(--edge-dim);
+  outline: none;
+}
+
+.settings__ground.is-on,
+.settings__preset.is-on {
+  color: var(--void);
+  background: var(--edge);
+  border-color: var(--edge);
+}
+
+.settings__presets {
+  flex-wrap: wrap;
+}
+
+.settings__slots {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+.settings__slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 12px;
+}
+
+/* The native control, stripped to the square of colour it is showing.
+   `-moz-color-swatch` and the WebKit pair are the only way in: without
+   them the browser draws its own inset border and the swatch stops
+   reading as the colour and starts reading as a button that has one. */
+.settings__swatch {
+  flex: none;
+  width: 3.2ch;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--grid-strong);
+  background: none;
+  cursor: pointer;
+}
+
+.settings__swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.settings__swatch::-webkit-color-swatch {
+  border: none;
+}
+
+.settings__swatch::-moz-color-swatch {
+  border: none;
+}
+
+.settings__hex {
+  flex: none;
+  width: 9ch;
+  font: inherit;
+  color: var(--steel);
+  background: var(--void);
+  border: 1px solid var(--grid-strong);
+  padding: 0 4px;
+}
+
+.settings__hex:focus-visible {
+  border-color: var(--edge);
+  outline: none;
+}
+
+.settings__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ash);
+}
+
+/* Reads as absent rather than as disabled where there is nothing to put
+   back: the column is then a list of what you have changed. Still in the
+   layout, because a button that came and went would shift the row it is
+   on every time a colour was set. */
+.settings__clear {
+  flex: none;
+  width: 3ch;
+  font: inherit;
+  color: var(--ash);
+  background: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.settings__clear:hover:not(:disabled),
+.settings__clear:focus-visible {
+  color: var(--rust);
+  border-color: var(--edge-dim);
+  outline: none;
+}
+
+.settings__clear.is-off {
+  visibility: hidden;
+}
+
+.settings__foot {
+  padding: 6px 12px;
+  border-top: 1px solid var(--grid-strong);
+  color: var(--ash-dim);
 }
 
 /* ---- super mode --------------------------------------------------- */
@@ -2806,12 +3018,12 @@ button.row__date:focus-visible {
   background:
     radial-gradient(
       38% 42% at 22% 28%,
-      rgba(34, 211, 238, 0.22),
+      rgb(from var(--edge) r g b / 0.22),
       transparent 70%
     ),
     radial-gradient(
       42% 38% at 78% 72%,
-      rgba(34, 211, 238, 0.16),
+      rgb(from var(--edge) r g b / 0.16),
       transparent 70%
     ),
     radial-gradient(
@@ -2847,9 +3059,9 @@ button.row__date:focus-visible {
   background: linear-gradient(
     180deg,
     transparent 0 40%,
-    rgba(34, 211, 238, 0.1) 47%,
+    rgb(from var(--edge) r g b / 0.1) 47%,
     rgba(255, 255, 255, 0.08) 50%,
-    rgba(34, 211, 238, 0.1) 53%,
+    rgb(from var(--edge) r g b / 0.1) 53%,
     transparent 60% 100%
   );
   background-size: 100% 55%;
@@ -2875,7 +3087,7 @@ button.row__date:focus-visible {
 :root[data-theme="super"] body::after {
   background: repeating-linear-gradient(
     0deg,
-    rgba(34, 211, 238, 0.1) 0 1px,
+    rgb(from var(--edge) r g b / 0.1) 0 1px,
     transparent 1px 3px
   );
   animation: super-scanlines 6s linear infinite;
@@ -2893,9 +3105,13 @@ button.row__date:focus-visible {
 /* ---- super mode: the HUD ------------------------------------------ */
 
 :root[data-theme="super"] .hud {
-  background: linear-gradient(180deg, #08202c, var(--void));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--edge) 12%, var(--void)),
+    var(--void)
+  );
   border-bottom-color: var(--edge-dim);
-  box-shadow: 0 0 26px rgba(34, 211, 238, 0.22);
+  box-shadow: 0 0 26px rgb(from var(--edge) r g b / 0.22);
 }
 
 /* The wordmark as the sign it always wanted to be, and the blade as the
@@ -2908,12 +3124,12 @@ button.row__date:focus-visible {
 @keyframes super-sign {
   0%,
   100% {
-    text-shadow: 0 0 12px rgba(34, 211, 238, 0.55);
+    text-shadow: 0 0 12px rgb(from var(--edge) r g b / 0.55);
   }
   50% {
     text-shadow:
-      0 0 26px rgba(34, 211, 238, 0.95),
-      0 0 48px rgba(34, 211, 238, 0.45);
+      0 0 26px rgb(from var(--edge) r g b / 0.95),
+      0 0 48px rgb(from var(--edge) r g b / 0.45);
   }
 }
 
@@ -2960,7 +3176,7 @@ button.row__date:focus-visible {
 }
 
 :root[data-theme="super"] .hud__bar {
-  text-shadow: 0 0 12px rgba(52, 211, 153, 0.7);
+  text-shadow: 0 0 12px rgb(from var(--jade) r g b / 0.7);
 }
 
 /* Overdue is the one readout allowed to nag, and this is the mode for
@@ -2972,10 +3188,10 @@ button.row__date:focus-visible {
 @keyframes super-alarm {
   0%,
   100% {
-    text-shadow: 0 0 6px rgba(251, 191, 36, 0.35);
+    text-shadow: 0 0 6px rgb(from var(--rust) r g b / 0.35);
   }
   50% {
-    text-shadow: 0 0 20px rgba(251, 191, 36, 0.9);
+    text-shadow: 0 0 20px rgb(from var(--rust) r g b / 0.9);
   }
 }
 
@@ -2986,12 +3202,12 @@ button.row__date:focus-visible {
 @keyframes super-switch {
   0%,
   100% {
-    text-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+    text-shadow: 0 0 8px rgb(from var(--edge) r g b / 0.6);
   }
   50% {
     text-shadow:
-      0 0 22px rgba(34, 211, 238, 1),
-      0 0 40px rgba(34, 211, 238, 0.5);
+      0 0 22px var(--edge),
+      0 0 40px rgb(from var(--edge) r g b / 0.5);
   }
 }
 
@@ -3004,8 +3220,8 @@ button.row__date:focus-visible {
   background-image:
     linear-gradient(
       90deg,
-      rgba(34, 211, 238, 0.26),
-      rgba(34, 211, 238, 0.04) 60%,
+      rgb(from var(--edge) r g b / 0.26),
+      rgb(from var(--edge) r g b / 0.04) 60%,
       transparent
     ),
     linear-gradient(
@@ -3057,10 +3273,10 @@ button.row__date:focus-visible {
 @keyframes super-selected {
   0%,
   100% {
-    background-color: rgba(244, 114, 182, 0.1);
+    background-color: rgb(from var(--blood) r g b / 0.1);
   }
   50% {
-    background-color: rgba(244, 114, 182, 0.24);
+    background-color: rgb(from var(--blood) r g b / 0.24);
   }
 }
 
@@ -3071,10 +3287,10 @@ button.row__date:focus-visible {
 @keyframes super-crit {
   0%,
   100% {
-    text-shadow: 0 0 8px rgba(244, 114, 182, 0.5);
+    text-shadow: 0 0 8px rgb(from var(--blood) r g b / 0.5);
   }
   50% {
-    text-shadow: 0 0 24px rgba(244, 114, 182, 1);
+    text-shadow: 0 0 24px var(--blood);
   }
 }
 
@@ -3125,7 +3341,7 @@ button.row__date:focus-visible {
 :root[data-theme="super"] .gantt__bar--critical {
   background-image: repeating-linear-gradient(
     90deg,
-    rgba(244, 114, 182, 0.3) 0 12px,
+    rgb(from var(--blood) r g b / 0.3) 0 12px,
     transparent 12px 24px
   );
   animation: super-march 900ms linear infinite;
@@ -3182,12 +3398,12 @@ button.row__date:focus-visible {
   background-image: linear-gradient(
     104deg,
     transparent 0 30%,
-    rgba(34, 211, 238, 0.95) 42%,
+    rgb(from var(--edge) r g b / 0.95) 42%,
     #fff 50%,
-    rgba(244, 114, 182, 0.95) 58%,
+    rgb(from var(--blood) r g b / 0.95) 58%,
     transparent 70% 100%
   );
-  filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.9));
+  filter: drop-shadow(0 0 14px rgb(from var(--edge) r g b / 0.9));
 }
 
 /* The row takes the hit as well as showing it. Well inside the 400ms the
@@ -3213,12 +3429,12 @@ button.row__date:focus-visible {
   background-image: linear-gradient(
     104deg,
     transparent 0 30%,
-    rgba(34, 211, 238, 0.95) 42%,
+    rgb(from var(--edge) r g b / 0.95) 42%,
     #fff 50%,
-    rgba(34, 211, 238, 0.95) 58%,
+    rgb(from var(--edge) r g b / 0.95) 58%,
     transparent 70% 100%
   );
-  filter: drop-shadow(0 0 16px rgba(34, 211, 238, 0.9));
+  filter: drop-shadow(0 0 16px rgb(from var(--edge) r g b / 0.9));
 }
 
 :root[data-theme="super"] .row--born::after,
@@ -3226,12 +3442,12 @@ button.row__date:focus-visible {
   background-image: linear-gradient(
     76deg,
     transparent 0 34%,
-    rgba(34, 211, 238, 0.9) 48%,
+    rgb(from var(--edge) r g b / 0.9) 48%,
     rgba(255, 255, 255, 0.8) 51%,
-    rgba(34, 211, 238, 0.35) 56%,
+    rgb(from var(--edge) r g b / 0.35) 56%,
     transparent 66% 100%
   );
-  filter: drop-shadow(0 0 12px rgba(34, 211, 238, 0.8));
+  filter: drop-shadow(0 0 12px rgb(from var(--edge) r g b / 0.8));
 }
 
 /* ---- super mode: the screen answers ------------------------------- */
@@ -3261,13 +3477,13 @@ button.row__date:focus-visible {
     radial-gradient(
       circle at 50% 45%,
       rgba(255, 255, 255, 0.4),
-      rgba(34, 211, 238, 0.22) 28%,
+      rgb(from var(--edge) r g b / 0.22) 28%,
       transparent 62%
     ),
     radial-gradient(
       circle at 50% 45%,
       transparent 40%,
-      rgba(34, 211, 238, 0.55) 46%,
+      rgb(from var(--edge) r g b / 0.55) 46%,
       rgba(255, 255, 255, 0.35) 48%,
       transparent 55%
     );
@@ -3289,7 +3505,7 @@ button.row__date:focus-visible {
 :root[data-theme="super"] .burst--born {
   background: linear-gradient(
     90deg,
-    rgba(34, 211, 238, 0.22),
+    rgb(from var(--edge) r g b / 0.22),
     transparent 55%
   );
   animation: super-burst-born 380ms ease-out forwards;
@@ -3313,7 +3529,7 @@ button.row__date:focus-visible {
   background: radial-gradient(
     circle at 50% 50%,
     transparent 30%,
-    rgba(5, 7, 13, 0.55) 100%
+    rgb(from var(--void) r g b / 0.55) 100%
   );
   animation: super-burst-slain 240ms ease-out forwards;
 }
@@ -3423,12 +3639,12 @@ button.row__date:focus-visible {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(34, 211, 238, 0.95) 38%,
+    rgb(from var(--edge) r g b / 0.95) 38%,
     #fff 52%,
-    rgba(34, 211, 238, 0.6) 66%,
+    rgb(from var(--edge) r g b / 0.6) 66%,
     transparent
   );
-  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9));
+  filter: drop-shadow(0 0 6px rgb(from var(--edge) r g b / 0.9));
   opacity: 0;
   animation: super-strike 420ms cubic-bezier(0.1, 0.75, 0.25, 1) forwards;
 }
@@ -3459,7 +3675,7 @@ button.row__date:focus-visible {
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--edge);
-  text-shadow: 0 0 12px rgba(34, 211, 238, 0.8);
+  text-shadow: 0 0 12px rgb(from var(--edge) r g b / 0.8);
   animation: super-combo 260ms ease-out;
 }
 
@@ -3468,24 +3684,24 @@ button.row__date:focus-visible {
    critical path's colour on a joke. */
 :root[data-theme="super"] .combo[data-tier="1"] {
   font-size: 1.1em;
-  text-shadow: 0 0 18px rgba(34, 211, 238, 0.95);
+  text-shadow: 0 0 18px rgb(from var(--edge) r g b / 0.95);
 }
 
 :root[data-theme="super"] .combo[data-tier="2"] {
   font-size: 1.25em;
   color: #fff;
   text-shadow:
-    0 0 20px rgba(34, 211, 238, 1),
-    0 0 40px rgba(34, 211, 238, 0.6);
+    0 0 20px var(--edge),
+    0 0 40px rgb(from var(--edge) r g b / 0.6);
 }
 
 :root[data-theme="super"] .combo[data-tier="3"] {
   font-size: 1.4em;
   color: #fff;
   text-shadow:
-    0 0 24px rgba(34, 211, 238, 1),
-    0 0 48px rgba(34, 211, 238, 0.8),
-    0 0 80px rgba(34, 211, 238, 0.4);
+    0 0 24px var(--edge),
+    0 0 48px rgb(from var(--edge) r g b / 0.8),
+    0 0 80px rgb(from var(--edge) r g b / 0.4);
 }
 
 @keyframes super-combo {

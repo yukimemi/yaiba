@@ -71,6 +71,8 @@ interface Props {
   onToggleTheme: () => void;
   /** Flip between super mode and the neon HUD. */
   onToggleSuper: () => void;
+  /** Open the colour settings — the one setting with no other route. */
+  onOpenColours: () => void;
   /** Which language the weekday beside the reference date is in. */
   lang: Lang;
   /** Flip the calendar between English and Japanese. */
@@ -108,6 +110,7 @@ export function Hud({
   theme,
   onToggleTheme,
   onToggleSuper,
+  onOpenColours,
   lang,
   onToggleLang,
   project,
@@ -342,6 +345,18 @@ export function Hud({
         }
       >
         {theme === "super" ? t("◈ SUPER") : t("◇ super")}
+      </button>
+      {/* The panel behind it is the only way to reach the palette at all:
+          the theme and super mode have keys *and* the two buttons beside
+          this one, and colours had neither. Quiet like the language
+          switch, for the same reason — it is set once and forgotten. */}
+      <button
+        type="button"
+        className="hud__colours"
+        onClick={onOpenColours}
+        title={t("colours — every slot, and a few presets (gc)")}
+      >
+        {t("◍ colours")}
       </button>
       {/* Beside the theme for the same reason: it is a setting about
           what the screen says, and the only sign it exists is here. */}
