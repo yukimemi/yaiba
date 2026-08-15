@@ -118,32 +118,22 @@ impl CalendarMode {
         }
     }
 
-    /// Parse, degrading to [`Self::Days`] on anything unrecognised.
-    ///
-    /// A replica cannot know what a later version will write here, and the
-    /// safe reading of an unknown mode is the one that leaves the plan
-    /// where it is. Same reflex as `Status::parse`.
-    pub fn parse(raw: &str) -> Self {
-        match raw {
-            "workdays" => Self::Workdays,
-            _ => Self::Days,
-        }
-    }
-
     /// Every mode there is, for anything that has to name them all.
     ///
     /// One list beside [`Self::as_str`] rather than a second spelling
     /// inside an error message somewhere else.
     pub const ALL: [Self; 2] = [Self::Days, Self::Workdays];
 
-    /// Parse, refusing anything unrecognised — the strict twin of
-    /// [`Self::parse`].
+    /// Parse, refusing anything unrecognised.
     ///
-    /// Both exist because the two callers are different in kind, the same
-    /// asymmetry the empty week has: a **person** typing a mode has made a
-    /// mistake and wants to be told, so the API refuses; a **replica**
-    /// merging a mode written by a later version has to keep working, so
-    /// the store degrades.
+    /// Strict because its caller is a *person*: the API takes what was
+    /// typed and a mode nobody has heard of is a typo worth being told
+    /// about. A **replica** merging a mode a later version wrote must keep
+    /// working instead, and that path is the derived `Deserialize` read
+    /// through `store::enum_field`, which falls to `Default` on anything it
+    /// cannot make sense of. Two callers, two kinds of failure, and
+    /// deliberately no third spelling of the vocabulary — `as_str` and
+    /// `ALL` are the only place the words live.
     pub fn strict(raw: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|mode| mode.as_str() == raw)
     }
@@ -176,27 +166,19 @@ impl HolidaySet {
         }
     }
 
-    /// Parse, degrading to [`Self::None`] on anything unrecognised.
-    ///
-    /// The honest failure for a region this binary has never heard of is
-    /// "I do not know that country's days off", not a guess. Note what it
-    /// costs: a replica that *does* know them resolves later finish dates
-    /// than this one until both are upgraded. That is unavoidable while
-    /// the table lives in code, and it is one reason the whole feature
-    /// ships switched off.
-    pub fn parse(raw: &str) -> Self {
-        match raw {
-            "jp" => Self::Jp,
-            _ => Self::None,
-        }
-    }
-
     /// Every region this binary knows. See [`CalendarMode::ALL`].
     pub const ALL: [Self; 2] = [Self::None, Self::Jp];
 
-    /// Parse, refusing anything unrecognised. See
-    /// [`CalendarMode::strict`] for why this exists beside
-    /// [`Self::parse`].
+    /// Parse, refusing anything unrecognised. See [`CalendarMode::strict`]
+    /// for the split between this and the replica's degrading read.
+    ///
+    /// What degrading costs here is worth being blunt about, and it is not
+    /// the same as for a mode: a region this build does not know reads as
+    /// "no bundled table", so it resolves *different dates* than the peer
+    /// that wrote it until both are upgraded. The tables live in code
+    /// rather than in the data, so a version gap is a date gap — which is
+    /// why `holiday:` marks, which mean the same thing on every build, are
+    /// the general mechanism and this is the shortcut.
     pub fn strict(raw: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|set| set.as_str() == raw)
     }
@@ -1059,10 +1041,20 @@ mod tests {
             cal.is_working(day("2026-01-01")),
             "no table asked for, so nothing but the week mask is off"
         );
-        // And an unknown region reads as none rather than as a guess.
-        assert_eq!(HolidaySet::parse("us"), HolidaySet::None);
-        assert_eq!(HolidaySet::parse("jp"), HolidaySet::Jp);
+        // An unknown region is refused rather than guessed at, on the path
+        // a person's typing takes. The replica's path is the derived
+        // `Deserialize` — degrading there is the store's job and is tested
+        // where that happens, so there is no third parser here to keep in
+        // step with either.
+        assert_eq!(HolidaySet::strict("us"), None);
+        assert_eq!(HolidaySet::strict("jp"), Some(HolidaySet::Jp));
         assert_eq!(HolidaySet::Jp.as_str(), "jp");
+        assert_eq!(
+            serde_json::from_str::<HolidaySet>("\"us\"").ok(),
+            None,
+            "and the wire form refuses it too, which is what `enum_field` \
+             turns into the default"
+        );
     }
 
     #[test]
