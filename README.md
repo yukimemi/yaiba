@@ -803,6 +803,12 @@ at once; pushing continuously would be a calendar rewriting itself while
 you think. On demand it is one reconcile: work out the difference, apply
 it, stop. Running it twice does nothing the second time.
 
+Ask for it either way: `:gcal push` on the `:` line, or `yaiba gcal push`
+in a terminal. Both are one `POST /api/gcal/push` to the server holding
+the plan, so they do the same reconcile and report the same counts —
+`:gcal push` puts them in the status line, and when Google refused an
+event it names the refusal there rather than counting it as done.
+
 ### Setting it up
 
 yaiba has no Google account of its own, so you lend it one. Once, about
@@ -848,7 +854,10 @@ the one window you happened to be in.
 
 `login` needs no running yaiba — the credential is yours, not a
 project's, so it writes straight to your credentials file. `push` does
-need one: it is reading a plan.
+need one: it is reading a plan. That asymmetry is why the `:` line has
+`:gcal push` and no `:gcal login`: the consent screen wants a browser
+and a listener on *this* machine, which is the terminal's job rather
+than the server's. Typing `:gcal login` says so instead of failing.
 
 ### What lands on the calendar
 

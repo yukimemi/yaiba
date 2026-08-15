@@ -221,6 +221,20 @@ export function App() {
   const [showHelp, setShowHelp] = useState(false);
 
   const [peers, setPeers] = useState<PeersInfo>({ ticket: null, peers: [] });
+  /**
+   * A calendar push is in flight — `:gcal push` refuses a second one.
+   *
+   * Not a nicety. The event ids are derived from task ids, so two runs
+   * racing each other do not duplicate anything: the loser's inserts
+   * collide and come back as refusals. Which is the problem — a second
+   * push would report a list of failures for work the first one was in
+   * the middle of doing correctly. Nothing on screen changes while it
+   * runs, so pressing it twice is the obvious thing to do.
+   *
+   * A ref rather than state: nothing renders it, and the guard has to be
+   * true for the keystroke that follows, not for the next render.
+   */
+  const pushingGcal = useRef(false);
 
   const [projects, setProjects] = useState<ProjectsInfo>({ projects: [], active: "" });
   const [showProjects, setShowProjects] = useState(false);
@@ -1000,6 +1014,58 @@ export function App() {
         void load();
       })
       .catch((e: Error) => say(e.message, "error"));
+  };
+
+  /**
+   * Write the plan to the active project's calendar — `:gcal push`.
+   *
+   * No `load()` after it: the calendar is downstream of the plan and
+   * nothing here changes a task, so there is nothing new to fetch. What
+   * it does owe is a word before it starts, because the request goes to
+   * Google and takes seconds — every other command in this app answers
+   * within a frame, so a silent pause reads as the command not existing.
+   *
+   * Refusals are counted separately and the message drops from `ok` to
+   * `info` when there are any, the same bargain `pasteCells` makes: a run
+   * that half landed looks exactly like one that landed, and the events
+   * it missed are the ones nobody thinks to check. They are spelled out
+   * after the counts, which is what the status line has room for — the
+   * counts stay legible when a long list ellipsises.
+   */
+  const pushGcal = () => {
+    if (pushingGcal.current) {
+      say(t("already pushing — give it a moment"), "error");
+      return;
+    }
+    pushingGcal.current = true;
+    say(t("pushing the plan to your calendar…"));
+    void api
+      .pushGcal()
+      .then((out) => {
+        const quiet =
+          !out.inserted && !out.patched && !out.deleted && !out.refused.length;
+        if (quiet) {
+          say(t("the calendar already says what the plan says"));
+          return;
+        }
+        const counts = t("calendar · {added} added, {updated} updated, {removed} removed", {
+          added: out.inserted,
+          updated: out.patched,
+          removed: out.deleted,
+        });
+        if (!out.refused.length) {
+          say(counts, "ok");
+          return;
+        }
+        say(
+          `${counts} · ${t("{n} refused", { n: out.refused.length })}: ${out.refused.join(" · ")}`,
+          "info",
+        );
+      })
+      .catch((e: Error) => say(e.message, "error"))
+      .finally(() => {
+        pushingGcal.current = false;
+      });
   };
 
   const renameProject = (from: string, to: string) => {
@@ -3592,6 +3658,7 @@ export function App() {
       });
       setShowProjects(true);
     }
+    if (result.gcal?.push) pushGcal();
     if (result.project?.pick) {
       // Opens however few projects there are. Switching is only one of the
       // things in here — create, rename and forget all live on the list

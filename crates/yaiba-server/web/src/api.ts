@@ -119,6 +119,23 @@ async function uiRequest(init?: RequestInit): Promise<ProjectUiState> {
   return (await res.json()) as ProjectUiState;
 }
 
+/**
+ * What a push did, as `gcal::push::Outcome` serialises it.
+ *
+ * `refused` is per-event and deliberately not folded into the counts: a
+ * run reports what it could not do rather than failing whole, so an
+ * outcome can be a success and a partial failure at once. Whoever
+ * renders it owes both halves — see `pushGcal` in `App.tsx`.
+ */
+export interface PushOutcome {
+  /** The calendar written to. Created by the first push, then remembered. */
+  calendar: string;
+  inserted: number;
+  patched: number;
+  deleted: number;
+  refused: string[];
+}
+
 export const api = {
   /** Pass a date to see the plan as it stood then. */
   getState: (asof?: string | null) =>
@@ -217,4 +234,30 @@ export const api = {
   getUi: () => uiRequest(),
   putUi: (ui: ProjectUiState) =>
     uiRequest({ method: "PUT", body: JSON.stringify(ui) }),
+  /**
+   * Make the active project's calendar say what the plan says.
+   *
+   * The one call in here that leaves the machine, so it is the one that
+   * takes seconds rather than milliseconds: the server mints an access
+   * token, creates the calendar on a first push, reads every event and
+   * then reconciles one HTTP call at a time.
+   *
+   * A 412 is the setup not being done — no credential on this machine
+   * (`yaiba gcal login`), or no OAuth client in the server's environment.
+   * The server writes a sentence naming which, and it is shown verbatim.
+   */
+  pushGcal: () =>
+    fetch("/api/gcal/push", { method: "POST" }).then(async (res) => {
+      if (!res.ok) {
+        let message = `${res.status} ${res.statusText}`;
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body.error) message = body.error;
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new ApiError(message, res.status);
+      }
+      return (await res.json()) as PushOutcome;
+    }),
 };
