@@ -1,10 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 
-import { earliestStart, type Zoom } from "../commands";
-import { addDays, diffDays, isWeekend, monthLabel, weekdayLabel } from "../dates";
+import {
+  earliestStart,
+  moveLanding,
+  resizeDuration,
+  type Zoom,
+} from "../commands";
+import {
+  addDays,
+  advanceWork,
+  diffDays,
+  holidayName,
+  isOffDay,
+  monthLabel,
+  snapForward,
+  weekdayLabel,
+} from "../dates";
 import { depKey, type FlashKind } from "../flash";
 import type { Lang } from "../lang";
-import type { Dep, Scheduled, Task } from "../types";
+import type { Calendar, Dep, Scheduled, Task } from "../types";
 
 /** Must match `--row-h` in styles.css. */
 export const ROW_H = 26;
@@ -25,6 +39,16 @@ interface Props {
   deps: Dep[];
   cursor: number;
   today: string;
+  /**
+   * The working calendar: which columns are shaded, and — since a pin
+   * lands on the first working day — where a dragged bar goes.
+   *
+   * The axis stays calendar days at every zoom. A column is a day
+   * whether or not anybody works it, so a week is always seven columns
+   * wide and the shading is what says which of them count. Collapsing
+   * the axis onto working days is a different chart.
+   */
+  cal: Calendar;
   /** Which language the weekday letters in the header are written in. */
   lang: Lang;
   zoom: Zoom;
@@ -64,6 +88,7 @@ export function Gantt({
   deps,
   cursor,
   today,
+  cal,
   lang,
   zoom,
   rangeStart,
@@ -187,11 +212,19 @@ export function Gantt({
     // the lag on an edge the drop lands inside, but a drop before the
     // finish would invert the edge and is refused. Clamp the preview at
     // that floor so what you see is what the release commits.
+    //
+    // The floor is the first *working* day at or after the finish, for
+    // the same reason: a pin dropped on a Sunday is raised to the
+    // Monday, so clamping at the Sunday would let the bar sit a column
+    // short of where releasing it would put it. Still measured in
+    // columns, because the axis is still calendar days.
     const floorDays = (() => {
       if (drag.kind !== "move") return null;
       const sched = bySchedule.get(drag.id);
       const floor = sched && earliestStart(deps, [...bySchedule.values()], drag.id);
-      return sched && floor ? diffDays(sched.start, floor) : null;
+      return sched && floor
+        ? diffDays(sched.start, snapForward(floor, cal))
+        : null;
     })();
 
     const onMove = (e: PointerEvent) => {
@@ -293,11 +326,18 @@ export function Gantt({
                   key={iso}
                   className={[
                     "gantt__day",
-                    isWeekend(iso) && "gantt__day--weekend",
+                    isOffDay(iso, cal) && "gantt__day--off",
                     iso === today && "gantt__day--today",
                   ]
                     .filter(Boolean)
                     .join(" ")}
+                  // Only where a cell is one day. At week and month
+                  // zoom the cell stands for a run of them, and naming
+                  // the first day's holiday would be labelling seven
+                  // columns after one.
+                  title={
+                    (dayStep === 1 ? holidayName(iso, cal) : null) ?? undefined
+                  }
                   style={{ left: x(iso), width: dayW * dayStep }}
                 >
                   {zoom === "day"
@@ -313,12 +353,18 @@ export function Gantt({
           ref={bodyRef}
           style={{ width, height: bodyH }}
         >
+          {/* Every day nobody works, in one band: a weekend, a holiday
+              and a day somebody marked off are the same fact to a
+              reader — "no work happens in this column" — and drawing
+              them differently would invite reading a difference that
+              does not affect a single date. Day zoom only; nine pixels
+              of holiday between two months is noise. */}
           {zoom === "day" &&
             days.map((iso) =>
-              isWeekend(iso) ? (
+              isOffDay(iso, cal) ? (
                 <div
                   key={iso}
-                  className="gantt__weekend"
+                  className="gantt__off"
                   style={{ left: x(iso), width: dayW }}
                 />
               ) : null,
@@ -340,12 +386,36 @@ export function Gantt({
               // A live drag shifts the preview; the commit happens on
               // release. Only the dragged bar moves — dependents settle
               // when the server recomputes.
+              //
+              // Both previews are computed by the same two functions
+              // the release commits through, rather than by adding the
+              // drag to the pixels. Under a working calendar the two
+              // are different numbers: a bar dropped on a Saturday
+              // lands on the Monday, and three columns pulled off a
+              // right edge across a weekend is one working day. Doing
+              // the arithmetic twice is how a bar comes to jump on
+              // release, which is the one thing a drag may never do.
               const dragging = drag?.id === task.id ? drag : null;
               const previewLeft =
-                dragging?.kind === "move" ? left + dragging.days * dayW : left;
+                dragging?.kind === "move"
+                  ? x(moveLanding(cal, sched.start, dragging.days))
+                  : left;
               const previewW =
                 dragging?.kind === "resize"
-                  ? Math.max(barW + dragging.days * dayW, dayW - 2)
+                  ? Math.max(
+                      (diffDays(
+                        sched.start,
+                        advanceWork(
+                          sched.start,
+                          resizeDuration(cal, sched, dragging.days) - 1,
+                          cal,
+                        ),
+                      ) +
+                        1) *
+                        dayW -
+                        2,
+                      dayW - 2,
+                    )
                   : barW;
 
               return (

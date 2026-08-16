@@ -83,6 +83,12 @@ const JA: Record<string, string> = {
   "◈ SUPER": "◈ SUPER",
   "◇ super": "◇ スーパー",
   "◌ local": "◌ ローカル",
+  // The glyph carries the meaning at a glance and the word beside it is
+  // the one a Japanese schedule uses. 営業日 alone, without 計算 or
+  // モード: the bar is a row of nouns.
+  "▤ workdays": "▤ 営業日",
+  "durations are working days — weekends and holidays are skipped (:cal)":
+    "期間は営業日です — 土日祝は数えません (:cal)",
   "◉ solo": "◉ 単独",
   "◉ 1 peer": "◉ ピア 1",
   "◉ {n} peers": "◉ ピア {n}",
@@ -278,7 +284,7 @@ const JA: Record<string, string> = {
     "離脱しました · 切断する相手はいませんでした · チケットが変わりました",
   "joined · {name}": "参加しました · {name}",
 
-  // ---- the calendar ----------------------------------------------
+  // ---- the google calendar ---------------------------------------
   // 「書き込む」rather than プッシュ: the CLI's word is `push`, but what
   // the sentence describes is one direction — the plan is the source and
   // the calendar is written to match it.
@@ -291,6 +297,31 @@ const JA: Record<string, string> = {
   // line, and it says the same thing for the same reason — a partial run
   // has to name what it could not do.
   "already pushing — give it a moment": "書き込み中です — 少し待ってください",
+
+  // ---- the working calendar --------------------------------------
+  //
+  // 営業日 rather than 稼働日: the word a schedule uses in Japanese, and
+  // the one on a bank's door. 休業日 is its opposite and covers all
+  // three reasons a day is off — the weekend, the holiday table, and a
+  // day somebody marked — the same way `isOffDay` does.
+  //
+  // The report is one line and has to fit beside a filter and a project
+  // name, so it is labelled rather than spelled out: 週 for the mask,
+  // 祝日表 for the region, and the two counts last.
+  "calendar: {mode} · week {week} · holidays {region} · {n} off / {m} worked in view":
+    "カレンダー: {mode} · 週 {week} · 祝日表 {region} · 表示範囲で休 {n} / 営業指定 {m}",
+  "durations count working days": "期間は営業日で数えます",
+  "durations count calendar days": "期間は暦日で数えます",
+  "work week: {week}": "営業日の週: {week}",
+  // 「手動指定の日は残る」is the half worth saying: turning the table off
+  // is not the same as clearing the calendar, and somebody who has typed
+  // in twenty of their own holidays needs to know which one this is.
+  "no holiday table — marked days stay": "祝日表なし — 手動指定の日は残ります",
+  "holiday table: {region}": "祝日表: {region}",
+  "{d} is off": "{d} は休業日にしました",
+  "{d} is off: {name}": "{d} は休業日にしました: {name}",
+  "{d} is a working day": "{d} は営業日にしました",
+  "{d} is back to the week": "{d} の指定を解除しました（週の設定に戻ります）",
 
   // ---- undo labels, which the two lines above quote ---------------
   "new task": "新規タスク",
@@ -339,6 +370,19 @@ const JA: Record<string, string> = {
   "usage: :gcal push": "使い方: :gcal push",
   "run `yaiba gcal login` in a terminal — it needs a browser, once per machine":
     "端末で `yaiba gcal login` を実行してください — ブラウザが必要で、マシンごとに1回だけです",
+  "usage: :cal {list}  (bare :cal reports)":
+    "使い方: :cal {list}（引数なしで現在の設定を表示）",
+  "usage: :cal on  (or :cal off)": "使い方: :cal on（戻すのは :cal off）",
+  // The mask stays in digits in both languages: it is what you type,
+  // and 月曜始まり is the half that has to be said out loud — a mask
+  // written Sunday-first is the mistake this sentence exists to stop.
+  "usage: :cal week mon-fri|mon-sat|1111100  (seven digits, monday first)":
+    "使い方: :cal week mon-fri|mon-sat|1111100（7桁、月曜始まり）",
+  "a week with no working day is not a calendar":
+    "営業日が1日もない週は設定できません",
+  "usage: :cal region {list}": "使い方: :cal region {list}",
+  "usage: :cal holiday ⟨date⟩ [name] · :cal workday ⟨date⟩ · :cal clear ⟨date⟩":
+    "使い方: :cal holiday ⟨日付⟩ [名前] · :cal workday ⟨日付⟩ · :cal clear ⟨日付⟩",
   "usage: :proj {verb} ⟨name⟩": "使い方: :proj {verb} ⟨名前⟩",
   "not a command: {name}  (try :help)":
     "コマンドではありません: {name}（:help を参照）",
@@ -408,6 +452,10 @@ const JA: Record<string, string> = {
   "DATE PICKER": "日付ピッカー",
   PEERS: "ピア",
   CALENDAR: "カレンダー",
+  // 稼働カレンダー rather than 営業日: the group is about the whole
+  // calendar — the week, the holiday table, the days marked by hand —
+  // and カレンダー alone is the group above it, which is Google's.
+  "WORK WEEK": "稼働カレンダー",
   PROJECTS: "プロジェクト",
   OWNER: "担当",
   // The colon is kept: these four groups are what you type on the `:`
@@ -605,6 +653,13 @@ const JA: Record<string, string> = {
     "このプロジェクトの計画を Google カレンダーに書き込む",
   "first, in a terminal — once per machine":
     "最初に端末で — マシンごとに1回だけ",
+  "what the calendar says — it only reports":
+    "いまの設定を表示するだけ（書き換えません）",
+  "durations in working days / calendar days": "期間を営業日 / 暦日で数える",
+  "a day off — a name after it, if it has one":
+    "その日を休業日に — 続けて名前も書けます",
+  "work it after all": "その日は営業日にする",
+  "forget that day, back to the week": "その日の指定を解除（週の設定に戻る）",
   "pick one — click the name in the bar too":
     "選ぶ — 上部バーの名前をクリックしても開きます",
   "switch straight to it": "そのまま切り替える",

@@ -15,7 +15,12 @@
  */
 
 import { earliestStart, pinStartOps } from "../src/commands.ts";
-import type { AppData, Scheduled, Task } from "../src/types.ts";
+import {
+  DEFAULT_CALENDAR,
+  type AppData,
+  type Scheduled,
+  type Task,
+} from "../src/types.ts";
 
 let ran = 0;
 let failures = 0;
@@ -94,6 +99,9 @@ function fixture(lag: number): {
       end: "2026-08-03",
       critical_path: ["a", "b"],
     },
+    // Calendar days, which is what every date in here is written as.
+    // The working-day reading of the same rule is `check-cal.ts`'s.
+    calendar: DEFAULT_CALENDAR,
     today: "2026-08-01",
     as_of: false,
     node_id: "test",

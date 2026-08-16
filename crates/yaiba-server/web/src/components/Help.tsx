@@ -220,6 +220,24 @@ const groups = (): Group[] => [
     ],
   },
   {
+    /* The project's own working calendar — a different thing from the
+       group above it, which writes to Google's. Named for the week
+       rather than for the word `calendar` so the two are not read as
+       one feature with two halves. */
+    title: t("WORK WEEK"),
+    keys: [
+      [":cal", t("what the calendar says — it only reports")],
+      [":cal on / off", t("durations in working days / calendar days")],
+      // The words themselves, like `:f` and `:sort` above: these are
+      // typed, not read, and a translated `mon-fri` would not work.
+      [":cal week ⟨w⟩", "mon-fri, mon-sat, 1111100"],
+      [":cal region ⟨r⟩", "none, jp"],
+      [":cal holiday ⟨d⟩", t("a day off — a name after it, if it has one")],
+      [":cal workday ⟨d⟩", t("work it after all")],
+      [":cal clear ⟨d⟩", t("forget that day, back to the week")],
+    ],
+  },
+  {
     title: t("PROJECTS"),
     keys: [
       [":proj", t("pick one — click the name in the bar too")],

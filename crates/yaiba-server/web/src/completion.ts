@@ -34,10 +34,13 @@ export function startCompletion(
   const head = line.slice(0, line.length - token.length);
   const words = head.trim().split(/\s+/).filter(Boolean);
 
+  // `words` goes to the spec as well as its length: a command with
+  // sub-verbs — `:cal week`, `:cal region` — has a different vocabulary
+  // per branch, and the position alone cannot say which branch it is on.
   const pool =
     words.length === 0
       ? COMMANDS.map((c) => c.name)
-      : (findSpec(words[0])?.args?.(ctx, words.length) ?? []);
+      : (findSpec(words[0])?.args?.(ctx, words.length, words) ?? []);
 
   const wanted = token.toLowerCase();
   const items = pool.filter((c) => c.toLowerCase().startsWith(wanted));

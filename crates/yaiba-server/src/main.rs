@@ -15,6 +15,7 @@ use yaiba::projects::{self, Registry};
 use yaiba::updater::{self, UpdateMode};
 use yaiba::{api, app, mcp};
 use yaiba_core::Store;
+use yaiba_core::calendar;
 use yaiba_sync::{Ticket, Transport};
 
 /// `ya-i-ba` → 8-1-8. Arbitrary, but memorable and well clear of the
@@ -95,6 +96,327 @@ fn unreachable_yaiba(base: &str) -> String {
         "no yaiba answering at {base}. This talks to a running one rather than starting its \
          own, so the server stays the only writer — leave `yaiba` up in another window"
     )
+}
+
+/// `yaiba cal [action]`, run against a yaiba that is already up.
+///
+/// A client of the HTTP API rather than a second writer — the same
+/// arrangement `gcal` and `mcp` are in, and the same honest failure when
+/// nothing is listening.
+///
+/// It exists beside the app's own `:cal` because a calendar usually
+/// *arrives* as a file: a company's shutdown days, a country's holidays
+/// somebody exported. Typing fifty dates one at a time into a command line
+/// is not a way to enter them, so `--file` reads them and posts the lot in
+/// **one** request. That is not only for typing: the server validates the
+/// whole map before it writes any of it, so a file with one bad line
+/// changes nothing, where fifty requests would leave the calendar halfway.
+async fn cal_command(action: Option<CalAction>, url: Option<String>) -> Result<()> {
+    let base = url.unwrap_or_else(|| format!("http://127.0.0.1:{DEFAULT_PORT}"));
+    let http = gcal::http();
+
+    // What the file did not give us, which only the marking verbs can
+    // pick up and only the count below can put in context.
+    let mut note = DayFileNote::default();
+
+    // Built before anything is sent, so a bad week spec or an unreadable
+    // file costs no request at all.
+    let patch = match &action {
+        // A bare `yaiba cal` reports, exactly as a bare `:cal` does. The
+        // reasoning is the gcal one: this is the entry point that reaches a
+        // write, so the word on its own must not be one.
+        None => None,
+        Some(CalAction::On) => Some(serde_json::json!({ "mode": "workdays" })),
+        Some(CalAction::Off) => Some(serde_json::json!({ "mode": "days" })),
+        Some(CalAction::Week { spec }) => {
+            // Parsed here because the API takes the mask and nothing else:
+            // the words are a typing convenience, and keeping them out of
+            // the wire format is what stops the two clients' vocabularies
+            // from becoming two behaviours.
+            let week = calendar::parse_week_spec(spec).ok_or_else(|| {
+                anyhow!(
+                    "{spec} is not a week — name one of {}, or spell seven days Monday-first \
+                     like 1111100",
+                    calendar::WEEK_WORDS
+                        .iter()
+                        .map(|(word, _)| *word)
+                        .collect::<Vec<_>>()
+                        .join(" or ")
+                )
+            })?;
+            Some(serde_json::json!({ "week": week }))
+        }
+        // Sent as typed. The server owns the list of regions it knows and
+        // names them in its refusal, so checking here would be a second
+        // copy that goes stale the day another one is added.
+        Some(CalAction::Region { name }) => Some(serde_json::json!({ "region": name })),
+        Some(CalAction::Holiday { date, name, file }) => {
+            let (days, parsed) =
+                day_map(date.as_deref(), name.as_deref(), file.as_deref(), Mark::Off)?;
+            note = parsed;
+            Some(serde_json::json!({ "days": days }))
+        }
+        Some(CalAction::Workday { date, file }) => {
+            let (days, parsed) = day_map(date.as_deref(), None, file.as_deref(), Mark::Worked)?;
+            note = parsed;
+            Some(serde_json::json!({ "days": days }))
+        }
+        Some(CalAction::Clear { date, file }) => {
+            let (days, parsed) = day_map(date.as_deref(), None, file.as_deref(), Mark::Forget)?;
+            note = parsed;
+            Some(serde_json::json!({ "days": days }))
+        }
+    };
+
+    let marked = patch
+        .as_ref()
+        .and_then(|p| p.get("days"))
+        .and_then(|days| days.as_object())
+        .map(serde_json::Map::len);
+
+    let response = match &patch {
+        Some(patch) => http.put(format!("{base}/api/calendar")).json(patch).send(),
+        None => http.get(format!("{base}/api/state")).send(),
+    }
+    .await
+    .with_context(|| unreachable_yaiba(&base))?;
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        // The server's refusals are the sentence worth reading — the bad
+        // date, the empty week, the region it does not know and what to do
+        // instead. Passed through rather than wrapped in a second one.
+        let text: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+        bail!("{}", text["error"].as_str().unwrap_or(body.as_str()));
+    }
+
+    let state: CalState =
+        serde_json::from_str(&body).context("yaiba answered something unexpected")?;
+    if let Some(days) = marked {
+        // Phrased to read the same for one day as for fifty: "1 day marked
+        // as days off" is the sort of sentence a plural branch is for.
+        let verb = match action {
+            Some(CalAction::Workday { .. }) => "marked as worked",
+            Some(CalAction::Clear { .. }) => "cleared",
+            _ => "marked off",
+        };
+        println!(
+            "{days} {} {verb}.{}",
+            if days == 1 { "day" } else { "days" },
+            note.aside()
+        );
+    }
+    // Every write answers with where the plan then stands, which is the
+    // bargain the rest of yaiba makes: the calendar is only interesting
+    // for what it does to the dates.
+    print!("{}", state.report());
+    Ok(())
+}
+
+/// Which of the three things a marking verb says about a day.
+#[derive(Clone, Copy)]
+enum Mark {
+    Off,
+    Worked,
+    Forget,
+}
+
+impl Mark {
+    /// The patch value for this mark. `null` is how a day is forgotten:
+    /// LWW has no delete, so "no opinion" has to be written as one.
+    fn value(self, name: &str) -> serde_json::Value {
+        match self {
+            Self::Off if name.is_empty() => serde_json::Value::Bool(true),
+            Self::Off => serde_json::Value::String(name.to_string()),
+            Self::Worked => serde_json::Value::Bool(false),
+            Self::Forget => serde_json::Value::Null,
+        }
+    }
+}
+
+/// The `days` map for a marking verb: either the one date on the command
+/// line, or every date in a file.
+///
+/// Dates are passed through as typed rather than parsed here. The server
+/// validates them and names the one it choked on, and a second parser here
+/// would only be able to disagree with it.
+///
+/// The [`DayFileNote`] comes back with the map because what a file lost is
+/// only interesting next to how many days went out — and the count is
+/// printed by the caller.
+fn day_map(
+    date: Option<&str>,
+    name: Option<&str>,
+    file: Option<&std::path::Path>,
+    mark: Mark,
+) -> Result<(serde_json::Map<String, serde_json::Value>, DayFileNote)> {
+    let mut days = serde_json::Map::new();
+    let mut note = DayFileNote::default();
+    if let Some(path) = file {
+        let text = if path == std::path::Path::new("-") {
+            std::io::read_to_string(std::io::stdin()).context("could not read stdin")?
+        } else {
+            std::fs::read_to_string(path)
+                .with_context(|| format!("could not read {}", path.display()))?
+        };
+        let (lines, parsed) = parse_day_file(&text);
+        note = parsed;
+        if lines.is_empty() {
+            bail!(
+                "{} named no days — one `date[,name]` per line, `#` for a comment",
+                path.display()
+            );
+        }
+        // Last one wins, which is what a map does and what the note has
+        // already counted.
+        for (day, label) in lines {
+            days.insert(day, mark.value(&label));
+        }
+    }
+    if let Some(day) = date {
+        days.insert(day.to_string(), mark.value(name.unwrap_or_default()));
+    }
+    Ok((days, note))
+}
+
+/// What a day file lost on the way in, so the sentence can say so.
+///
+/// Both of these are *tolerated*: the format is documented as forgiving,
+/// and refusing a whole file over a stray line would be the worse
+/// failure — the file usually came out of somebody else's spreadsheet.
+/// But a tolerated line and a clean file must not print the same thing.
+/// The count that gets printed is the size of the map that was sent, and
+/// somebody comparing it against the lines they wrote is owed the
+/// difference rather than left to find it on the chart.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct DayFileNote {
+    /// Lines that named no date at all — `,Christmas`, a separator with
+    /// nothing in front of it.
+    skipped: usize,
+    /// Dates named more than once. The last one wins, which is what the
+    /// map does and not something worth changing; it is only worth
+    /// mentioning.
+    repeated: usize,
+}
+
+impl DayFileNote {
+    /// The aside that follows the count, empty when the file was clean.
+    ///
+    /// Phrased and pluralised like the count it trails, because it is
+    /// read as one sentence: `3 days marked off. (2 lines skipped, 1 date
+    /// repeated)`.
+    fn aside(self) -> String {
+        let mut parts = Vec::new();
+        if self.skipped > 0 {
+            let noun = if self.skipped == 1 { "line" } else { "lines" };
+            parts.push(format!("{} {noun} skipped", self.skipped));
+        }
+        if self.repeated > 0 {
+            let noun = if self.repeated == 1 { "date" } else { "dates" };
+            parts.push(format!("{} {noun} repeated", self.repeated));
+        }
+        match parts.is_empty() {
+            true => String::new(),
+            false => format!(" ({})", parts.join(", ")),
+        }
+    }
+}
+
+/// `date[,name]` a line, `#` comments and blank lines skipped.
+///
+/// Deliberately not a CSV library. The format is two fields whose second is
+/// free text that may itself contain a comma — "Christmas Eve, half day" —
+/// so the split is on the **first** separator and everything after it is
+/// the name. Quoting rules would be a spec nobody asked for and a file
+/// nobody could write by hand.
+///
+/// A tab counts as the separator too, because a spreadsheet exporting one
+/// column of dates and one of names is as likely to produce TSV, and the
+/// leading BOM Excel writes is stripped — otherwise the first date arrives
+/// as `\u{feff}2026-01-01` and the server refuses it with a message that
+/// looks like nonsense.
+///
+/// Every line kept is returned in the order it was written, duplicates
+/// included, because the map the caller builds is where last-one-wins
+/// belongs. What is *not* kept, and what was written twice, comes back
+/// beside them as a [`DayFileNote`] — see there for why neither is an
+/// error.
+fn parse_day_file(text: &str) -> (Vec<(String, String)>, DayFileNote) {
+    let mut note = DayFileNote::default();
+    let mut seen = std::collections::HashSet::new();
+    let days = text
+        .strip_prefix('\u{feff}')
+        .unwrap_or(text)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| match line.find([',', '\t']) {
+            Some(at) => (
+                line[..at].trim().to_string(),
+                line[at + 1..].trim().to_string(),
+            ),
+            None => (line.to_string(), String::new()),
+        })
+        .filter(|(day, _)| {
+            if day.is_empty() {
+                note.skipped += 1;
+                return false;
+            }
+            if !seen.insert(day.clone()) {
+                note.repeated += 1;
+            }
+            true
+        })
+        .collect();
+    (days, note)
+}
+
+/// Just enough of `/api/state` to say where the calendar stands.
+///
+/// A local shape rather than the server's own type: this is an API client
+/// like `mcp` is, and what it reads is what it prints.
+#[derive(serde::Deserialize)]
+struct CalState {
+    calendar: CalView,
+    schedule: PlanSpan,
+}
+
+#[derive(serde::Deserialize)]
+struct CalView {
+    mode: String,
+    week: [bool; 7],
+    region: String,
+    /// Day off → its name. Weekends are not in here; see the API.
+    holidays: std::collections::BTreeMap<String, String>,
+    workdays: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct PlanSpan {
+    end: String,
+}
+
+impl CalState {
+    fn report(&self) -> String {
+        let counting = if self.calendar.mode == "workdays" {
+            "working days"
+        } else {
+            "calendar days"
+        };
+        format!(
+            "counting   {counting}\n\
+             week       {}\n\
+             holidays   {}\n\
+             in view    {} off, {} worked\n\
+             plan ends  {}\n",
+            calendar::week_word(self.calendar.week),
+            self.calendar.region,
+            self.calendar.holidays.len(),
+            self.calendar.workdays.len(),
+            self.schedule.end,
+        )
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -343,6 +665,27 @@ enum Command {
         #[arg(long, value_name = "URL", env = "YAIBA_GCAL_URL")]
         url: Option<String>,
     },
+
+    /// Read or change the working calendar: what a duration is counted in,
+    /// and which days are days off.
+    ///
+    /// Like `mcp` and `gcal`, this talks to a yaiba that is already running
+    /// rather than starting one, so the server stays the only writer.
+    ///
+    /// The app has `:cal` for the same settings one at a time. This exists
+    /// for the case that one is bad at: a calendar that arrives as a file.
+    /// `yaiba cal holiday --file days.csv` posts every line in one request.
+    Cal {
+        #[command(subcommand)]
+        action: Option<CalAction>,
+
+        /// The running yaiba to talk to. Its own variable rather than
+        /// sharing `mcp`'s or `gcal`'s, for the reason spelled out on
+        /// those: one name meaning two things is a trade this repo has
+        /// already paid for once.
+        #[arg(long, value_name = "URL", env = "YAIBA_CAL_URL")]
+        url: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -359,6 +702,59 @@ enum GcalAction {
     /// Idempotent: it works out the difference and applies it, so a
     /// second run in a row does nothing.
     Push,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum CalAction {
+    /// Count durations in working days, skipping weekends and days off.
+    On,
+    /// Count durations in calendar days — the default, and what every
+    /// project did before calendars existed.
+    Off,
+    /// Set which weekdays are worked.
+    Week {
+        /// `mon-fri`, `mon-sat`, or seven days Monday-first: `1111100`.
+        spec: String,
+    },
+    /// Choose the bundled holiday table, if any.
+    Region {
+        /// `jp` for Japan's 国民の祝日, or `none` for a project that marks
+        /// its own days. Anywhere else, mark the dates with `holiday
+        /// --file` — that is the general mechanism, and a table in the
+        /// binary is only a shortcut for one country.
+        name: String,
+    },
+    /// Mark days off.
+    Holiday {
+        #[arg(required_unless_present = "file")]
+        date: Option<String>,
+        /// What to call it. Optional — an unlabelled day off is still one.
+        name: Option<String>,
+        /// Read `date[,name]` lines from a file, or `-` for stdin, and post
+        /// them in one request.
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["date", "name"])]
+        file: Option<PathBuf>,
+    },
+    /// Mark days worked, against the week mask or the holiday table — a
+    /// Saturday everybody is in, or a public holiday the team works
+    /// through.
+    Workday {
+        #[arg(required_unless_present = "file")]
+        date: Option<String>,
+        /// As `holiday --file`. Any name in the file is ignored here, so
+        /// the same file can be handed to either verb.
+        #[arg(long, value_name = "PATH", conflicts_with = "date")]
+        file: Option<PathBuf>,
+    },
+    /// Forget whatever was said about these days, leaving the week mask and
+    /// the holiday table to decide.
+    Clear {
+        #[arg(required_unless_present = "file")]
+        date: Option<String>,
+        /// As `holiday --file`; names are ignored.
+        #[arg(long, value_name = "PATH", conflicts_with = "date")]
+        file: Option<PathBuf>,
+    },
 }
 
 /// What the resolved command says to open.
@@ -449,6 +845,11 @@ async fn main() -> Result<()> {
         Some(Command::Mcp { url }) => return mcp::serve(url.clone()).await,
         Some(Command::Gcal { action, url }) => {
             return gcal_command(action.clone(), url.clone(), !cli.no_open).await;
+        }
+        // Serves a running yaiba, so it skips everything below exactly as
+        // `mcp` and `gcal` do: no registry, no database, no listener.
+        Some(Command::Cal { action, url }) => {
+            return cal_command(action.clone(), url.clone()).await;
         }
         _ => {}
     }
@@ -1137,6 +1538,159 @@ mod tests {
     #[test]
     fn the_cli_is_well_formed() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn a_bare_cal_asks_for_nothing() {
+        // The word on its own has to be a read. `:cal` in the app makes the
+        // same promise, and for the reason `check-gcal.ts` spells out: the
+        // entry point that reaches a write must not *be* one on an early ⏎.
+        let cli = Cli::parse_from(["yaiba", "cal"]);
+        match cli.command {
+            Some(Command::Cal { action, .. }) => assert!(action.is_none()),
+            other => panic!("expected cal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_marking_verb_wants_a_date_or_a_file_and_not_both() {
+        let cli = Cli::parse_from(["yaiba", "cal", "holiday", "2026-12-29", "年末休み"]);
+        match cli.command {
+            Some(Command::Cal {
+                action: Some(CalAction::Holiday { date, name, file }),
+                ..
+            }) => {
+                assert_eq!(date.as_deref(), Some("2026-12-29"));
+                assert_eq!(name.as_deref(), Some("年末休み"));
+                assert!(file.is_none());
+            }
+            other => panic!("expected a holiday, got {other:?}"),
+        }
+
+        assert!(
+            Cli::try_parse_from(["yaiba", "cal", "holiday"]).is_err(),
+            "a date or a file, but not neither"
+        );
+        assert!(
+            Cli::try_parse_from([
+                "yaiba",
+                "cal",
+                "holiday",
+                "2026-12-29",
+                "--file",
+                "days.csv"
+            ])
+            .is_err(),
+            "a date or a file, but not both"
+        );
+        assert!(
+            Cli::try_parse_from(["yaiba", "cal", "workday", "--file", "-"]).is_ok(),
+            "stdin is a file"
+        );
+    }
+
+    #[test]
+    fn a_day_file_is_one_date_and_an_optional_name_per_line() {
+        let (parsed, note) = parse_day_file(
+            "\u{feff}# 2026, as the office keeps it\n\
+             \n\
+             2026-12-29,年末休み\n\
+             2026-12-30\n\
+             2026-12-31\tNew Year's Eve\n\
+             2026-01-04 , Christmas Eve, half day \n",
+        );
+        assert_eq!(
+            parsed,
+            vec![
+                ("2026-12-29".to_string(), "年末休み".to_string()),
+                ("2026-12-30".to_string(), String::new()),
+                ("2026-12-31".to_string(), "New Year's Eve".to_string()),
+                // Split on the *first* separator, so a comma inside a name
+                // survives instead of truncating it.
+                (
+                    "2026-01-04".to_string(),
+                    "Christmas Eve, half day".to_string()
+                ),
+            ]
+        );
+        // A clean file has nothing to say for itself, and the count that
+        // gets printed then stands on its own.
+        assert_eq!(note, DayFileNote::default());
+        assert_eq!(note.aside(), "");
+        assert!(parse_day_file("# nothing but a comment\n\n").0.is_empty());
+    }
+
+    #[test]
+    fn a_day_file_says_what_it_could_not_use() {
+        // Neither a skipped line nor a repeated date is an error — the
+        // format is forgiving on purpose — but neither may look like a
+        // clean file either. All three lines here are what a spreadsheet
+        // produces: a name that ended up in the second column with no
+        // date in the first, a row that is nothing but its separator, and
+        // the same shutdown day entered twice.
+        let (parsed, note) = parse_day_file(
+            ",Christmas\n\
+             2026-12-29,年末休み\n\
+             ,\n\
+             2026-12-30\n\
+             2026-12-29,冬期休暇\n",
+        );
+        assert_eq!(
+            parsed,
+            vec![
+                ("2026-12-29".to_string(), "年末休み".to_string()),
+                ("2026-12-30".to_string(), String::new()),
+                // Kept in the order it was written; the map is where the
+                // last one wins.
+                ("2026-12-29".to_string(), "冬期休暇".to_string()),
+            ]
+        );
+        assert_eq!(
+            note,
+            DayFileNote {
+                skipped: 2,
+                repeated: 1
+            }
+        );
+        assert_eq!(note.aside(), " (2 lines skipped, 1 date repeated)");
+
+        // Through the path that actually reads a file: the map is two
+        // days where four lines were written, and the note is what says
+        // where the other two went.
+        let path = std::env::temp_dir().join("yaiba-cal-day-file-note.csv");
+        std::fs::write(
+            &path,
+            ",Christmas\n2026-12-29,年末休み\n2026-12-29,冬期休暇\n2026-12-30\n",
+        )
+        .expect("write the day file");
+        let mapped = day_map(None, None, Some(&path), Mark::Off);
+        std::fs::remove_file(&path).ok();
+
+        let (days, note) = mapped.unwrap();
+        assert_eq!(days.len(), 2);
+        assert_eq!(
+            days["2026-12-29"],
+            serde_json::json!("冬期休暇"),
+            "last one wins, as the map does"
+        );
+        assert_eq!(note.aside(), " (1 line skipped, 1 date repeated)");
+    }
+
+    #[test]
+    fn a_day_map_carries_what_each_verb_means() {
+        // The three marks are three values, and `null` is the one that says
+        // "no opinion" — LWW has no delete, so forgetting has to be written.
+        let (off, _) = day_map(Some("2026-05-01"), Some("創立記念日"), None, Mark::Off).unwrap();
+        assert_eq!(off["2026-05-01"], serde_json::json!("創立記念日"));
+
+        let (unnamed, _) = day_map(Some("2026-05-01"), None, None, Mark::Off).unwrap();
+        assert_eq!(unnamed["2026-05-01"], serde_json::json!(true));
+
+        let (worked, _) = day_map(Some("2026-08-15"), None, None, Mark::Worked).unwrap();
+        assert_eq!(worked["2026-08-15"], serde_json::json!(false));
+
+        let (forgotten, _) = day_map(Some("2026-08-15"), None, None, Mark::Forget).unwrap();
+        assert_eq!(forgotten["2026-08-15"], serde_json::Value::Null);
     }
 
     #[test]

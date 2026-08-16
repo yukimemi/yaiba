@@ -1,8 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { addDays, isWeekend, monthLabel, parseISO, toISO, weekdays } from "../dates";
+import {
+  addDays,
+  holidayName,
+  isOffDay,
+  isOffWeekday,
+  monthLabel,
+  parseISO,
+  toISO,
+  weekdays,
+} from "../dates";
 import { t } from "../i18n";
 import type { Lang } from "../lang";
+import type { Calendar } from "../types";
 
 /** Six weeks, so the panel never changes height as you page months. */
 const CELLS = 42;
@@ -19,6 +29,15 @@ interface Props {
   value: string | null;
   /** The reference date — highlighted, and where an empty cell opens. */
   today: string;
+  /**
+   * The working calendar, so the grid shades the days nobody works.
+   *
+   * Shading only: every day stays pickable. A start pinned to a holiday
+   * is raised to the next working day by the scheduler rather than
+   * refused, and a picker that would not let you say it would be
+   * stricter than the thing it is typing into.
+   */
+  cal: Calendar;
   /** Which language the column of weekday names is written in. */
   lang: Lang;
   anchor: Anchor;
@@ -68,6 +87,7 @@ function monthGrid(iso: string): string[] {
 export function DatePicker({
   value,
   today,
+  cal,
   lang,
   anchor,
   label,
@@ -198,10 +218,16 @@ export function DatePicker({
       </div>
 
       <div className="datepick__grid">
+        {/* The grid is Sunday-first because a month calendar is read
+            that way; the work week is not. So the heading is dimmed
+            from the mask rather than from the two columns that used to
+            be assumed — under `mon-sat` the Saturday column is a
+            working day and saying otherwise would be the picker
+            disagreeing with every bar behind it. */}
         {weekdays(lang).map((day, i) => (
           <span
             key={day}
-            className={`datepick__wd${i === 0 || i === 6 ? " datepick__wd--weekend" : ""}`}
+            className={`datepick__wd${isOffWeekday(i, cal) ? " datepick__wd--off" : ""}`}
           >
             {day}
           </span>
@@ -213,13 +239,17 @@ export function DatePicker({
             className={[
               "datepick__day",
               iso.slice(0, 7) !== month && "datepick__day--outside",
-              isWeekend(iso) && "datepick__day--weekend",
+              isOffDay(iso, cal) && "datepick__day--off",
               iso === today && "datepick__day--today",
               iso === value && "datepick__day--set",
               iso === cursor && "datepick__day--cursor",
             ]
               .filter(Boolean)
               .join(" ")}
+            // The one place a holiday's name fits: a grid cell holds
+            // two digits, and the shading alone says "off" without
+            // saying why 5/4 is off and 5/7 is not.
+            title={holidayName(iso, cal) ?? undefined}
             onClick={() => onPick(iso)}
           >
             {Number(iso.slice(8))}

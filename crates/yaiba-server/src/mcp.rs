@@ -41,7 +41,7 @@ use rmcp::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use yaiba_core::{Dep, Schedule, Task};
+use yaiba_core::{CalendarMode, Dep, Schedule, Task};
 
 /// Where the running yaiba is. Loopback only — the API has no
 /// authentication, which is exactly why it is not addressable off-box.
@@ -51,14 +51,29 @@ const DEFAULT_BASE: &str = "http://127.0.0.1:8188";
 ///
 /// A reader's view of `api::StateResponse`, not that type itself — its
 /// fields are private to the `api` module, and serde ignores what is not
-/// named here, so this stays valid as the response grows. The three
-/// fields below are the ones an agent has any use for.
+/// named here, so this stays valid as the response grows. The fields
+/// below are the ones an agent has any use for.
 #[derive(Debug, Deserialize)]
 struct State {
     tasks: Vec<Task>,
     deps: Vec<Dep>,
     schedule: Schedule,
     today: NaiveDate,
+    /// Only the part of the calendar an agent has to be told about: what a
+    /// day in a duration means. The shading, the holiday names and the
+    /// working overrides are for a screen, and an agent reading them would
+    /// be reading a rendering.
+    ///
+    /// Defaulted rather than required, so this also survives being pointed
+    /// at a yaiba that predates the calendar — and the default it lands on
+    /// is calendar days, which is exactly what that yaiba does.
+    #[serde(default)]
+    calendar: Cal,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Cal {
+    mode: CalendarMode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -259,7 +274,9 @@ pub struct AddTask {
         description = "Enclosing task — id, id prefix, or title. A task with children takes its dates from them, so put work on the leaves."
     )]
     pub parent: Option<String>,
-    #[schemars(description = "Calendar days the task spans. Defaults to 1.")]
+    #[schemars(
+        description = "Days the task spans — working days if the project counts those, calendar days otherwise; `plan` says which. Defaults to 1."
+    )]
     pub duration_days: Option<i64>,
     #[schemars(description = "Who it belongs to. Free text; use a name already in the plan.")]
     pub assignee: Option<String>,
@@ -291,7 +308,9 @@ pub struct UpdateTask {
         description = "Pinned start, YYYY-MM-DD. A pin is a floor: the task starts no earlier, and it cannot be pulled before a predecessor finishes."
     )]
     pub start: Option<String>,
-    #[schemars(description = "Calendar days the task spans.")]
+    #[schemars(
+        description = "Days the task spans — working days if the project counts those, calendar days otherwise; `plan` says which."
+    )]
     pub duration_days: Option<i64>,
     #[schemars(description = "Due date, YYYY-MM-DD.")]
     pub due: Option<String>,
@@ -318,7 +337,7 @@ pub struct Edge {
     #[schemars(description = "The task that waits — id, id prefix, or title.")]
     pub to: String,
     #[schemars(
-        description = "Calendar days between the first finishing and the second starting. 1 means the next day, 0 lets them share a date. Ignored when cutting."
+        description = "Days between the first finishing and the second starting, in the same days a duration is counted in. 1 means the next such day, 0 lets them share a date. Ignored when cutting."
     )]
     pub lag_days: Option<i64>,
 }
@@ -725,7 +744,7 @@ impl ServerHandler for Yaiba {
                  dependencies, and it computes the dates. Read `plan` before \
                  editing — it prints each task's short id, which every other \
                  tool accepts (a title works too, if it is unambiguous).\n\n\
-                 Three rules the scheduler will enforce whether or not you know \
+                 Four rules the scheduler will apply whether or not you know \
                  them:\n\
                  - A task with children takes its dates from them. Put work on \
                    the leaves; setting a parent's dates is refused.\n\
@@ -733,7 +752,12 @@ impl ServerHandler for Yaiba {
                    parent — an edge touching a summary is expanded to its \
                    leaves, so linking a task to its own parent is a cycle.\n\
                  - A pinned start is a floor, not an override: a task never \
-                   starts before what it waits for has finished.\n\n\
+                   starts before what it waits for has finished.\n\
+                 - A duration is not always a count of dates. A project can \
+                   be set to count working days, in which case weekends, \
+                   holidays and days marked off are skipped — `plan` says \
+                   which it is on every read, so check there before \
+                   deciding what a duration of 5 buys you.\n\n\
                   To change manual task order, use `reorder`. To move a task in or out of a parent, \
                   use `update_task` with `parent` (or pass empty/\"none\"/\"root\" for top level).\n\n\
                  Every write answers with where the plan then stands — its \
@@ -775,8 +799,25 @@ fn render_plan(state: &State) -> String {
         .count();
     let _ = writeln!(
         out,
-        "{} on the critical path, {late} behind, {overdue} overdue, {blocked} blocked.\n",
+        "{} on the critical path, {late} behind, {overdue} overdue, {blocked} blocked.",
         state.schedule.critical_path.len()
+    );
+    // Said every time rather than only under workday mode. An agent that
+    // sets `duration_days: 5` is deciding what a day is worth, and the
+    // answer differs per project — so the reading it needs is on the page
+    // it already reads, not something to infer from the dates.
+    let _ = writeln!(
+        out,
+        "{}\n",
+        match state.calendar.mode {
+            CalendarMode::Workdays =>
+                "Durations and dependency lags are counted in working days: \
+                 weekends, holidays and days marked off are skipped, so a \
+                 5-day task can span more than 5 dates.",
+            CalendarMode::Days =>
+                "Durations and dependency lags are counted in calendar days, \
+                 weekends included.",
+        }
     );
 
     for task in &state.tasks {
@@ -927,6 +968,9 @@ mod tests {
                 critical_path: Vec::new(),
             },
             today,
+            calendar: Cal {
+                mode: CalendarMode::Days,
+            },
         }
     }
 
@@ -1034,5 +1078,25 @@ mod tests {
 
         assert_eq!(Yaiba::resolve(&state, "parent task").unwrap(), parent_id);
         assert!(Yaiba::resolve(&state, "unknown parent").is_err());
+    }
+
+    /// What a `duration_days` means is the one thing an agent cannot work
+    /// out from the numbers, so `plan` has to say it — in both modes, not
+    /// only the surprising one.
+    #[test]
+    fn the_plan_says_which_days_a_duration_is_counted_in() {
+        let mut state = state(Vec::new());
+        assert!(
+            render_plan(&state).contains("calendar days"),
+            "the default has to be stated too, or silence reads as workdays"
+        );
+
+        state.calendar.mode = CalendarMode::Workdays;
+        let rendered = render_plan(&state);
+        assert!(rendered.contains("working days"), "{rendered}");
+        assert!(
+            rendered.contains("more than 5 dates"),
+            "and why that surprises: {rendered}"
+        );
     }
 }

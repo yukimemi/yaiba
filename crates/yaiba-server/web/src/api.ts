@@ -1,4 +1,12 @@
-import type { AppData, Dep, NewTask, Task, TaskPatch } from "./types";
+import {
+  DEFAULT_CALENDAR,
+  type AppData,
+  type CalendarPatch,
+  type Dep,
+  type NewTask,
+  type Task,
+  type TaskPatch,
+} from "./types";
 import type { ProjectUiState } from "./uiState";
 
 /**
@@ -32,7 +40,14 @@ async function request(path: string, init?: RequestInit): Promise<AppData> {
     }
     throw new ApiError(message, res.status);
   }
-  return (await res.json()) as AppData;
+  const data = (await res.json()) as AppData;
+  // Every read of the plan comes through here, so this is the one place
+  // a reply without a calendar has to be dealt with — a replica older
+  // than the field, or a server part-way through an upgrade. Filling in
+  // the default degrades it to calendar days, which is what those
+  // versions meant, rather than leaving `data.calendar` undefined for
+  // every shading and duration read downstream to guard separately.
+  return data.calendar ? data : { ...data, calendar: DEFAULT_CALENDAR };
 }
 
 const json = (method: string, body: unknown): RequestInit => ({
@@ -234,6 +249,17 @@ export const api = {
   getUi: () => uiRequest(),
   putUi: (ui: ProjectUiState) =>
     uiRequest({ method: "PUT", body: JSON.stringify(ui) }),
+  /**
+   * Change the working calendar — `:cal`.
+   *
+   * A patch rather than the whole object: the calendar syncs like
+   * everything else, so sending back the four fields you did not touch
+   * would overwrite whatever a peer changed between the read and the
+   * write. Answers with the whole plan, because a calendar change moves
+   * every bar.
+   */
+  putCalendar: (patch: CalendarPatch) =>
+    request("/api/calendar", json("PUT", patch)),
   /**
    * Make the active project's calendar say what the plan says.
    *

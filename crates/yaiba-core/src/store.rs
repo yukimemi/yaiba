@@ -15,11 +15,14 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::calendar::{Calendar, CalendarMode, DayMark, HolidaySet, parse_week_mask, week_mask};
 use crate::crdt::{
-    Entry, FIELD_ACTUAL_END, FIELD_ACTUAL_START, FIELD_ASSIGNEE, FIELD_CREATED, FIELD_DELETED,
-    FIELD_DUE, FIELD_DURATION, FIELD_EXISTS, FIELD_LAG, FIELD_NOTES, FIELD_PARENT, FIELD_POSITION,
-    FIELD_PRIORITY, FIELD_PROGRESS, FIELD_START, FIELD_STATUS, FIELD_TITLE, TAG_PREFIX,
-    VersionVector, dep_key, log_key, parse_dep_key, parse_log_key, parse_task_key, task_key,
+    CAL_KEY, Entry, FIELD_ACTUAL_END, FIELD_ACTUAL_START, FIELD_ASSIGNEE, FIELD_CAL_HOLIDAYS,
+    FIELD_CAL_MODE, FIELD_CAL_WEEK, FIELD_CREATED, FIELD_DELETED, FIELD_DUE, FIELD_DURATION,
+    FIELD_EXISTS, FIELD_LAG, FIELD_NOTES, FIELD_PARENT, FIELD_POSITION, FIELD_PRIORITY,
+    FIELD_PROGRESS, FIELD_START, FIELD_STATUS, FIELD_TITLE, TAG_PREFIX, VersionVector, dep_key,
+    holiday_field, log_key, parse_dep_key, parse_holiday_field, parse_log_key, parse_task_key,
+    task_key,
 };
 use crate::graph;
 use crate::hlc::{Clock, Hlc, NodeId};
@@ -210,6 +213,15 @@ impl Store {
     /// Everything else — titles, dates, the breakdown — is shown as it
     /// is *now*, not as it was. LWW keeps no history for those fields,
     /// and inventing one would be worse than the honest limitation.
+    ///
+    /// The working calendar included in the snapshot is the *current* one,
+    /// under exactly that rule — it is a set of LWW rows like a title, so
+    /// there is no record of which days were holidays in March and
+    /// inventing one is the worse of the two answers. The consequence is
+    /// worth knowing: an `:asof` view recounts the old plan in today's
+    /// working days, so turning workday mode on moves the bars in the
+    /// as-of view too. That is the same thing a retitle already does to a
+    /// historical view, and it beats a second, fabricated calendar.
     pub fn snapshot_at(&self, date: NaiveDate) -> Result<Snapshot> {
         let entries = self.entries()?;
         let mut snapshot = materialize(&entries);
@@ -651,6 +663,74 @@ impl Store {
         self.commit(vec![(dep_key(from, to), FIELD_EXISTS.into(), json!(false))])
     }
 
+    // ---- the working calendar --------------------------------------
+    //
+    // Four writes, all through `commit`, all on the singleton `cal` key.
+    // Going through the CRDT log rather than `meta` is the whole design:
+    // each replica computes the schedule itself, so a calendar that did
+    // not sync would give two peers two sets of dates for one plan.
+
+    /// Whether durations are counted in calendar days or working days.
+    ///
+    /// Serialised through the enum's own derive rather than a `match` to a
+    /// string here, so `"days"` and `"workdays"` are written in exactly one
+    /// place — the `rename_all` on [`CalendarMode`] — and the projection
+    /// below reads them back the same way.
+    pub fn set_calendar_mode(&mut self, mode: CalendarMode) -> Result<()> {
+        self.commit(vec![(CAL_KEY.into(), FIELD_CAL_MODE.into(), json!(mode))])
+    }
+
+    /// Which weekdays are worked, Monday first.
+    ///
+    /// Stored as the seven-character string rather than a JSON array: it
+    /// is one LWW value either way, and the fixed width is what makes a
+    /// truncated or padded value obvious to the projection instead of
+    /// silently short.
+    pub fn set_work_week(&mut self, week: [bool; 7]) -> Result<()> {
+        self.commit(vec![(
+            CAL_KEY.into(),
+            FIELD_CAL_WEEK.into(),
+            json!(week_mask(week)),
+        )])
+    }
+
+    /// Which built-in holiday table applies, if any.
+    ///
+    /// The variant's name and not a flag, so adding a region never changes
+    /// what is on the wire — and so a project that keeps its own holidays
+    /// as `mark_day` entries reads back as "no table" rather than as "the
+    /// Japanese one, off".
+    pub fn set_holiday_set(&mut self, set: HolidaySet) -> Result<()> {
+        self.commit(vec![(
+            CAL_KEY.into(),
+            FIELD_CAL_HOLIDAYS.into(),
+            json!(set),
+        )])
+    }
+
+    /// Mark one day off or working, or take the mark away with `None`.
+    ///
+    /// `None` writes `Value::Null`, it does not delete the row. LWW has no
+    /// delete — a removed row is one a peer holding the old value happily
+    /// puts back on the next sync, exactly the way a dropped tombstone
+    /// resurrects a task. So "no opinion about this day" needs a value of
+    /// its own that can *win* a merge, and null is it.
+    pub fn mark_day(&mut self, day: NaiveDate, mark: Option<DayMark>) -> Result<()> {
+        let value = match mark {
+            // A holiday's name is its value, so an unnamed one is the
+            // empty string rather than `true` — one shape to read back,
+            // and `true` stays what an older or hand-written row means.
+            Some(DayMark::Holiday(name)) => json!(name),
+            Some(DayMark::Working) => json!(false),
+            None => Value::Null,
+        };
+        self.commit(vec![(
+            CAL_KEY.into(),
+            holiday_field(&day.to_string()),
+            value,
+        )])
+    }
+
     // ---- sync ------------------------------------------------------
 
     /// What this replica has seen, per originating node.
@@ -1074,7 +1154,78 @@ fn materialize(entries: &[Entry]) -> Snapshot {
         .collect();
     deps.sort_by_key(|d| (d.from, d.to));
 
-    Snapshot { tasks, deps }
+    let calendar = by_key
+        .get(CAL_KEY)
+        .map(project_calendar)
+        .unwrap_or_default();
+
+    Snapshot {
+        tasks,
+        deps,
+        calendar,
+    }
+}
+
+/// Fold the `cal` entity's fields into a [`Calendar`].
+///
+/// Every value degrades to the default rather than being refused, and for
+/// the same reason the lag is clamped on the way out: there is no
+/// guarantee about what a peer puts in these rows. A replica running a
+/// newer version can invent a mode this one has never heard of, an older
+/// one can carry a row somebody hand-edited, and `materialize` runs on
+/// every read — so a value this function cannot make sense of has to cost
+/// the *field*, never the snapshot.
+///
+/// The degradation is always towards today's behaviour: unknown mode reads
+/// as `days`, an unreadable week as Monday-to-Friday, an unparseable date
+/// as no mark at all.
+fn project_calendar(fields: &HashMap<&str, &Entry>) -> Calendar {
+    let default = Calendar::default();
+    // Both enums are read back through their own `Deserialize`, which is
+    // what `set_calendar_mode` and `set_holiday_set` wrote them with — one
+    // definition of `"workdays"` and `"jp"`, not two that can drift. An
+    // unknown name, or a value that is not a string at all, fails the
+    // deserialise and falls to the default.
+    let mode = enum_field(fields, FIELD_CAL_MODE);
+    // For the holiday table that fallback is worth being blunt about:
+    // unlike every other field here, degrading is not "ignore a setting"
+    // but "compute different dates than the peer that wrote it", because
+    // the tables live in code rather than in the data. A version gap is a
+    // date gap. `holiday:` marks are the version-proof way to say the same
+    // thing, which is why the API takes them in bulk.
+    let holidays = enum_field(fields, FIELD_CAL_HOLIDAYS);
+    // The seven-character form is parsed in `calendar.rs` and nowhere
+    // else, so the projection cannot drift from what `set_work_week`
+    // writes.
+    let week = field_str(fields, FIELD_CAL_WEEK)
+        .and_then(|text| parse_week_mask(&text))
+        .unwrap_or(default.week);
+
+    let marks = fields
+        .iter()
+        .filter_map(|(field, entry)| {
+            let day: NaiveDate = parse_holiday_field(field)?.parse().ok()?;
+            let mark = match &entry.value {
+                // A name, however it was spelled. Empty is allowed: "a day
+                // off nobody named" is a real thing to say.
+                Value::String(name) => DayMark::Holiday(name.clone()),
+                Value::Bool(true) => DayMark::Holiday(String::new()),
+                Value::Bool(false) => DayMark::Working,
+                // `null` is how a mark is *removed* — see `mark_day`. Any
+                // other shape (a number, an object) says nothing this can
+                // act on, so it reads the same way: no mark.
+                _ => return None,
+            };
+            Some((day, mark))
+        })
+        .collect();
+
+    Calendar {
+        mode,
+        week,
+        holidays,
+        marks,
+    }
 }
 
 fn millis_to_utc(millis: u64) -> Option<DateTime<Utc>> {
@@ -1095,6 +1246,22 @@ fn field_bool(fields: &HashMap<&str, &Entry>, name: &str) -> Option<bool> {
 
 fn field_date(fields: &HashMap<&str, &Entry>, name: &str) -> Option<NaiveDate> {
     fields.get(name)?.value.as_str()?.parse().ok()
+}
+
+/// A field whose values are a closed set of names, read through the type's
+/// own `Deserialize` and falling back to its `Default`.
+///
+/// Unlike the readers above this one *has* an opinion about failure, and it
+/// is the right one for a calendar: the entry may name a variant this build
+/// does not have, and a peer's word is not a reason to stop scheduling.
+fn enum_field<T: serde::de::DeserializeOwned + Default>(
+    fields: &HashMap<&str, &Entry>,
+    name: &str,
+) -> T {
+    fields
+        .get(name)
+        .and_then(|entry| serde_json::from_value(entry.value.clone()).ok())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1948,5 +2115,212 @@ mod tests {
         assert_eq!(titles(&store), ["persisted"]);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ---- the working calendar --------------------------------------
+
+    #[test]
+    fn a_fresh_store_counts_in_calendar_days() {
+        // The rule the whole feature is built around: an upgrade must not
+        // move a single bar, so a store nobody has configured has to read
+        // back exactly `Calendar::default()`.
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(store.snapshot().unwrap().calendar, Calendar::default());
+        assert_eq!(
+            store.snapshot().unwrap().calendar.mode,
+            CalendarMode::Days,
+            "workday counting is opt-in"
+        );
+    }
+
+    #[test]
+    fn the_calendar_round_trips_through_the_store() {
+        let mut store = Store::open_in_memory().unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        let saturday = NaiveDate::from_ymd_opt(2026, 5, 2).unwrap();
+
+        store.set_calendar_mode(CalendarMode::Workdays).unwrap();
+        store
+            .set_work_week([true, true, true, true, true, true, false])
+            .unwrap();
+        store.set_holiday_set(HolidaySet::Jp).unwrap();
+        store
+            .mark_day(day, Some(DayMark::Holiday("創立記念日".into())))
+            .unwrap();
+        store.mark_day(saturday, Some(DayMark::Working)).unwrap();
+
+        let cal = store.snapshot().unwrap().calendar;
+        assert_eq!(cal.mode, CalendarMode::Workdays);
+        assert_eq!(cal.week, [true, true, true, true, true, true, false]);
+        assert_eq!(cal.holidays, HolidaySet::Jp);
+        assert_eq!(
+            cal.marks.get(&day),
+            Some(&DayMark::Holiday("創立記念日".into()))
+        );
+        assert_eq!(cal.marks.get(&saturday), Some(&DayMark::Working));
+    }
+
+    #[test]
+    fn an_unnamed_holiday_is_still_a_holiday() {
+        // "A day off nobody named" has to be representable, or every
+        // one-off closure needs a label invented for it.
+        let mut store = Store::open_in_memory().unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        store
+            .mark_day(day, Some(DayMark::Holiday(String::new())))
+            .unwrap();
+        assert_eq!(
+            store.snapshot().unwrap().calendar.marks.get(&day),
+            Some(&DayMark::Holiday(String::new()))
+        );
+    }
+
+    #[test]
+    fn clearing_a_mark_writes_a_null_rather_than_dropping_the_row() {
+        let mut store = Store::open_in_memory().unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        store
+            .mark_day(day, Some(DayMark::Holiday("創立記念日".into())))
+            .unwrap();
+        store.mark_day(day, None).unwrap();
+
+        assert!(
+            !store.snapshot().unwrap().calendar.marks.contains_key(&day),
+            "the day is back to whatever the week mask and the jp table say"
+        );
+        // The row itself has to survive, or a peer still holding the
+        // holiday puts it back on the next sync — the same reason a
+        // delete is a tombstone rather than a missing task.
+        assert!(
+            store
+                .entries()
+                .unwrap()
+                .iter()
+                .any(|e| e.key == CAL_KEY && e.field == holiday_field("2026-05-01")),
+            "clearing must leave a value that can win a merge"
+        );
+    }
+
+    #[test]
+    fn a_broken_calendar_from_a_peer_degrades_to_the_default() {
+        // None of this is reachable through the write methods — it is what
+        // a newer version, a hand-edited row, or a corrupted transfer can
+        // put in front of `materialize`, which runs on every read. The
+        // holiday table is the interesting one: `"kr"` is a region this
+        // build does not carry, and reading it as "none" is the deliberate
+        // choice to keep scheduling over refusing to.
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .commit(vec![
+                (CAL_KEY.into(), FIELD_CAL_MODE.into(), json!("halfdays")),
+                (CAL_KEY.into(), FIELD_CAL_WEEK.into(), json!("111")),
+                (CAL_KEY.into(), FIELD_CAL_HOLIDAYS.into(), json!("kr")),
+                (CAL_KEY.into(), holiday_field("not-a-date"), json!(true)),
+                (CAL_KEY.into(), holiday_field("2026-05-01"), json!(42)),
+            ])
+            .unwrap();
+
+        let cal = store.snapshot().unwrap().calendar;
+        assert_eq!(
+            cal,
+            Calendar::default(),
+            "every field falls back on its own"
+        );
+        assert!(cal.marks.is_empty(), "an unreadable day is no day at all");
+    }
+
+    #[test]
+    fn a_week_of_the_wrong_shape_keeps_monday_to_friday() {
+        let mut store = Store::open_in_memory().unwrap();
+        let default_week = Calendar::default().week;
+        for broken in ["11111", "11111000", "1111x00", ""] {
+            store
+                .commit(vec![(CAL_KEY.into(), FIELD_CAL_WEEK.into(), json!(broken))])
+                .unwrap();
+            assert_eq!(
+                store.snapshot().unwrap().calendar.week,
+                default_week,
+                "{broken:?} is not seven days"
+            );
+        }
+    }
+
+    #[test]
+    fn the_calendar_crosses_a_sync() {
+        // The reason it lives in the CRDT log at all: each replica computes
+        // its own schedule, so a calendar that stayed local would give two
+        // peers two sets of dates for the same plan.
+        let mut a = Store::open_in_memory().unwrap();
+        let mut b = Store::open_in_memory().unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        a.set_calendar_mode(CalendarMode::Workdays).unwrap();
+        a.set_holiday_set(HolidaySet::Jp).unwrap();
+        a.mark_day(day, Some(DayMark::Holiday("創立記念日".into())))
+            .unwrap();
+
+        sync(&mut a, &mut b);
+
+        assert_eq!(
+            b.snapshot().unwrap().calendar,
+            a.snapshot().unwrap().calendar,
+            "both replicas must count the same days"
+        );
+    }
+
+    #[test]
+    fn concurrent_marks_on_different_days_both_stick() {
+        // One entry per day, exactly like `tag:` — which is what makes two
+        // people filling in the company holidays at once additive rather
+        // than a race.
+        let mut a = Store::open_in_memory().unwrap();
+        let mut b = Store::open_in_memory().unwrap();
+        sync(&mut a, &mut b);
+
+        let first = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        let second = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
+        a.mark_day(first, Some(DayMark::Holiday("創立記念日".into())))
+            .unwrap();
+        b.mark_day(second, Some(DayMark::Holiday("社内研修".into())))
+            .unwrap();
+
+        sync(&mut a, &mut b);
+
+        let cal = a.snapshot().unwrap().calendar;
+        assert_eq!(cal.marks.len(), 2, "a replaced map would lose one of them");
+        assert_eq!(cal, b.snapshot().unwrap().calendar);
+    }
+
+    #[test]
+    fn concurrent_marks_on_the_same_day_resolve_identically() {
+        let mut a = Store::open_in_memory().unwrap();
+        let mut b = Store::open_in_memory().unwrap();
+        sync(&mut a, &mut b);
+
+        // One day, two answers: unlike two different days this *has* to
+        // collapse to one, and both replicas have to pick the same one.
+        let day = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        a.mark_day(day, Some(DayMark::Holiday("創立記念日".into())))
+            .unwrap();
+        b.mark_day(day, Some(DayMark::Working)).unwrap();
+
+        sync(&mut a, &mut b);
+
+        let from_a = a.snapshot().unwrap().calendar.marks;
+        let from_b = b.snapshot().unwrap().calendar.marks;
+        assert_eq!(from_a, from_b, "the HLC breaks the tie the same way");
+        assert_eq!(from_a.len(), 1, "one day holds one mark");
+    }
+
+    #[test]
+    fn an_asof_view_reads_the_current_calendar() {
+        // Deliberate, and documented on `snapshot_at`: LWW keeps no history
+        // for the calendar any more than for a title, and fabricating one
+        // is the worse answer.
+        let mut store = Store::open_in_memory().unwrap();
+        store.create_task(new_task("shipped")).unwrap();
+        store.set_calendar_mode(CalendarMode::Workdays).unwrap();
+
+        let asof = store.snapshot_at(Local::now().date_naive()).unwrap();
+        assert_eq!(asof.calendar.mode, CalendarMode::Workdays);
     }
 }
