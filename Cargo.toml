@@ -67,7 +67,7 @@ reqwest             = { version = "0.13.4", default-features = false, features =
 # `claude mcp add` launches — and `schemars` derives each tool's input
 # schema from its request struct, so the schema cannot drift from the
 # arguments the tool actually reads.
-rmcp                = { version = "3.1.3", features = ["server", "macros", "transport-io", "schemars"] }
+rmcp                = { version = "3.1.4", features = ["server", "macros", "transport-io", "schemars"] }
 rusqlite            = { version = "0.40.2", features = ["bundled", "chrono"] }
 rust-embed          = "8.12.0"
 # Reads the machine's own CA roots, which yaiba-sync hands to iroh so a
