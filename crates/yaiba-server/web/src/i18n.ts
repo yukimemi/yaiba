@@ -236,6 +236,9 @@ const JA: Record<string, string> = {
   "a row cannot be dropped inside itself": "行を自分自身の中へは落とせません",
   "nothing above to nest under": "上に入れ子にできる行がありません",
   "already at the top level": "すでに最上位です",
+  // 一部だけ動いた選択は、全部動いた選択と見分けがつかないため必ず言う。
+  "shifted {n}": "{n} 件移動しました",
+  "{n} stayed": "{n} 件はそのままです",
   "already the first row": "すでに先頭の行です",
   "already the last row": "すでに末尾の行です",
   "this row is the focus — zF to come back, then move it":

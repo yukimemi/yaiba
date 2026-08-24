@@ -5,11 +5,13 @@ import {
   assigneeNames,
   calendarReport,
   moveLanding,
+  nestMoves,
   pinStartOps,
   resizeDuration,
   runCommand,
   type Columns,
   type DateField,
+  type NestRow,
   type UiPatch,
   type View,
   type Zoom,
@@ -1424,77 +1426,69 @@ export function App() {
   );
 
   /**
-   * Nest rows under the sibling above them — the outliner convention.
+   * `>>` / `<<` — shift the selection one level, keeping its shape.
    *
-   * The anchor is the nearest preceding row at the same level, which is
-   * what "the one above" means visually. A row with nothing above it at
-   * its level has nowhere to go, and says so rather than silently doing
-   * nothing.
+   * The decision itself is `nestMoves`, which is pure and checked by
+   * `check-nest.ts`; this is the part that needs the view: the rows as
+   * drawn (so an anchor is something on screen) and every task's parent
+   * (so a folded-away ancestor is still reachable).
+   *
+   * A selection can move in part — the first child of a parent selected
+   * with two of its later siblings shifts the two and leaves the one —
+   * and that is said out loud, the way `pasteCells` names the cells it
+   * missed. A shift that lands whole stays quiet: the indents are the
+   * message, and there is nothing to go looking for.
    */
-  const indent = useCallback(
-    (tasks: Task[]) => {
-      if (!tasks.length) return;
-      const ops: Op[] = [];
-      const undo: Op[] = [];
-      for (const task of tasks) {
-        const index = visible.findIndex((t) => t.id === task.id);
-        const level = bySchedule.get(task.id)?.level ?? 0;
-        let anchor: string | null = null;
-        for (let i = index - 1; i >= 0; i -= 1) {
-          const candidate = visible[i];
-          const candidateLevel = bySchedule.get(candidate.id)?.level ?? 0;
-          if (candidateLevel === level) {
-            anchor = candidate.id;
-            break;
-          }
-          // Reached a shallower row: this is the first child here.
-          if (candidateLevel < level) break;
-        }
-        if (!anchor) continue;
-        ops.push({ kind: "patch", id: task.id, patch: { parent: anchor } });
-        undo.push({
-          kind: "patch",
-          id: task.id,
-          patch: { parent: task.parent },
-        });
-      }
-      if (!ops.length) {
-        say(t("nothing above to nest under"), "error");
-        return;
-      }
-      void run(ops, undo, "indent");
-    },
-    [visible, bySchedule, run],
-  );
-
-  /** Move rows up one level, to their grandparent. */
-  const outdent = useCallback(
-    (tasks: Task[]) => {
+  const nest = useCallback(
+    (direction: "in" | "out", tasks: Task[]) => {
       if (!data || !tasks.length) return;
-      const byId = new Map(data.tasks.map((t) => [t.id, t]));
-      const ops: Op[] = [];
-      const undo: Op[] = [];
-      for (const task of tasks) {
-        if (!task.parent) continue;
-        const grandparent = byId.get(task.parent)?.parent ?? null;
-        ops.push({
-          kind: "patch",
-          id: task.id,
-          patch: { parent: grandparent },
-        });
-        undo.push({
-          kind: "patch",
-          id: task.id,
-          patch: { parent: task.parent },
-        });
-      }
-      if (!ops.length) {
-        say(t("already at the top level"), "error");
+      const rows: NestRow[] = visible.map((row) => ({
+        id: row.id,
+        parent: row.parent,
+        level: bySchedule.get(row.id)?.level ?? 0,
+      }));
+      const parents = new Map(data.tasks.map((row) => [row.id, row.parent]));
+      const { moves, stayed } = nestMoves(
+        direction,
+        rows,
+        tasks.map((task) => task.id),
+        parents,
+      );
+      if (!moves.length) {
+        say(
+          direction === "in"
+            ? t("nothing above to nest under")
+            : t("already at the top level"),
+          "error",
+        );
         return;
       }
-      void run(ops, undo, "outdent");
+      const ops: Op[] = moves.map((move) => ({
+        kind: "patch",
+        id: move.id,
+        patch: { parent: move.to },
+      }));
+      const undo: Op[] = moves.map((move) => ({
+        kind: "patch",
+        id: move.id,
+        patch: { parent: move.from },
+      }));
+      void run(ops, undo, direction === "in" ? "indent" : "outdent").then(
+        // After the write, not before it: `run` reports its own failure
+        // and a message said first would be the one overwritten.
+        (next) => {
+          if (!next || !stayed) return;
+          say(
+            `${t("shifted {n}", { n: moves.length })} · ${t("{n} stayed", { n: stayed })}`,
+            // Rows did move, so not an error — but not a plain `ok`
+            // either, because the ones that did not are exactly the rows
+            // nobody thinks to check.
+            "info",
+          );
+        },
+      );
     },
-    [data, run],
+    [data, visible, bySchedule, run],
   );
 
   /**
@@ -3507,10 +3501,10 @@ export function App() {
 
       // ---- the breakdown itself
       case ">>":
-        indent(selection);
+        nest("in", selection);
         break;
       case "<<":
-        outdent(selection);
+        nest("out", selection);
         break;
 
       case "gd":

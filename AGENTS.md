@@ -1618,6 +1618,52 @@ command, and the row menu is that something. Consequences worth knowing:
   invariant, and is what a new overlay should copy. Test it by tabbing
   past the last control, not by tabbing once.
 
+### `>>` shifts a block one level, not one level each
+
+`nestMoves` (web `commands.ts`) is the whole decision and
+`check-nest.ts` holds it to it. The rule is that a selection keeps its
+shape: every row moves by one level and the block comes out the block it
+was.
+
+The bug it was extracted for is what a per-row answer looks like. The
+loop asked "which is the nearest preceding row at my level" of the
+**pre-edit** tree, once per selected row — and for the second selected
+sibling that row is the first selected sibling. Three siblings therefore
+came out as a staircase, `B` under `A`, `C` under `B`, `D` under `C`,
+one level deeper per row. Every individual answer was right; the block
+was destroyed. Same shape as the drop line reading its side out of
+`dropOrder` rather than inferring it: the honest question is about the
+gesture, not about each row in turn.
+
+Two exclusions are what make it uniform, and both name a row that is
+**already travelling**:
+
+- **A selected row inside another selected row is skipped.** It moves
+  with its ancestor, so re-parenting it too would take it down twice on
+  `>>` — and on `<<` would leave it behind as its parent's new sibling,
+  which is the same block taken apart from the other side.
+- **A selected sibling is not an anchor.** It is going wherever we are
+  going, so the anchor has to be a row that stays put. Where there is
+  none — the block already starts at the top of its own level — *every*
+  row refuses. The first version had the first row refuse and the rest
+  pile into it, which is the staircase again, one row shorter.
+
+`rows` is the list as drawn, so an anchor is always something on screen;
+`parents` covers every task, because an ancestor or a grandparent may be
+folded away while the row acting on it is not. And the walks are bounded
+against a parent loop, which two peers can close concurrently — same
+bargain the renderer makes.
+
+**A selection can move in part, and then it is said out loud.** The
+first child of a parent selected with two of its later siblings shifts
+the two and leaves the one — one refusal inside a gesture that otherwise
+worked, which is the silent half-landing `pasteCells` exists not to be.
+So `nestMoves` returns the count of rows that stayed rather than leaving
+`App` to derive it from `moves.length`: a **carried** descendant is
+neither a move nor a row that stayed, so that subtraction is wrong by
+exactly the rows the exclusions above are about. A shift that lands
+whole stays quiet — the indents are the message.
+
 ### The row menu is bounded by a rule, not by taste
 
 `rowMenu.ts` holds the table and the argument; `check-rowmenu.ts` holds
