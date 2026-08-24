@@ -405,6 +405,137 @@ function refuseSummary(data: AppData, task: Task, field: string): string | null 
   return t("“{title}” is a summary — its {field} comes from its children", { title: task.title, field });
 }
 
+// ---- nesting ------------------------------------------------------
+
+/** A row as the nesting decision sees it: where it sits, and how deep. */
+export interface NestRow {
+  id: string;
+  parent: string | null;
+  /** Depth in the breakdown, as the scheduler computed it. */
+  level: number;
+}
+
+/** One re-parenting that `>>` / `<<` asks for. */
+export interface NestMove {
+  id: string;
+  /** Where it sits now, which is what an undo puts back. */
+  from: string | null;
+  to: string | null;
+}
+
+/** What one `>>` / `<<` comes to. */
+export interface NestShift {
+  moves: NestMove[];
+  /**
+   * Selected rows that could not move at all — the block reached the top
+   * of its own level, or the top of the plan.
+   *
+   * Counted rather than derived from `moves.length`, because a carried
+   * descendant is neither: it moves, without a move of its own. A mixed
+   * selection is the case this exists for — the first child of a parent
+   * selected together with two of its later siblings shifts the two and
+   * leaves the one, and a status line that said nothing would be the
+   * silent half-landing `pasteCells` refuses to be.
+   */
+  stayed: number;
+}
+
+/**
+ * Where `>>` / `<<` move a selection.
+ *
+ * **A block shifts one level, keeping its shape.** That is the whole
+ * rule, and it is the one the first implementation broke: it walked the
+ * selection row by row, anchoring each on "the nearest preceding row at
+ * my level" against the *pre-edit* tree — so three selected siblings
+ * anchored on each other and came out as a staircase, A under the row
+ * above, B under A, C under B, one level deeper per row. Each answer was
+ * individually correct and the block was destroyed.
+ *
+ * Two exclusions are what make it uniform, and both are about rows that
+ * are already travelling:
+ *
+ *   - **A selected row inside another selected row is skipped.** It
+ *     moves with its ancestor, so re-parenting it as well would deepen
+ *     it a second time — and on `<<` it would be left behind as its
+ *     parent's sibling, which is the same block taken apart from the
+ *     other side.
+ *   - **A selected sibling is not an anchor.** It is going wherever we
+ *     are going, so the anchor has to be a row that stays put. When
+ *     there is none — the block already starts at the top of its own
+ *     level — every row refuses, rather than the first refusing and the
+ *     rest piling into it.
+ *
+ * Pure, and here rather than in `App`, for the reason `foldStep` gives:
+ * a nesting rule checked only by a real keyboard is a rule nothing
+ * checks. `check-nest.ts` runs it.
+ *
+ * `rows` is the list as drawn, so an anchor is always something the user
+ * can see. `parents` covers *every* task, because an ancestor or a
+ * grandparent may be folded away while the row acting on it is not.
+ */
+export function nestMoves(
+  direction: "in" | "out",
+  rows: NestRow[],
+  selection: string[],
+  parents: Map<string, string | null>,
+): NestShift {
+  const picked = new Set(selection);
+
+  /** Does an ancestor of this row carry it? Then it needs no move. */
+  const carried = (row: NestRow): boolean => {
+    // `seen` bounds a parent loop, which two peers can create
+    // concurrently — the renderer degrades rather than throwing, and so
+    // does this.
+    const seen = new Set<string>([row.id]);
+    let at = row.parent;
+    while (at && !seen.has(at)) {
+      if (picked.has(at)) return true;
+      seen.add(at);
+      at = parents.get(at) ?? null;
+    }
+    return false;
+  };
+
+  const moves: NestMove[] = [];
+  let stayed = 0;
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (!picked.has(row.id) || carried(row)) continue;
+
+    if (direction === "out") {
+      const to = row.parent ? parents.get(row.parent) ?? null : null;
+      // Already a project, or a parent loop — two peers can close one
+      // concurrently — that would otherwise ask the server to make this
+      // row its own parent.
+      if (!row.parent || to === row.id) {
+        stayed += 1;
+        continue;
+      }
+      moves.push({ id: row.id, from: row.parent, to });
+      continue;
+    }
+
+    let anchor: string | null = null;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const candidate = rows[j];
+      // Deeper rows are somebody else's children; step over them.
+      if (candidate.level > row.level) continue;
+      // A shallower row is the parent: this is the first child here, so
+      // there is nothing at this level to nest under.
+      if (candidate.level < row.level) break;
+      if (picked.has(candidate.id)) continue;
+      anchor = candidate.id;
+      break;
+    }
+    if (!anchor) {
+      stayed += 1;
+      continue;
+    }
+    moves.push({ id: row.id, from: row.parent, to: anchor });
+  }
+  return { moves, stayed };
+}
+
 /**
  * The earliest date a start pin for `to` can actually hold: the latest
  * finish among its predecessors, or null when nothing constrains it.
