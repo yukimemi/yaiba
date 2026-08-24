@@ -100,6 +100,12 @@ import {
 } from "./uiState";
 import { applyOps, inversePatch, type Op, type Step } from "./ops";
 import type { AppData, Dep, Status, Task, TaskPatch } from "./types";
+import {
+  copiedDeps,
+  EMPTY_ROWS,
+  rowBlock,
+  type RowBlock,
+} from "./rows";
 
 /** How often to pick up edits merged in from peers. */
 const REFRESH_MS = 3000;
@@ -506,7 +512,14 @@ export function App() {
   const syncingScroll = useRef(false);
   const undoStack = useRef<Step[]>([]);
   const redoStack = useRef<Step[]>([]);
-  const register = useRef<Task[]>([]);
+  /**
+   * The row register: what `yy` / `Y` / `dd` filled, edges included.
+   *
+   * A block, not a list of rows — see `rows.ts` for why a yank is
+   * closed under descendants and why the edges inside it travel with
+   * it.
+   */
+  const register = useRef<RowBlock>(EMPTY_ROWS);
   /**
    * The other register: a rectangle of cell values.
    *
@@ -1705,22 +1718,45 @@ export function App() {
     [data, visible, sort, filter, focus, run],
   );
 
+  /**
+   * Delete what the selection names — `dd`, `d` in visual, `:delete`,
+   * and the row menu.
+   *
+   * A closed summary is deleted with its subtree, an open one is
+   * deleted alone: `rows.ts` carries the argument, and the half that
+   * matters here is that a closed one's children would otherwise be
+   * filtered off the list entirely — `collapsed` still holds the dead
+   * id — where an open one's are simply drawn at the root.
+   */
   const deleteSelection = useCallback(
     (tasks: Task[]) => {
       // Asked here as well as inside `run`, because the wait below means
       // a refusal would otherwise arrive after the rows had visibly been
       // struck — the report has to come before the stroke, not after it.
       if (!tasks.length || !data || !liveOnly()) return;
-      const at = visible.findIndex((t) => t.id === cursorRef.current);
+      const block = rowBlock(data.tasks, data.deps, tasks, collapsed);
+      register.current = block;
+      const gone = new Set(block.tasks.map((t) => t.id));
+      // The first row the delete does not take, at or below the cursor —
+      // counting rows off the screen would overshoot, since a folded
+      // subtree is in the block and not in `visible`.
+      const at = Math.max(
+        visible.findIndex((t) => t.id === cursorRef.current),
+        0,
+      );
+      const kept = visible.filter((t) => !gone.has(t.id));
       const below =
-        visible[
-          Math.min((at >= 0 ? at : 0) + tasks.length, visible.length - 1)
-        ];
-      register.current = tasks;
+        visible.slice(at).find((t) => !gone.has(t.id)) ?? kept[kept.length - 1];
       // Both lists are built now, against the `data` the rows were
       // chosen from, because the run below happens after a wait.
-      const ops: Op[] = tasks.map((t) => ({ kind: "delete", id: t.id }));
-      const undoOps: Op[] = tasks.map((t) => ({
+      const ops: Op[] = block.tasks.map((t) => ({
+        kind: "delete",
+        id: t.id,
+      }));
+      // Every edge each row was on, not just the ones inside the block:
+      // an edge to a row that stayed behind is as much a part of putting
+      // this one back.
+      const undoOps: Op[] = block.tasks.map((t) => ({
         kind: "restore",
         task: t,
         deps: data.deps.filter((d) => d.from === t.id || d.to === t.id),
@@ -1741,11 +1777,11 @@ export function App() {
        * inside the reaction time it would take to notice and act.
        */
       flash(
-        tasks.map((t) => t.id),
+        block.tasks.map((t) => t.id),
         "slain",
       );
       window.setTimeout(
-        () => void run(ops, undoOps, `delete ${tasks.length}`),
+        () => void run(ops, undoOps, `delete ${block.tasks.length}`),
         SLAIN_MS,
       );
       // The whole of visual, not half of it. This stood the mode and the
@@ -1758,33 +1794,47 @@ export function App() {
       putAnchor(null);
       putAnchorCell(null);
       putVisualLine(false);
-      if (below && !tasks.some((t) => t.id === below.id)) putCursor(below.id);
+      if (below) putCursor(below.id);
     },
-    [data, visible, run, putAnchorCell, putVisualLine, liveOnly, flash],
+    [
+      collapsed,
+      data,
+      visible,
+      run,
+      putAnchorCell,
+      putVisualLine,
+      liveOnly,
+      flash,
+    ],
   );
 
   /**
    * Paste the register next to `at`, with its root rows at `parent`'s
    * level.
    *
-   * The register is a block in the order it was drawn, so the copies
-   * keep the shape it had: a row whose parent came along in the same
-   * yank is re-parented onto that parent's *copy*, and only the rows
-   * whose parent stayed behind land at the paste level. Flattening the
-   * block instead threw away the breakdown that made it worth yanking.
+   * The register is a block in tree order, so the copies keep the shape
+   * it had: a row whose parent came along in the same yank is
+   * re-parented onto that parent's *copy*, and only the rows whose
+   * parent stayed behind land at the paste level. Flattening the block
+   * instead threw away the breakdown that made it worth yanking.
+   *
+   * The edges inside the block are re-drawn between the copies once
+   * every row exists — a copied phase that lost its own ordering is a
+   * list of tasks, not a plan. `rows.ts` decides which edges those are;
+   * nothing here does.
    */
   const paste = useCallback(
     async (at: string | null, place: Place, parent: string | null) => {
       if (!liveOnly()) return;
       const block = register.current;
-      if (!block.length) {
+      if (!block.tasks.length) {
         say(t("nothing yanked"), "error");
         return;
       }
       // Kept across the loop because `createTask` diffs against a
       // render-old `data` — see its `known` parameter.
       const seen = new Set((data?.tasks ?? []).map((t) => t.id));
-      const yanked = new Set(block.map((t) => t.id));
+      const yanked = new Set(block.tasks.map((t) => t.id));
       /** Yanked id → the copy of it, for re-parenting the rows below. */
       const copies = new Map<string, string>();
       // One gesture is one undo: `createTask` files a step per row, and
@@ -1796,7 +1846,7 @@ export function App() {
       // it, so a `P` of three keeps the register's own order.
       let side = place;
       let first: string | null = null;
-      for (const task of block) {
+      for (const task of block.tasks) {
         const under =
           task.parent && yanked.has(task.parent)
             ? (copies.get(task.parent) ?? parent)
@@ -1827,13 +1877,26 @@ export function App() {
           .catch(() => undefined);
       }
 
+      // After the loop, not inside it: an edge's `to` is routinely a row
+      // further down the block, which does not exist yet while its `from`
+      // is being created. Filed through `run` like any other edge, so a
+      // refusal reports itself and the undo is the removal.
+      const edges = copiedDeps(block, copies);
+      if (edges.length) {
+        await run(
+          edges.map((dep): Op => ({ kind: "addDep", dep })),
+          edges.map((dep): Op => ({ kind: "removeDep", dep })),
+          `link ${edges.length}`,
+        );
+      }
+
       const filed = undoStack.current.splice(filedBefore);
       if (filed.length > 1) {
         undoStack.current.push({
           redo: filed.flatMap((step) => step.redo),
           // Newest first, so a parent's copy outlives its children's.
           undo: filed.flatMap((step) => step.undo).reverse(),
-          label: `paste ${filed.length}`,
+          label: `paste ${copies.size}`,
         });
       } else if (filed.length) {
         undoStack.current.push(filed[0]);
@@ -1842,9 +1905,11 @@ export function App() {
       // The head of what was pasted, the way a linewise `p` in vim
       // leaves the cursor on the first line it put down.
       if (first) putCursor(first);
-      say(t("pasted {n}", { n: filed.length }), "ok");
+      // The rows, not `filed.length`: the edges are one more step on the
+      // stack and `p` put down rows.
+      say(t("pasted {n}", { n: copies.size }), "ok");
     },
-    [createTask, data, liveOnly],
+    [createTask, data, liveOnly, run],
   );
 
   /**
@@ -3024,11 +3089,20 @@ export function App() {
       enterMode("insert");
     };
 
-    /** Fill the row register — `yy` / `Y`, and `y` under linewise `V`. */
+    /**
+     * Fill the row register — `yy` / `Y`, and `y` under linewise `V`.
+     *
+     * `collapsed` decides the unit: a closed summary yanks its whole
+     * subtree, an open one yanks the row. See `rows.ts`. The count
+     * reported is the block's, which is the only report a grown
+     * selection needs.
+     */
     const yankRows = (rows: Task[]): void => {
-      register.current = rows;
+      if (!data) return;
+      const block = rowBlock(data.tasks, data.deps, rows, collapsed);
+      register.current = block;
       lastYank.current = "rows";
-      say(t("yanked {n}", { n: rows.length }), "ok");
+      say(t("yanked {n}", { n: block.tasks.length }), "ok");
       leaveVisual();
     };
 

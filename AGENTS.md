@@ -1059,6 +1059,60 @@ combination cannot be expressed.
   insert first (`x` on a title) has to call it *before* the edit or it
   does nothing at all.
 
+### A closed fold is one row to an operator
+
+`rows.ts` is the row register's `cells.ts`: the block `yy` / `Y` / `dd`
+fill, and what a put rebuilds from it. `check-rows.ts` holds it to that.
+
+- **The fold state decides the unit, and nothing else does.** `yy` /
+  `dd` on a *closed* summary take the subtree under it; on an open one
+  they take the row. Vim's `foldenable` rule, and the argument for
+  keeping it rather than making containment the unit is that the fold
+  state is exactly what separates the two cases. Open, the children are
+  on screen: acting on them would be acting on rows the gesture did not
+  point at, and a `dd` there leaves orphans *drawn at the root*, which
+  is what deleting a heading does anywhere else and is one `u` away.
+  Closed, they are not on screen: a summary alone copies to a task with
+  no dates at all (its dates are the union of its children's, its
+  progress their roll-up), and a summary alone deleted leaves children
+  whose parent is gone while `collapsed` still holds the dead id — so
+  `ancestorsOf` filters every one of them off the list. Present in the
+  plan, reachable only by `zR`; from the outside that read as "deleting
+  a folded phase eats the tasks".
+- **Closed means `collapsed`.** A filter hides rows without claiming
+  they are folded, so it never makes a summary a group — a block that
+  grew because of a query typed earlier would be `yy` meaning two
+  things. But once a fold *is* closed the subtree comes from the plan,
+  so it is whole regardless of what else the view hides. A fold nested
+  inside a closed fold adds nothing; a closed child under an open
+  parent is not reached at all, because nothing selected it.
+- **Which fields a copy carries is `paste`'s single patch, and it is
+  deliberately not all of them.** `notes`, `assignee`, `priority`,
+  `start`, `duration_days`, `due` and `tags` land on every row of the
+  block; `status`, `progress` and the two actuals do not, because a
+  duplicate is work that has not happened. A copy of a finished phase
+  that arrived already done would be a plan nobody could work from.
+- **The cursor lands on the first row the delete did *not* take.**
+  Counting `selection.length` rows down the screen overshoots, since a
+  folded subtree is in the block and not in `visible`.
+- **Edges inside the block travel with it; edges leaving it do not.**
+  The rule the nesting already followed, asked of two endpoints instead
+  of one. `copiedDeps` re-points both ends at the copies and carries
+  `lag_days` with them, because an edge that quietly became the default
+  spacing would move the copy's dates — the one thing a duplicate must
+  not do.
+- **The edges are drawn after the loop, and through `run`.** A `to` is
+  routinely a row further down the block, which does not exist while its
+  `from` is being created. Filed as one more step and then merged into
+  the paste's, so one `u` takes back the rows and the edges together.
+- **The block is a snapshot.** Every field a put writes comes from the
+  register rather than the live task, so the edges do too: a dep drawn
+  after the yank is no more in the copy than a title typed after it.
+- **What is still open:** a `collapsed` holding an id no task has is
+  only reachable by a peer's delete now, not by yours. The fix belongs
+  wherever `collapsed` is reconciled with the tasks that exist, not
+  here.
+
 ### A project is a database file
 
 `projects.rs` is an *index*, not a scope. Nothing in `yaiba-core` or
