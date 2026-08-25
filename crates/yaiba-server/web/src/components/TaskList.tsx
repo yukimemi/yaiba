@@ -99,6 +99,23 @@ interface Props {
 const BOX = { todo: "[ ]", doing: "[~]", done: "[x]" } as const;
 const PRIO = ["", "C", "B", "A"];
 
+/**
+ * How long a finger has to rest on a row before it opens the row menu.
+ *
+ * 500ms is what iOS and Android both use for their own long press, so
+ * the gesture arrives already learned. Shorter and a slow tap opens a
+ * menu nobody asked for; longer and the row feels unresponsive.
+ */
+const LONG_PRESS_MS = 500;
+/**
+ * How far the finger may drift and still count as resting.
+ *
+ * A finger on glass never holds still. 10px absorbs that without
+ * swallowing the first frames of a scroll, which is the gesture the
+ * list must lose the press to.
+ */
+const PRESS_SLOP_PX = 10;
+
 export function TaskList({
   tasks,
   bySchedule,
@@ -145,10 +162,13 @@ export function TaskList({
    * The drag in progress: what is being moved, and what it is over.
    *
    * Kept here rather than in `App` for the same reason `Gantt` keeps its
-   * own — it is the gesture, not the plan, and it dies with the mouse
-   * button. The dragged id has to be remembered at `dragstart` because
-   * `dataTransfer.getData` is deliberately empty until `drop`: a page
-   * may not read what is being dragged over it until it is released.
+   * own — it is the gesture, not the plan, and it dies with the pointer.
+   *
+   * Pointer events, not HTML5 drag-and-drop. `draggable` /
+   * `dataTransfer` used to carry this, and on a phone the reorder simply
+   * did not exist: touch never fires `dragstart` at all, so there was
+   * nothing to pick a row up with. The gesture is now the same one
+   * `Gantt` uses for its bars, started from `.row__grip`.
    */
   const [drag, setDrag] = useState<{
     id: string;
@@ -166,6 +186,128 @@ export function TaskList({
      */
     over: { id: string; lead: number } | null;
   } | null>(null);
+  // The window listeners are installed once per drag and close over the
+  // props as they were at `pointerdown`; a poll landing mid-drag
+  // replaces `onDropRow` without replacing them, so the commit goes
+  // through a ref and lands on the current handler.
+  const dragRef = useRef<typeof drag>(null);
+  dragRef.current = drag;
+  const dropRef = useRef(onDropRow);
+  dropRef.current = onDropRow;
+
+  /**
+   * The pending press on a row: a long press waiting to open the menu, or
+   * a mouse drag waiting to start.
+   *
+   * 500ms is the platform's own long-press dwell (iOS and Android both
+   * sit around it), so the gesture feels native rather than like a
+   * second convention; 10px of slop is the smallest movement that still
+   * lets a finger rest on glass without cancelling, while anything
+   * larger would swallow the start of a scroll. The same 10px is what a
+   * mouse has to travel before a click becomes a drag.
+   *
+   * `openedAt` exists because iOS Safari *also* synthesises
+   * `contextmenu` for a long press on some elements. Without it the
+   * menu opened, closed and reopened at the synthetic event's
+   * coordinates. One second covers the synthetic event, which arrives
+   * within a frame or two of the release, without ever reaching a
+   * deliberate second gesture.
+   *
+   * `drag` marks the mouse case. `timer` is 0 there — there is nothing
+   * to wait for, and `clearTimeout(0)` is a no-op, so `cancelPress`
+   * stays one path for both.
+   *
+   * `id` is the row the press started on, and it is here rather than
+   * read from the handler's closure because the handlers are per-row
+   * while the gesture is not: nothing captures the pointer until a drag
+   * begins, so a press on a 26px row that moves the 10px of slop is
+   * already over the *next* row, and `onPointerMove` fires on that one.
+   * Taking the id from there started the drag on the wrong task —
+   * dragging `alpha` down swapped `bravo` and `charlie`, which is what
+   * driving it with a real mouse showed.
+   */
+  const pressRef = useRef<{
+    id: string;
+    timer: number;
+    x: number;
+    y: number;
+    drag?: true;
+  } | null>(null);
+  const openedAtRef = useRef(0);
+  const cancelPress = () => {
+    if (!pressRef.current) return;
+    window.clearTimeout(pressRef.current.timer);
+    pressRef.current = null;
+  };
+  // A row unmounting mid-press — a filter change, a poll — must not
+  // leave a timer that opens a menu for a task that is no longer there.
+  useEffect(() => cancelPress, []);
+
+  useEffect(() => {
+    if (!drag) return;
+
+    /**
+     * The row under the pointer, hit-tested rather than read off the
+     * event.
+     *
+     * Touch and pen implicitly capture the pointer on whatever received
+     * `pointerdown`, so `e.target` for the whole drag — release
+     * included — is the grip that started it. The preview and the
+     * commit both call this, which is what keeps the drawn line and the
+     * reorder from ever disagreeing.
+     */
+    const rowAt = (e: PointerEvent) => {
+      const row = document
+        .elementFromPoint(e.clientX, e.clientY)
+        ?.closest(".row[data-row-id]") as HTMLElement | null;
+      const id = row?.getAttribute("data-row-id");
+      if (!row || !id) return null;
+      const lead =
+        (row.querySelector(".row__lead") as HTMLElement | null)?.offsetLeft ?? 0;
+      return { id, lead };
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const current = dragRef.current;
+      if (!current) return;
+      const hit = rowAt(e);
+      const over = hit && hit.id !== current.id ? hit : null;
+      // `pointermove` fires continuously; only a change of row is news,
+      // and answering it costs a measurement here and a walk of the
+      // whole task list in `planDrop`.
+      if (over?.id === current.over?.id) return;
+      setDrag({ ...current, over });
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const current = dragRef.current;
+      setDrag(null);
+      if (!current) return;
+      const hit = rowAt(e);
+      // A drop that achieves nothing is still handed over: `App` is the
+      // one that can say why, and silence would read as a lost gesture.
+      if (hit && hit.id !== current.id) dropRef.current(current.id, hit.id);
+    };
+
+    // A phone promotes a stalled drag to a system scroll and fires this
+    // instead of `pointerup`. Without it the row stays lifted and the
+    // drop line stays drawn over a list nothing is dragging any more.
+    const onCancel = () => setDrag(null);
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+    };
+    // Deliberately keyed on the identity of the drag alone: re-running
+    // this on every `over` change would tear the listeners down and
+    // rebuild them on each row the pointer crosses.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag?.id]);
+
   const landing = drag?.over ? planDrop(drag.id, drag.over.id) : null;
 
   // Whether the visual rectangle is the whole row. Computed once rather
@@ -378,6 +520,13 @@ export function TaskList({
                 {index === draftIndex && draftRow}
                 <div
                   className={classes}
+                  // What the pointer drag hit-tests against. Its own
+                  // attribute rather than the `data-task-id` the gantt
+                  // rows carry, because that one is what `Gantt`'s link
+                  // drag looks for: sharing it would silently make a
+                  // release over the list create a dependency, with
+                  // nothing in the list drawn to say so.
+                  data-row-id={task.id}
                   ref={isCursor ? cursorRef : undefined}
                   // The row is the click target for "put the cursor
                   // here"; the controls inside it stop propagation so a
@@ -392,70 +541,112 @@ export function TaskList({
                   onContextMenu={(e) => {
                     if (e.shiftKey) return;
                     e.preventDefault();
+                    // Swallow the long press's own synthetic
+                    // `contextmenu`, or the menu opens twice — the
+                    // second time at coordinates the finger has already
+                    // left.
+                    if (Date.now() - openedAtRef.current < 1000) return;
                     onRowMenu(task.id, e.clientX, e.clientY);
                   }}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", task.id);
-                    e.dataTransfer.effectAllowed = "move";
-                    setDrag({ id: task.id, over: null });
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    // `dragover` fires continuously; only a change of
-                    // row is news, and answering it costs a measurement
-                    // here and a walk of the task list in `planDrop`.
-                    const lead = (
-                      e.currentTarget.querySelector(
-                        ".row__lead",
-                      ) as HTMLElement | null
-                    )?.offsetLeft;
-                    setDrag((d) =>
-                      !d || d.over?.id === task.id
-                        ? d
-                        : { ...d, over: { id: task.id, lead: lead ?? 0 } },
-                    );
-                  }}
-                  // Leaving the last row for the empty space below it
-                  // must take the line with it, or the list keeps
-                  // promising a drop the pointer has walked away from.
+                  // A press on the row means two different things to the
+                  // two pointers, and both were already true before the
+                  // grip existed.
                   //
-                  // Guarded on `relatedTarget`, because `dragleave` does
-                  // not only fire when the pointer leaves the row — it
-                  // fires crossing *into* the row's own children, and a
-                  // row is eight boxes wide. Unguarded, walking a drag
-                  // across one row clears `over` at every internal
-                  // boundary and the `dragover` bubbling up from the
-                  // child immediately puts it back: two renders and a
-                  // whole-tree `planDrop` per crossing, which is the
-                  // exact recompute the handler above is written to
-                  // avoid, and a line that can flicker while doing it.
-                  // `.row__drop` already takes `pointer-events: none`
-                  // for the same reason; this is that reason applied to
-                  // the seven boxes it does not cover. Same shape as the
-                  // guard `RowMenu` puts on its `onBlur`.
-                  onDragLeave={(e) => {
-                    if (e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  // **Mouse**: press and move reorders the row, which is
+                  // what `draggable` did here. The grip cannot be the
+                  // only way in — it is hidden wherever there is a hover
+                  // to reveal things with, so keying the drag to it alone
+                  // took the gesture away from every desktop user, and
+                  // left `DIRECT_GESTURES` advertising a "drag a row"
+                  // that no longer existed. Armed, not started: the drag
+                  // begins at the first move past the slop, so a plain
+                  // click is still a click.
+                  //
+                  // **Touch / pen**: a held finger opens the row menu,
+                  // because there is no second button to open it with. It
+                  // must not also start a drag — a press that moves is
+                  // the list scrolling, which is why the grip exists.
+                  onPointerDown={(e) => {
+                    cancelPress();
+                    const { clientX: x, clientY: y } = e;
+                    // `button === 0` matters: the right button also
+                    // sends `pointerdown`, and arming on it made a
+                    // right-press-and-move reorder the row behind the
+                    // context menu it was opening.
+                    if (e.pointerType === "mouse") {
+                      if (e.button !== 0) return;
+                      pressRef.current = {
+                        id: task.id,
+                        x,
+                        y,
+                        timer: 0,
+                        drag: true,
+                      };
                       return;
                     }
-                    setDrag((d) =>
-                      d?.over?.id === task.id ? { ...d, over: null } : d,
-                    );
+                    pressRef.current = {
+                      id: task.id,
+                      x,
+                      y,
+                      timer: window.setTimeout(() => {
+                        pressRef.current = null;
+                        openedAtRef.current = Date.now();
+                        onRowMenu(task.id, x, y);
+                      }, LONG_PRESS_MS),
+                    };
                   }}
-                  // Fires on the row that was picked up, however the
-                  // drag ended — including `esc` and a release over
-                  // another window, neither of which sends a `drop`.
-                  onDragEnd={() => setDrag(null)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDrag(null);
-                    const dragged = e.dataTransfer.getData("text/plain");
-                    if (dragged && dragged !== task.id) {
-                      onDropRow(dragged, task.id);
+                  onPointerMove={(e) => {
+                    const press = pressRef.current;
+                    if (!press) return;
+                    const moved =
+                      Math.abs(e.clientX - press.x) > PRESS_SLOP_PX ||
+                      Math.abs(e.clientY - press.y) > PRESS_SLOP_PX;
+                    if (!moved) return;
+                    // Past the slop the finger is scrolling, not resting:
+                    // the list must keep the gesture. A mouse past the
+                    // same distance is a drag, and this is where it
+                    // starts.
+                    cancelPress();
+                    if (press.drag) {
+                      // `press.id`, never `task.id`: this handler belongs
+                      // to whichever row the pointer has reached, which
+                      // by 10px of slop is often not the one pressed.
+                      onPick(press.id);
+                      setDrag({ id: press.id, over: null });
                     }
                   }}
+                  // A release before the timer is a tap, and a tap has
+                  // already moved the cursor through `onMouseDown`.
+                  onPointerUp={cancelPress}
+                  onPointerCancel={cancelPress}
                 >
+                  {/* The touch route into a drag: on glass a press that
+                      moves is a scroll, so the gesture needs somewhere
+                      that means "not this time". A mouse needs no such
+                      thing and does not get one — the grip is hidden
+                      wherever there is a hover, and the row itself is
+                      the drag source there. Out of the accessibility
+                      tree because it is a pointer affordance for what
+                      `<`, `>` and the row menu already do. */}
+                  <span
+                    className="row__grip"
+                    data-grip
+                    aria-hidden="true"
+                    onPointerDown={(e) => {
+                      // The row below would otherwise arm a long press
+                      // and open the menu mid-drag.
+                      e.stopPropagation();
+                      // Suppresses the compatibility `mousedown`, so the
+                      // cursor move the row would do is made here
+                      // instead — picking a row up has always put the
+                      // cursor on it.
+                      e.preventDefault();
+                      onPick(task.id);
+                      setDrag({ id: task.id, over: null });
+                    }}
+                  >
+                    ⠿
+                  </span>
                   {/* The line the drop would land on. A child rather
                       than a pseudo-element because both of this row's
                       are spoken for — `row--cursor::before` is the

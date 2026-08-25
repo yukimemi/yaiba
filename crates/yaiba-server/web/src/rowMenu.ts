@@ -70,6 +70,18 @@ export interface MenuItem {
   actions: [MenuAction] | [MenuAction, MenuAction];
   /** Items are drawn in groups, separated by a rule. */
   group: "state" | "shape" | "edit";
+  /**
+   * The item acts on the app, not on the row it was opened over.
+   *
+   * Only `undo` so far, and it is on the menu for the reason its own
+   * comment gives. The flag exists because the touch bar carries the
+   * global keys, and `check-mobile.ts` refuses any overlap between the
+   * two surfaces *except* here: a second route to a row action means two
+   * places to keep in step, while a second route to undo is just undo
+   * being reachable from a phone with no row to long-press — which is
+   * exactly the case an empty plan is in.
+   */
+  global?: true;
 }
 
 export const ROW_MENU: MenuItem[] = [
@@ -154,6 +166,7 @@ export const ROW_MENU: MenuItem[] = [
     // like the rest, and the moment after a mis-click is exactly when
     // somebody driving with the mouse wants it and does not know the key.
     actions: [{ cmd: "u", hint: "u" }],
+    global: true,
     group: "edit",
   },
   {

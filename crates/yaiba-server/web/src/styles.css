@@ -43,6 +43,13 @@
   --row-h: 26px;
   --gutter: 14px;
 
+  /* The gap between a row's cells. Named because a second place has to
+     agree with it: the two rows that draw the flex skeleton without a
+     reorder grip (`.row--head`, `.row--draft`) pay for the missing cell
+     in padding, and a restated `8px` there is the same arithmetic the
+     drop line was 14px wrong on. */
+  --row-gap: 8px;
+
   /* Trailing space below the last row, so the bottom of the list is
      reachable to the middle of the screen rather than pinned to the
      very edge. Both panes have to spend the *same* amount of it — see
@@ -537,7 +544,7 @@ body::after {
 .row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--row-gap);
   height: var(--row-h);
   padding: 0 var(--gutter) 0 0;
   white-space: nowrap;
@@ -3769,4 +3776,408 @@ button.row__date:focus-visible {
   100% {
     transform: translate3d(0, 0, 0);
   }
+}
+
+/* ---- the shell on a phone ----------------------------------------
+ *
+ * Everything from here down is later-wins on purpose: a phone is the
+ * same app with a bigger pointer and less room, not a second
+ * stylesheet. Two numbers govern it and both are stated once — the
+ * breakpoint, which is `NARROW_PX` in `narrow.ts` and the width in the
+ * two queries below that `check-mobile.ts` holds to it, and nothing
+ * else may spell it; and the touch queries, which are keyed on
+ * `(hover: none)` rather than on a width, so a narrow *desktop* window
+ * keeps every hover affordance it has.
+ */
+
+/* `.app` is `height: 100%`, which resolves up through `#root` and
+   `body` to the *layout* viewport — on iOS Safari that is the tall
+   viewport measured with the URL bar retracted, so the status line
+   spent the whole session underneath the browser's own chrome. `dvh`
+   is the one that shrinks with it. The guard is belt and braces: an
+   engine that does not know the unit drops the declaration anyway, and
+   this says out loud which value is the fallback. */
+@supports (height: 100dvh) {
+  .app {
+    height: 100dvh;
+  }
+}
+
+/* The notch and the home bar. `env()` is 0 everywhere else, so this is
+   the same line of pixels as before on a desktop — and it is 0 on a
+   notched iPhone too unless `index.html` asks for the area with
+   `viewport-fit=cover`.
+
+   The bottom inset is owed by whatever is the *bottom* row of the shell,
+   which is the status line everywhere the touch bar is not: it is paid
+   here and handed over inside the narrow query below. Deliberately not
+   `.app > .status:last-child` — the overlays are siblings after it and
+   they mount and unmount, so the line's own height would change by the
+   inset every time a row menu opened. The height grows with the padding
+   because the line is `border-box`, and eating 34px out of a 28px row
+   would leave no row. */
+.status {
+  height: calc(var(--row-h) + 2px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(var(--gutter), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--gutter), env(safe-area-inset-right, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ---- the touch bar ------------------------------------------------
+ *
+ * Global commands only — `o`, `<tab>`, `[`, `]`, `gd`, `:`, `u`, `T`.
+ * Anything that acts on a row lives on the row menu, which is a rule
+ * with `check-rowmenu.ts` behind it and not a matter of taste.
+ *
+ * The shell's grid is `auto 1fr auto` and the bar is a fourth child, so
+ * it lands in an implicit `auto` row and the panes keep the `1fr`. It is
+ * only mounted on narrow, so it needs no query of its own.
+ */
+.touchbar {
+  /* A grid of four, not a wrapping flex row. Wrapping sized every key to
+     its label and gave whatever was alone on the last line the rest of
+     the width — `today` came out 501px against `undo` at 53px, so the
+     largest target on the bar was the one nobody reaches for and the
+     eight keys had eight different sizes to learn. A grid makes the
+     target the same everywhere and the arithmetic the browser's. Four
+     across, because eight would be 48px per key at 390px including the
+     gaps, which is below the width a two-word label needs. */
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  padding: 3px max(4px, env(safe-area-inset-right, 0px))
+    calc(3px + env(safe-area-inset-bottom, 0px))
+    max(4px, env(safe-area-inset-left, 0px));
+  border-top: 1px solid var(--grid-strong);
+  background: var(--panel);
+}
+
+.touchbar__key {
+  /* 44px is the floor a fingertip can be asked to hit; below it the
+     neighbouring key gets the tap. The width is the grid's to decide, so
+     a long label ellipsises rather than widening its column and pushing
+     the app sideways. */
+  min-height: 44px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ash);
+  background: color-mix(in srgb, var(--grid) 70%, var(--panel));
+  border: 1px solid var(--grid-strong);
+  border-radius: 2px;
+  cursor: pointer;
+  /* Two keys in a row is a common thing to want — `]` twice to zoom —
+     and without this the browser waits 300ms for a double-tap-to-zoom
+     that will never come, then fires both. */
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* A key with no pressed state on a touchscreen is a key you cannot tell
+   you hit: there is no cursor to watch and no hover left behind. */
+.touchbar__key:active {
+  color: var(--edge);
+  border-color: var(--edge-dim);
+  background: rgb(from var(--edge) r g b / 0.16);
+}
+
+/* ---- the reorder grip --------------------------------------------
+ *
+ * The row is the drag target with a mouse, which a touchscreen cannot
+ * copy: a press that moves is a scroll until something says otherwise.
+ * The grip is that something, and it is absent by default — with a
+ * pointer it would be a column of nothing on every row.
+ */
+.row__grip {
+  display: none;
+}
+
+@media (hover: none), (max-width: 720px) {
+  :root {
+    /* Wide enough to be hit without aiming. */
+    --grip-w: 32px;
+  }
+
+  .row__grip {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    width: var(--grip-w);
+    color: var(--ash-dim);
+    /* Or the browser reads the first few pixels of the drag as a scroll,
+       promotes it, and cancels the pointer before the row has moved. */
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .row__grip:active {
+    color: var(--edge);
+  }
+
+  /* `.row--head` and `.row--draft` draw the row's flex skeleton without
+     a grip, so the cell it adds has to be paid for here — otherwise
+     every heading sits one grip and one gap to the left of the column it
+     names, which is the misalignment the comment above `.row--head`
+     records being caught by once already. */
+  .row--head,
+  .row--draft {
+    padding-left: calc(var(--grip-w) + var(--row-gap));
+  }
+}
+
+/* ---- narrow: one pane, thumb-sized ------------------------------- */
+
+@media (max-width: 720px) {
+  :root {
+    /* 40vh is nearly half the screen left blank below the last row — on
+       a desktop it is the room that makes the end of the plan reachable
+       to the middle of the display, on a phone it is a screenful of
+       nothing to flick back through. Both panes spend this and they have
+       to spend the *same* amount: whichever runs out of scrollable
+       content first freezes while the other keeps going, and row N is
+       off against bar N for the whole of that stretch. Declared here
+       rather than on a pane for exactly that reason. */
+    --pane-tail: 12vh;
+  }
+
+  /* One pane at this width. `App` already mounts one at a time here; the
+     `flex` is for the frame in between, and the divider means nothing
+     with nothing to divide.
+
+     `--row-h` is raised for the whole *list* and deliberately not on
+     `:root`, which is the part worth reading twice: the chart's row
+     geometry is not CSS's. `ROW_H = 26` in `Gantt.tsx` places every
+     `.gantt__row`, both ends of every dependency path and every vertex
+     of the progress polyline, so a `:root` override moves the CSS rows
+     to 40px, leaves the SVG at 26px, and every bar is out by 14px times
+     its row index. Consumers checked, all inside this pane and all
+     following it: `.row`, `.row--head`, `.list__summary`, and
+     `--pane-head` — restated here because a custom property substitutes
+     its `var()`s where it is *declared*, so left on `:root` it would
+     still be 52px, the two-row head would overflow its own box and the
+     pane's `scroll-padding-top` would go with it. Outside and untouched:
+     `body`'s `line-height` (computed on `body`, so the taller row
+     centres its 26px line rather than stretching it), every `.gantt__*`,
+     `.status`, and the wildmenu's cap. */
+  .pane--list {
+    --row-h: 40px;
+    --pane-head: calc(var(--row-h) * 2);
+    flex: 1;
+    border-right: none;
+  }
+
+  .panes__grip {
+    display: none;
+  }
+
+  /* One step up. 13px on a phone is a squint, and the `ch`-based columns
+     grow with it rather than needing numbers of their own. */
+  body {
+    font-size: 15px;
+  }
+
+  /* A dozen children or more, an 18px gap, and a phone's width to put
+     them in. Wrapping rather than overflowing, because the bar does not
+     scroll and anything past the right edge would simply be gone — the
+     mode, the project and the as-of control all have to stay
+     reachable. */
+  .hud {
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 4px var(--gutter);
+  }
+
+  /* `flex: 1` on a wrapped line takes the whole rest of *that* line, so
+     the spacer stops separating two ends and becomes a line break in the
+     middle of the bar. */
+  .hud__spacer {
+    display: none;
+  }
+
+  /* The two things here that carry no number. `.hud__meter` stays — the
+     ratio beside the bar is a number — and only the ▓▓░░ goes, with the
+     wordmark. */
+  .hud__mark,
+  .hud__bar {
+    display: none;
+  }
+
+  /* The touch bar is below it now and pays the home bar itself, so the
+     line goes back to being a line. The one narrow case with no bar
+     below it is insert / command / search, where the bar is unmounted
+     because a tap on it cannot reach `onKey` — and that is exactly when
+     the soft keyboard is over the bottom of the screen, so there is no
+     home bar left to keep clear of. */
+  .status {
+    height: calc(var(--row-h) + 2px);
+    padding-bottom: 0;
+  }
+
+  /* The widest thing on the screen, and the one nobody on a phone can
+     act on: `j/k move · o new · space done · x clear · ? help` is 422px
+     of `white-space: nowrap` inside a `nowrap` flex line, so it set the
+     app's minimum width and every full-width element came out 509px on a
+     390px screen — the whole shell scrolled sideways. The touch bar is
+     the same information as buttons, so this is not lost, it is
+     translated. Driving the real thing at 390px is what found it; no
+     check could. */
+  .status__hint {
+    display: none;
+  }
+}
+
+/* ---- no hover: nothing is revealed by arriving ------------------- */
+
+/* Keyed on the pointer rather than on the width, so a narrow desktop
+   window keeps its hover affordances and a tablet at 1024px gets these.
+   Two things happen to every grip in the app: it stops waiting for a
+   hover that will never arrive, and its *hit box* grows to 24px while
+   the line you see stays exactly where it was. A wider visible grip
+   would cover the bar it resizes. */
+@media (hover: none) {
+  .gantt__handle {
+    width: 24px;
+    /* Half the 17px the box gained, so the paint below lands back on the
+       exact pixel the inline `left` names. What the bar gives up in
+       exchange is 8px of its right end to the resize grip, which is the
+       price of a target a finger can hit at all. */
+    margin-left: -8px;
+    /* Present, not lit: a permanently bright grip on every bar reads as
+       a state rather than as something available. */
+    opacity: 0.5;
+    background: none;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* The paint, back at the width and the offset it had before the box
+     grew around it. */
+  .gantt__handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 8px;
+    width: 7px;
+  }
+
+  .gantt__handle--resize::after {
+    background: var(--edge);
+  }
+
+  .gantt__handle--link::after {
+    width: 8px;
+    background: radial-gradient(circle, var(--edge) 40%, transparent 45%);
+  }
+
+  /* An 11px stroke is a mouse target. Nothing about a fingertip is 11px
+     wide, and this path is the only way to cut an edge by pointer. */
+  .gantt__link-hit {
+    stroke-width: 24;
+  }
+
+  /* The same trade on the divider: a 24px box straddling the border,
+     with the line you see still the border. The fill moves to the
+     pseudo-element so a drag in progress is a 3px line brightening
+     rather than a 24px band of cyan. */
+  .panes__grip {
+    /* A flex box, so the strip below stretches to the divider's height
+       without asking a percentage to resolve against a flex item's
+       cross size. */
+    display: flex;
+    justify-content: center;
+    width: 24px;
+    margin: 0 -12px;
+    background: none;
+  }
+
+  .panes__grip::after {
+    content: "";
+    flex: none;
+    width: 3px;
+    background: rgb(from var(--edge) r g b / 0.45);
+  }
+
+  .panes__grip--dragging::after {
+    background: var(--edge);
+  }
+
+  /* A drag that starts on a row or a bar must not be taken away from us.
+     `manipulation` drops the double-tap-to-zoom wait, and the callout is
+     iOS's own long-press menu, which would come up over the row menu the
+     long press is opening. The selection half is not in here: a mouse
+     drags rows too, so it has to hold at every width — see below. */
+  .row,
+  .gantt__bar {
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+  }
+
+  /* And never on something you are meant to be able to put a caret in.
+     Selecting inside a field is how a typo gets fixed on a phone, where
+     there are no arrow keys to fix it with. */
+  .row__edit,
+  .status__input,
+  .hud__asof-input {
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  /* The `+` that means `o` is a 2ch slot whose only sign it is live is a
+     colour arriving under a pointer. Both the button and the placeholder
+     span widen, or the columns to their left stop lining up — the slot is
+     the same width on every row precisely so they do. */
+  .row__new {
+    width: 3ch;
+  }
+
+  button.row__new {
+    color: var(--ash);
+  }
+
+  /* "⇧ right-click — the browser's own menu" is an apology for taking a
+     button, offered to a device that has neither the button nor the
+     modifier. On a touchscreen the menu is opened by a long press and
+     nothing was taken, so the footer is instructions for a gesture that
+     does not exist. Seen on the real thing at 390px, where it was the
+     last two lines of the panel. */
+  .rowmenu__foot {
+    display: none;
+  }
+}
+
+/* ---- what the reorder drag costs a selection ---------------------
+ *
+ * `draggable` used to suppress text selection for free, and the pointer
+ * drag that replaced it does not: a mouse press-and-move across three
+ * rows left them highlighted instead of moving one. So this is not part
+ * of the phone layer at all — it holds at every width, because the mouse
+ * reorder does.
+ *
+ * Nothing is lost that was there before: a row's text was never
+ * selectable while the row was a drag source. The fields are the
+ * exception, and they are the reason this is not simply on `.rows`:
+ * fixing a typo without arrow keys means selecting inside one.
+ */
+.row,
+.gantt__bar {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.row__edit,
+.status__input,
+.hud__asof-input {
+  user-select: text;
+  -webkit-user-select: text;
 }

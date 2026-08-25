@@ -139,6 +139,7 @@ for (const { slot } of SLOTS) {
  */
 const NOT_COLOURS: Record<string, true> = {
   "--row-h": true,
+  "--row-gap": true,
   "--gutter": true,
   "--pane-tail": true,
   "--pane-head": true,

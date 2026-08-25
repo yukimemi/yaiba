@@ -39,6 +39,7 @@ import { SplitGrip } from "./components/SplitGrip";
 import { StatusLine, type Message } from "./components/StatusLine";
 import { Strikes } from "./components/Strikes";
 import { TaskList } from "./components/TaskList";
+import { TouchBar } from "./components/TouchBar";
 import { addDays, advanceWork, diffDays, toISO } from "./dates";
 import {
   BURST_MS,
@@ -78,6 +79,7 @@ import {
 import { modeHint, type Mode } from "./mode";
 import { t } from "./i18n";
 import { applyLang, initialLang, type Lang } from "./lang";
+import { useNarrow } from "./narrow";
 import { applySplit, clampSplit, initialSplit } from "./split";
 import {
   applyPalette,
@@ -292,6 +294,23 @@ export function App() {
   const [zoom, setZoom] = useState<Zoom>(savedView.zoom);
   /** Which columns the list carries — `:dates` / `gd` swaps them. */
   const [columns, setColumns] = useState<Columns>(savedView.columns);
+  /** True while the window is phone-width — see `narrow.ts`. */
+  const narrow = useNarrow();
+  /**
+   * The pane arrangement actually drawn, which is `view` everywhere but
+   * on a phone.
+   *
+   * `split` cannot render at 390px: two panes of ~46% are 180px each,
+   * one column of ellipses beside one of them. So narrow shows the list
+   * instead — and this is *derived*, never written back. Narrow is a
+   * property of the window, not a choice anyone made: a desktop window
+   * dragged past 720px and back has to give the split back, and it
+   * cannot if the first resize overwrote the setting.
+   *
+   * Every render decision reads this rather than `view`. The one place
+   * `view` is still the answer is the `<tab>` case, which writes.
+   */
+  const shownView: View = narrow && view === "split" ? "list" : view;
   /**
    * Which cell of the cursor row `h` / `l` last walked to.
    *
@@ -3441,7 +3460,16 @@ export function App() {
 
       // ---- view
       case "<tab>":
-        setView(VIEW_CYCLE[(VIEW_CYCLE.indexOf(view) + 1) % VIEW_CYCLE.length]);
+        // Narrow has two states, not three: `split` renders as the list,
+        // so cycling through it would be a press that changes nothing
+        // visible — a key that looks broken every third time. This is
+        // the one place a narrow window writes `view`, and it writes a
+        // value the desktop can use as-is.
+        if (narrow) setView(shownView === "gantt" ? "list" : "gantt");
+        else
+          setView(
+            VIEW_CYCLE[(VIEW_CYCLE.indexOf(view) + 1) % VIEW_CYCLE.length],
+          );
         break;
       case "]":
         setZoom(
@@ -4005,6 +4033,15 @@ export function App() {
       ? ` ${QUAKE_CLASSES[burst.n % 2]}`
       : "";
 
+  // The three modes that run an <input> of their own, which is the same
+  // line `onKey` declines on. The touch bar is the keys a phone cannot
+  // type, so while a real soft keyboard is up it is both redundant and
+  // wrong: a bar tap does not go through `onKey`, so `o` during an open
+  // draft would throw away what is being typed — a state no keyboard
+  // can reach. The overlays need no clause here; each is `inset: 0` and
+  // covers the bar.
+  const typing = mode === "insert" || mode === "command" || mode === "search";
+
   return (
     <div className={`app${quake}`} ref={shellRef}>
       {/* Keyed on the counter, so each bump mounts a new node and the
@@ -4076,7 +4113,7 @@ export function App() {
       />
 
       <div className="panes">
-        {view !== "gantt" && (
+        {shownView !== "gantt" && (
           <TaskList
             tasks={visible}
             bySchedule={bySchedule}
@@ -4098,7 +4135,7 @@ export function App() {
             searchTerm={searchTerm}
             flashes={flashes}
             linkAnchor={linkAnchor}
-            onlyPane={view === "list"}
+            onlyPane={shownView === "list"}
             emptyHint={
               filter ? t("nothing matches this filter.") : t("no tasks yet.")
             }
@@ -4128,10 +4165,10 @@ export function App() {
         {/* Only in split: with one pane there is nothing to divide, and a
             grip against the window edge would have no room to be dragged
             back from. */}
-        {view === "split" && (
+        {shownView === "split" && (
           <SplitGrip percent={listWidth} onCommit={setListWidth} />
         )}
-        {view !== "list" && (
+        {shownView !== "list" && (
           <Gantt
             tasks={visible}
             bySchedule={bySchedule}
@@ -4145,7 +4182,7 @@ export function App() {
             rangeEnd={rangeEnd}
             flashes={flashes}
             severing={severing}
-            onlyPane={view === "gantt"}
+            onlyPane={shownView === "gantt"}
             paneRef={ganttPane}
             onScroll={syncScroll(ganttPane)}
             onRowMenu={openRowMenu}
@@ -4260,6 +4297,24 @@ export function App() {
             setPaletteMode(undefined);
             setProjectError(null);
           }}
+        />
+      )}
+
+      {/* Last, because `.app` is a grid and the bar is its bottom row —
+          below the status line, where a thumb is. It stays unpositioned
+          so the overlays above keep covering it: every one of them is
+          `position: fixed`, and a positioned element paints over
+          in-flow content whatever the DOM order.
+
+          Unmounted on a desktop window rather than hidden, because eight
+          buttons nobody can reach are still eight buttons in the
+          accessibility tree. Every press goes through `runKeyRef`, the
+          way the row menu's items do: this bar knows key strings and
+          nothing else. */}
+      {narrow && !typing && (
+        <TouchBar
+          shownView={shownView}
+          onRun={(cmd) => runKeyRef.current(cmd)}
         />
       )}
     </div>
