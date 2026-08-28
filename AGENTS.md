@@ -1790,6 +1790,82 @@ indent constant. It is indented because a drop takes the target's
 column widths and five flex gaps restated in CSS — was 14px wrong and
 would have stayed wrong silently.
 
+### A phone is the same app with less room and a fatter pointer
+
+Not a second stylesheet and not a second component tree. Two questions
+are kept apart on purpose, and conflating them is the mistake to avoid:
+**room** is a width (`NARROW_PX` in `narrow.ts`, `@media (max-width:
+720px)` in `styles.css`, and `check-mobile.ts` fails the build when the
+two disagree), while **pointer** is `@media (hover: none)`. A narrow
+desktop window gets one pane and the bar because those are about room; it
+keeps every hover affordance, because those are about the pointer.
+
+- **`shownView` is derived, `view` is stored.** At narrow width `split`
+  cannot render, so the panes read `narrow && view === "split" ? "list" :
+  view`. Nothing writes the stored value from a phone except `<tab>`,
+  which on narrow toggles list/chart — a third state you cannot see is a
+  key that looks broken. So a phone visit does not cost the desktop its
+  split.
+- **The bar is keys, the row menu is rows.** `TouchBar` hands `runKey` a
+  command string and owns no behaviour, the same bargain the row menu
+  makes; `check-mobile.ts` asserts every `data-cmd` is a case `runKey`
+  answers, and that none of them is a row action. The one allowed
+  overlap is an item the menu itself flags `global` — `undo`, because a
+  phone with an empty plan has no row to long-press and undo would
+  otherwise be unreachable. Adding a per-row key to the bar makes a menu
+  item redundant, which is what `check-rowmenu.ts` exists to catch.
+- **The bar unmounts while you type.** A press routes through `runKey`
+  and so bypasses the line in `onKey` that stands the keyboard down for
+  an overlay; tapping `o` with a draft open would discard what is being
+  typed, a state no keyboard can reach. It is gated on the same three
+  modes `onKey` declines on.
+- **HTML5 drag-and-drop is gone, and cannot come back.** Touch never
+  fires `dragstart`, so the row reorder simply did not exist on a phone.
+  The pointer path replaces it, started from `.row__grip` because a
+  press that moves anywhere else is a scroll. It hit-tests with
+  `document.elementFromPoint` for the reason the gantt already documents
+  — touch and pen implicitly capture on the element that got
+  `pointerdown`, so `e.target` at release is always the grip — and it
+  listens for `pointercancel`, which is what a phone sends instead of
+  `pointerup` when the gesture becomes a system scroll.
+- **`--row-h` is raised on `.pane--list`, not on `:root`.** `ROW_H = 26`
+  in `Gantt.tsx` is a JS constant placing every bar, dependency path and
+  progress vertex; CSS rows at 40px against an SVG at 26px puts each bar
+  out by 14px times its row index. The two panes are never on screen
+  together at this width, so the list gets the taller rows alone. A
+  custom property substitutes where it is *declared*, so `--pane-head`
+  is restated in the same rule.
+- **Anything that instructs the user must be possible on the device.**
+  Two came out of driving the real thing: the status line's keybinding
+  hint is `nowrap` and 422px wide, which made the whole shell scroll
+  sideways at 390px *and* told a phone to press `j/k`; and the row menu's
+  footer offers `⇧ right-click` to a device with neither. Both are
+  `display: none` in the phone layer.
+- **The insets are opt-in.** `env(safe-area-inset-*)` computes to 0
+  unless `index.html`'s viewport meta carries `viewport-fit=cover`, so
+  every rule spending them looks right on every device without a notch.
+
+Reach is not a code question: `--host 0.0.0.0` has always existed, there
+is no authentication anywhere in the API, and the answer is a trusted
+network (Tailscale). Verified on this machine — `http://<tailnet
+ip>:8202/api/state` answers with no credential, which is the fact the
+flag's own help text is warning about.
+
+**Binding is not reachability, and on this machine it was not.** The sync
+endpoint's startup firewall dialog — the one the relay-only section
+covers — writes **block** rules for the executable when it is answered
+with anything but allow, inbound TCP *and* UDP, private and public
+profiles. `~/.cargo/bin/yaiba.exe` and several worktree debug binaries
+all carry them here. So `--host 0.0.0.0` binds, the server answers
+`localhost` and its own tailnet address from *this* host, and a phone
+gets nothing — which is the one thing a local probe cannot tell you,
+because loopback never crosses the filter. Check
+`Get-NetFirewallRule -Direction Inbound | Where-Object DisplayName -like
+'*yaiba*'` before believing a reachability claim, and remember block
+beats allow: the old rules have to be removed, not out-voted. The README
+carries the scoped fix (allow TCP 8188 from `100.64.0.0/10`, the CGNAT
+range every Tailscale address lives in).
+
 ### Verifying UI changes by hand
 
 `cargo make check` will not catch any of the above — every interaction

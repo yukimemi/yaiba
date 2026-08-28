@@ -337,6 +337,98 @@ there is no roster behind the names: `tab` does that job on the `:` line,
 and clicking has no `tab`. `co` opens the same panel from the keyboard —
 nothing in yaiba should be reachable *only* by clicking.
 
+## And a phone
+
+The same app, reached over the network and laid out for a thumb. Nothing
+is installed on the phone and nothing syncs to it: it is a browser
+looking at the yaiba already running on your machine, so there is one
+replica and one store, and what you type on the train is on your desk
+before you are.
+
+```sh
+yaiba --host 0.0.0.0        # or YAIBA_HOST=0.0.0.0
+```
+
+**There is no authentication, and this does not add any.** Everything at
+that address can read and write the plan, so the network has to be the
+thing you trust. A mesh VPN is the cheap way to get that and to keep
+working away from home — with [Tailscale](https://tailscale.com/), `yaiba
+--host 0.0.0.0` plus the tailnet address is the whole recipe:
+
+```sh
+tailscale ip -4             # 100.x.y.z
+# then http://100.x.y.z:8188 from the phone, with Tailscale on there too
+```
+
+On a LAN with no VPN it works the same way and stops at the front door.
+Do not put it on the open internet: put a reverse proxy that authenticates
+in front of it, or do not do it.
+
+### Windows: the prompt you already said no to
+
+Binding the address is not the same as being reachable. yaiba's sync
+endpoint raises a firewall dialog on startup — the one wanting an
+administrator — and answering it with anything but *allow* writes
+**block** rules for that executable, inbound TCP *and* UDP, on the
+private and public profiles. `--host 0.0.0.0` then binds perfectly and
+the phone still gets nothing.
+
+Block beats allow in Windows Firewall, so the old rules have to go before
+a new one means anything. In an **administrator** PowerShell:
+
+```powershell
+# What is there now — Action: Block on your yaiba is the thing to remove.
+Get-NetFirewallRule -Direction Inbound |
+  Where-Object DisplayName -like '*yaiba*' |
+  Select-Object DisplayName, Action, Enabled
+
+Get-NetFirewallRule -Direction Inbound |
+  Where-Object { $_.DisplayName -like '*yaiba*' -and $_.Action -eq 'Block' } |
+  Remove-NetFirewallRule
+
+# Then let the tailnet in, and only the tailnet: 100.64.0.0/10 is the
+# CGNAT range every Tailscale address lives in, so this opens nothing on
+# the LAN or a cafe's wifi.
+New-NetFirewallRule -DisplayName 'yaiba UI (tailnet)' -Direction Inbound `
+  -Action Allow -Protocol TCP -LocalPort 8188 `
+  -RemoteAddress 100.64.0.0/10
+```
+
+`--relay-only` is worth pairing with this if the dialog is what you were
+avoiding: it syncs through relays and binds no UDP socket at all, so
+nothing asks again.
+
+### What changes on a small screen
+
+Below 720px the layout is one pane at a time — at 390px the split's list
+would be 180px, which is a column of ellipses — and `tab`, on the bar or
+the keyboard, swaps between the list and the chart. The stored `:split`
+is left alone, so the desktop is unchanged when you come back to it.
+
+Everything a key does is still done by a key. What the phone gets is a
+route to the keys it cannot type:
+
+- **The bar along the bottom** is eight global commands — new task,
+  list/chart, zoom out, zoom in, dates, the `:` line, undo, today. Each
+  button *is* its key: it hands the same string to the same command layer
+  the keyboard uses, so nothing on it can drift from what the keyboard
+  does. It stands down while you are typing, because the keys it would
+  run are not the keys that mode is listening for.
+- **A long press on a row** opens the row menu — the same menu the right
+  button opens, which is where everything that acts on *one row* lives:
+  status, priority, progress, a note, nesting, focus, yank, put, undo,
+  delete.
+- **The handle at the left of a row** drags it to a new place. A press
+  that moves anywhere else is a scroll, which is why the handle exists at
+  all.
+- **Bars, edges and dependency arrows** keep their drags, with hit areas
+  a finger can actually land on. The date columns (`gd`) scroll sideways
+  inside the pane rather than pushing the app off the screen.
+
+What a phone does not get is the keyboard's speed, and nothing here tries
+to fake it: this is for looking at the plan, ticking things off, and
+fixing a date — the work you do standing up.
+
 ## Projects, and the level you look at them from
 
 There is no separate "project" object: a task with no parent *is* a

@@ -712,4 +712,22 @@ const JA: Record<string, string> = {
   "text and marks, quietest": "文字と記号（最弱）",
   "Edits save as they happen. Dates accept today / tom / mon / +3d / 8-14. On the : line, tab completes and s-tab walks back. Press ? or esc to close.":
     "編集はその場で保存されます。日付は today / tom / mon / +3d / 8-14 のように書けます。: の行では tab が補完し、s-tab が戻ります。? か esc で閉じます。",
+
+  // ---- the touch bar ----------------------------------------------
+  //
+  // Eight buttons across a phone's width, so each label is one word and
+  // the Japanese is the shorter of the two. 一覧 / ガント name the two
+  // panes the way the `:view` argument does — the button says where it
+  // goes, not what it is. コマンド stays katakana: it is the `:` line,
+  // and 命令 would name something the app has never called it.
+  //
+  // "new task", "dates", "undo" and "today" are already above, spent by
+  // the undo labels, the columns and the reference date. Reusing them is
+  // the point of the English-as-key scheme — one word, one translation.
+  list: "一覧",
+  gantt: "ガント",
+  "zoom out": "縮小",
+  "zoom in": "拡大",
+  command: "コマンド",
+  actions: "操作",
 };
