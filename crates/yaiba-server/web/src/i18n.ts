@@ -261,7 +261,6 @@ const JA: Record<string, string> = {
   // because the panel is one column of them beside a column of keys.
   "mark it doing": "着手中にする",
   "priority": "優先度",
-  "note…": "ノート…",
   "nest / unnest": "ネスト / 解除",
   "focus this subtree": "この配下だけ表示",
   "yank the row": "行をヤンク",
@@ -461,6 +460,7 @@ const JA: Record<string, string> = {
   "WORK WEEK": "稼働カレンダー",
   PROJECTS: "プロジェクト",
   OWNER: "担当",
+  NOTES: "メモ",
   // The colon is kept: these four groups are what you type on the `:`
   // line, and the heading says so before the first row does.
   ": COMMANDS": ": コマンド",
@@ -511,6 +511,14 @@ const JA: Record<string, string> = {
   "the same panel, from the column": "同じパネルを列から開く",
   "filter, or write a name that is new": "絞り込み、または新しい名前を入力",
   "walk the names in use": "使われている名前を移動",
+  "open the notes panel": "メモパネルを開く",
+  "the same panel, from the marker": "同じパネルをマーカーから開く",
+  "save & close": "保存して閉じる",
+  "a quick one-line note without the panel": "パネルなしで一行だけ手早く",
+  "details, or a link — plain text": "詳細やリンクを — 書式なしのテキスト",
+  "ctrl+⏎ / esc / click away — save & close":
+    "ctrl+⏎ / esc / 外側クリック — 保存して閉じる",
+  "add a note": "メモを追加",
   "set it without the panel — bare clears":
     "パネルを使わず指定 — 引数なしで外す",
   "fold a summary": "サマリを畳む",
@@ -560,8 +568,8 @@ const JA: Record<string, string> = {
   "progress percent": "進捗（%）",
   "add / remove tags": "タグを追加 / 削除",
   "hand it to somebody — bare clears": "担当を決める（引数なしで外す）",
-  "attach a note — bare clears · hover the ✎":
-    "ノートを付ける（引数なしで消去）· ✎ にホバーで表示",
+  "attach a note — bare clears · click the ✎":
+    "ノートを付ける（引数なしで消去）· ✎ をクリックで開く",
   "wait for row n": "n 行目を待つ",
   // 同日 carries it: the point is that the two share a calendar
   // square, not that the number is zero.
@@ -588,7 +596,8 @@ const JA: Record<string, string> = {
   "critical path — zero slack": "クリティカルパス — 余裕 0 日",
   "on the critical path — no slack, so a day here is a day on the project":
     "クリティカルパス上 — 余裕がなく、ここでの1日はそのまま全体の1日",
-  "has a note — hover it": "メモあり — ホバーで読める",
+  "has a note — click it": "メモあり — クリックで開ける",
+  "has a note with a link — click it": "リンク付きメモあり — クリックで開ける",
   // 遅延 is what the top bar's readout is called, so the legend uses the
   // same word the number beside it does.
   "a due date — this colour is overdue": "期限日 — この色なら遅延",

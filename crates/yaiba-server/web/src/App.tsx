@@ -31,6 +31,7 @@ import {
   type Mode as PaletteMode,
 } from "./components/ProjectPalette";
 import { Hud } from "./components/Hud";
+import { NotesPanel } from "./components/NotesPanel";
 import { OwnerPicker } from "./components/OwnerPicker";
 import { RowMenu, type RowMenuAt } from "./components/RowMenu";
 import { isCmdline, type MenuAction } from "./rowMenu";
@@ -417,6 +418,17 @@ export function App() {
    * and it is dropped when its row leaves `visible`.
    */
   const [pickingOwner, setPickingOwner] = useState<{
+    id: string;
+    anchor: Anchor;
+  } | null>(null);
+  /**
+   * The row whose notes panel is up.
+   *
+   * Every lifecycle rule `picking` and `pickingOwner` carry applies here
+   * too: polling stands down while it is up, the key handler stands
+   * down, and it is dropped when its row leaves `visible`.
+   */
+  const [pickingNotes, setPickingNotes] = useState<{
     id: string;
     anchor: Anchor;
   } | null>(null);
@@ -872,10 +884,10 @@ export function App() {
     // The picker is an input like any other, even though the mode stays
     // normal behind it: a refresh mid-pick re-renders the cell the panel
     // is anchored to.
-    if (picking || pickingOwner) return;
+    if (picking || pickingOwner || pickingNotes) return;
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(timer);
-  }, [mode, picking, pickingOwner, load]);
+  }, [mode, picking, pickingOwner, pickingNotes, load]);
 
   useEffect(() => {
     if (!cursorId && visible.length) putCursor(visible[0].id);
@@ -894,7 +906,10 @@ export function App() {
     if (pickingOwner && !visible.some((t) => t.id === pickingOwner.id)) {
       setPickingOwner(null);
     }
-  }, [picking, pickingOwner, visible]);
+    if (pickingNotes && !visible.some((t) => t.id === pickingNotes.id)) {
+      setPickingNotes(null);
+    }
+  }, [picking, pickingOwner, pickingNotes, visible]);
 
   // Peer roster, for the HUD. Slower than the data poll — peers come and
   // go on a human timescale.
@@ -3006,6 +3021,58 @@ export function App() {
     [data, visible, projects, run],
   );
 
+  /**
+   * Open the notes panel over a row.
+   *
+   * Anchored the same way `openOwner` anchors its panel: the note
+   * marker when it is on screen, the cursor row when it is not, the
+   * gantt bar when the list is gone entirely.
+   */
+  const openNotes = useCallback((row: Task | null) => {
+    if (!row) {
+      say(t("no task under the cursor"), "error");
+      return;
+    }
+    const box = (
+      document.querySelector(`[data-notes-cell="${row.id}"]`) ??
+      document.querySelector(".row--cursor") ??
+      document.querySelector(
+        `.gantt__row[data-task-id="${row.id}"] .gantt__bar`,
+      )
+    )?.getBoundingClientRect();
+    setPickingNotes({
+      id: row.id,
+      anchor: box
+        ? { left: box.left, top: box.top, bottom: box.bottom }
+        : { left: 40, top: 60, bottom: 60 },
+    });
+  }, []);
+
+  /**
+   * Commit whatever the notes panel holds.
+   *
+   * Patched directly rather than run through `:notes` on the command
+   * line, unlike `commitOwner` / `commitDate`: a note can carry
+   * newlines and arbitrary punctuation, and the `:` line is one line.
+   * `:notes ⟨t⟩` still exists for a quick one-line note from the
+   * keyboard; this is the same field, reached the other way.
+   */
+  const commitNotes = useCallback(
+    (id: string, text: string) => {
+      setPickingNotes(null);
+      const before = data?.tasks.find((t) => t.id === id);
+      if (!before || before.notes === text) return;
+      void run(
+        [{ kind: "patch", id, patch: { notes: text } }],
+        [{ kind: "patch", id, patch: { notes: before.notes } }],
+        "notes",
+      ).then((ok) => {
+        if (ok) say(t("notes"), "ok");
+      });
+    },
+    [data, run],
+  );
+
   // ---- key handling -----------------------------------------------
 
   /**
@@ -3252,6 +3319,12 @@ export function App() {
       // lists them.
       case "co":
         openOwner(current);
+        break;
+      // `gn` for notes, the same bargain `co` makes with the owner
+      // panel: the mouse reaches it by clicking the marker, and this is
+      // the keyboard's way into the same panel, not a second field.
+      case "gn":
+        openNotes(current);
         break;
       case "<space>":
         toggleDone(selection);
@@ -3647,7 +3720,7 @@ export function App() {
     const activeMode = modeRef.current;
     // The palette and the date picker each run their own input and own
     // every key while up, exactly as insert / command / search do.
-    if (showProjects || showSettings || picking || pickingOwner) return;
+    if (showProjects || showSettings || picking || pickingOwner || pickingNotes) return;
     // The row menu is the same bargain — it runs its own keyboard while
     // it is up, and hands back `esc`.
     if (rowMenu) return;
@@ -4021,6 +4094,9 @@ export function App() {
   const ownerTask = pickingOwner
     ? (visible.find((t) => t.id === pickingOwner.id) ?? null)
     : null;
+  const notesTask = pickingNotes
+    ? (visible.find((t) => t.id === pickingNotes.id) ?? null)
+    : null;
 
   // Super mode's two screen-level effects. Both are decided here rather
   // than in the stylesheet because both would cost something outside
@@ -4146,6 +4222,8 @@ export function App() {
             onOpenDate={(id, field, anchor) => setPicking({ id, field, anchor })}
             pickingOwner={pickingOwner?.id ?? null}
             onOpenOwner={(id, anchor) => setPickingOwner({ id, anchor })}
+            pickingNotes={pickingNotes?.id ?? null}
+            onOpenNotes={(id, anchor) => setPickingNotes({ id, anchor })}
             // Both go through `openNew`, the one `o` uses, so a row born
             // from a click and one born from a key are the same row.
             onNewBelow={(id) => openNew(id, "after", parentOfRow(id))}
@@ -4253,6 +4331,18 @@ export function App() {
           anchor={pickingOwner.anchor}
           onPick={(name) => commitOwner(ownerTask.id, name)}
           onClose={() => setPickingOwner(null)}
+        />
+      )}
+
+      {/* Keyed on the row, for the reason the owner panel is: clicking
+          straight from one open panel onto another row's marker batches
+          the close and the open into one render. */}
+      {pickingNotes && notesTask && (
+        <NotesPanel
+          key={pickingNotes.id}
+          value={notesTask.notes}
+          anchor={pickingNotes.anchor}
+          onSave={(text) => commitNotes(notesTask.id, text)}
         />
       )}
 

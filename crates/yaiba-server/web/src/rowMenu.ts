@@ -3,7 +3,7 @@
  *
  * The mouse could reach about two thirds of what a row can do. The rest
  * — deleting it, marking it `doing`, its priority, its progress, its
- * nesting, its note — had a key and nothing else, which is the exact
+ * nesting — had a key and nothing else, which is the exact
  * mirror of the thing `AGENTS.md` refuses in the other direction:
  *
  * > nothing in yaiba should be reachable *only* by clicking
@@ -115,17 +115,6 @@ export const ROW_MENU: MenuItem[] = [
     ],
     group: "state",
   },
-
-  {
-    id: "note",
-    label: "note…",
-    glyph: "✎",
-    // The `✎` marker on a row says a note is there and the hover shows
-    // it, but nothing short of the `:` line could ever put one there.
-    actions: [{ cmd: ":note ", hint: ":note" }],
-    group: "state",
-  },
-
   {
     id: "nest",
     label: "nest / unnest",
@@ -199,6 +188,7 @@ export const DIRECT_GESTURES: { gesture: string; cmd: string }[] = [
   { gesture: "click ▾", cmd: "za" },
   { gesture: "double-click", cmd: "cc" },
   { gesture: "click the owner cell", cmd: "co" },
+  { gesture: "click the note marker", cmd: "gn" },
   { gesture: "click a date cell", cmd: "cs" },
   { gesture: "drag a row", cmd: "J" },
   { gesture: "drag a bar", cmd: "." },
