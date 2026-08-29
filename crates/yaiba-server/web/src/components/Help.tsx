@@ -126,7 +126,8 @@ const groups = (): Group[] => [
     title: t("MARKS"),
     keys: [
       ["◆", t("critical path — zero slack"), "help__key--crit"],
-      ["✎", t("has a note — hover it"), "help__key--note"],
+      ["✎", t("has a note — click it"), "help__key--note"],
+      ["⛓", t("has a note with a link — click it"), "help__key--note"],
       ["8/14", t("a due date — this colour is overdue"), "help__key--due"],
       ["▸ / ▾", t("a summary, folded / open")],
       ["[ ] [x]", t("todo / done — click it")],
@@ -156,7 +157,7 @@ const groups = (): Group[] => [
       [":tag +a -b", t("add / remove tags")],
       [":assign ⟨n⟩", t("hand it to somebody — bare clears")],
       [":title ⟨t⟩", t("rename — the whole selection")],
-      [":notes ⟨t⟩", t("attach a note — bare clears · hover the ✎")],
+      [":notes ⟨t⟩", t("attach a note — bare clears · click the ✎")],
       [":dep ⟨n⟩", t("wait for row n")],
       [":dep ⟨n⟩ +0", t("…and may start the same day")],
       [":undep ⟨n⟩", t("cut that dependency")],
@@ -197,6 +198,15 @@ const groups = (): Group[] => [
       ["↑ / ↓", t("walk the names in use")],
       ["⏎ / esc", t("commit / close")],
       [":assign ⟨n⟩", t("set it without the panel — bare clears")],
+    ],
+  },
+  {
+    title: t("NOTES"),
+    keys: [
+      ["gn", t("open the notes panel")],
+      ["click ✎", t("the same panel, from the marker")],
+      ["ctrl+⏎ / esc", t("save & close")],
+      [":notes ⟨t⟩", t("a quick one-line note without the panel")],
     ],
   },
   {

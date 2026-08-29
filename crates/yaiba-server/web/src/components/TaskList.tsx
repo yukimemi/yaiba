@@ -12,6 +12,7 @@ import { diffDays, shortLabel } from "../dates";
 import type { FlashKind } from "../flash";
 import type { SortKey } from "../filter";
 import { t } from "../i18n";
+import { noteLinks } from "../notes";
 import type { Scheduled, Task } from "../types";
 
 import type { Anchor } from "./DatePicker";
@@ -64,6 +65,10 @@ interface Props {
   pickingOwner: string | null;
   /** Click the owner cell to pick who it belongs to. */
   onOpenOwner: (id: string, anchor: Anchor) => void;
+  /** The row whose notes panel is open, lit for the same reason. */
+  pickingNotes: string | null;
+  /** Click the note marker to open the panel over it. */
+  onOpenNotes: (id: string, anchor: Anchor) => void;
   /** Click the `+` on the cursor row for a sibling below it — what `o` does. */
   onNewBelow: (id: string) => void;
   /** Click the empty pane's prompt for the very first task. */
@@ -142,6 +147,8 @@ export function TaskList({
   onOpenDate,
   pickingOwner,
   onOpenOwner,
+  pickingNotes,
+  onOpenNotes,
   onNewBelow,
   onNewFirst,
   collapsed,
@@ -748,15 +755,51 @@ export function TaskList({
                     </span>
                   )}
 
-                  {/* A note has no column and no panel, so this marker is
-                      the only sign the row carries one — and hovering it
-                      the only way to read one. Muted like the meta run it
-                      sits in: a note is a gloss, not a signal, and the
-                      palette is spent on things that mean trouble. */}
-                  {task.notes && (
-                    <span className="row__note" title={task.notes}>
-                      ✎
-                    </span>
+                  {/* A note has a panel now (`NotesPanel`), reached by
+                      clicking this marker or `gn` — but it still has no
+                      column, and the marker is still the only sign a
+                      row carries one. Muted like the meta run it sits
+                      in: a note is a gloss, not a signal, and the
+                      palette is spent on things that mean trouble.
+
+                      An empty row shows nothing except on the cursor
+                      row, the same restraint `row__new`'s `+` uses —
+                      every row offering a hollow ✎ would be the palette
+                      spent on a field almost nothing uses.
+
+                      The glyph itself carries one more bit: a note
+                      that holds a link says so before the panel is
+                      opened, because "there is a link in here" is
+                      worth knowing without paying for the click —
+                      `noteLinks` is the same check `NotesPanel` runs
+                      for its live preview, not a second guess at it. */}
+                  {(task.notes || isCursor) && (
+                    <button
+                      type="button"
+                      className={[
+                        "row__note",
+                        !task.notes && "row__note--empty",
+                        pickingNotes === task.id && "row__note--picking",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      data-notes-cell={task.id}
+                      title={task.notes || t("add a note")}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const box = e.currentTarget.getBoundingClientRect();
+                        onOpenNotes(task.id, {
+                          left: box.left,
+                          top: box.top,
+                          bottom: box.bottom,
+                        });
+                      }}
+                    >
+                      {task.notes && noteLinks(task.notes).length > 0
+                        ? "⛓"
+                        : "✎"}
+                    </button>
                   )}
 
                   {/* Who, then what: the owner sits ahead of the tags

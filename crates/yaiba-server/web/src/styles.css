@@ -869,11 +869,42 @@ button.row__new:focus-visible {
   color: var(--edge-dim);
 }
 
-/* Muted, like the meta run it sits in — see the comment at the marker's
-   call site. */
+/* It is a <button> now, same reset `.row__owner-col` takes and the same
+   reason: the browser's own button skin would sit a pixel off the run
+   of meta it lives in. Muted like that run — see the comment at the
+   marker's call site — until it either holds something or is under the
+   pointer. */
 .row__note {
   flex: none;
+  padding: 0;
+  font: inherit;
+  line-height: inherit;
   color: var(--ash-dim);
+  background: transparent;
+  border: none;
+}
+
+button.row__note {
+  cursor: pointer;
+}
+
+button.row__note:hover,
+button.row__note:focus-visible {
+  color: var(--edge);
+  outline: none;
+}
+
+/* Only on the cursor row (see the call site), and hollow rather than
+   solid — a hint that this row could carry a note, not a claim that it
+   does. */
+.row__note--empty {
+  opacity: 0.5;
+}
+
+/* Stays lit while the panel is over it, same treatment the owner cell
+   gets for the same reason. */
+.row__note--picking {
+  color: var(--edge);
 }
 
 .row__meta {
@@ -1542,6 +1573,97 @@ button.row__date:focus-visible {
 }
 
 .ownerpick__hint {
+  flex: 1;
+  min-width: 0;
+  color: var(--ash-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Same furniture as `.ownerpick` — a small box the pointer opens over a
+ * cell and that owns the keyboard until it is done — but wider, because
+ * prose needs the room a name never did. Same `z-index` for the same
+ * reason: the two panels can never be mounted together, since each
+ * stands the keyboard down for the other and a click on the other kind
+ * of cell closes the one that is up before opening its own.
+ */
+.notespanel {
+  position: fixed;
+  z-index: 70;
+  padding: 6px;
+  width: 32ch;
+  max-width: calc(100vw - 16px);
+  background: var(--panel);
+  border: 1px solid var(--edge-dim);
+  box-shadow:
+    0 0 0 1px rgb(from var(--edge) r g b / calc(0.12 * var(--glow))),
+    0 12px 40px rgba(0, 0, 0, calc(0.6 * var(--glow)));
+  outline: none;
+  line-height: 20px;
+}
+
+.notespanel__head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 4px;
+  color: var(--ash-dim);
+}
+
+.notespanel__textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  line-height: inherit;
+  color: var(--ash);
+  background: var(--void);
+  border: 1px solid var(--edge-dim);
+  padding: 4px 6px;
+}
+
+/* `--edge`, not `--edge-dim` — the textarea is the one control in this
+   panel meant to hold focus for a while, typing prose, so a keyboard
+   user needs to be able to tell it is focused at a glance. `outline:
+   none` is still safe: the border swap is the focus indicator. */
+.notespanel__textarea:focus {
+  border-color: var(--edge);
+  outline: none;
+}
+
+/* Detected out of the text as it is typed, so a pasted URL is a link to
+   open before the note is even saved. */
+.notespanel__links {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 8em;
+  overflow-y: auto;
+}
+
+.notespanel__link {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--edge-dim);
+}
+
+.notespanel__link:hover,
+.notespanel__link:focus-visible {
+  color: var(--edge);
+}
+
+.notespanel__foot {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.notespanel__hint {
   flex: 1;
   min-width: 0;
   color: var(--ash-dim);
