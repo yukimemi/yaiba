@@ -1,5 +1,9 @@
 [tasks.default]
 alias = "check"
+
+[tasks.check]
+description = "Run editorconfig-check + fmt + clippy + test + lock-check (same as CI)"
+dependencies = ["editorconfig-check", "fmt-check", "clippy", "test", "lock-check"]
 [config]
 # cargo-make's default is to enter every workspace member and run the
 # requested task once per member. The convention here runs cargo
@@ -12,9 +16,17 @@ alias = "check"
 # --workspace / --all-targets flag — and shaves the wall-clock cost.
 default_to_workspace = false
 
-[tasks.check]
-description = "Run fmt + clippy + test + lock-check (same as CI)"
-dependencies = ["fmt-check", "clippy", "test", "lock-check"]
+[tasks.editorconfig-check]
+description = "Check tracked files against .editorconfig (skipped locally if the `editorconfig-checker` binary isn't on PATH — CI always enforces it via editorconfig-checker/action-editorconfig-checker). Install: https://github.com/editorconfig-checker/editorconfig-checker#installation"
+script_runner = "@duckscript"
+script = '''
+ec_path = which editorconfig-checker
+if is_empty ${ec_path}
+    echo "editorconfig-checker not on PATH; skipping editorconfig-check locally (still enforced in CI). Install: https://github.com/editorconfig-checker/editorconfig-checker#installation"
+    exit 0
+end
+exec --fail-on-error editorconfig-checker
+'''
 
 [tasks.fmt-check]
 description = "Check formatting"
