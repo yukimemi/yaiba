@@ -1,14 +1,14 @@
 preset = "github.com/yukimemi/pj-presets:rust-workspace"
-applied_at = "2026-09-03T04:42:57.498072959Z"
+applied_at = "2026-09-04T03:28:57.023197523Z"
 
 [[templates]]
 source = "github.com/yukimemi/pj-base"
-rev = "6dddfa1a3b889a9ec28382d8ae18f6985c5c9b9e"
+rev = "08989f887002780557cb6e0ce18141d7abf2c85e"
 version = "0.18.0"
 
 [[templates]]
 source = "github.com/yukimemi/pj-rust"
-rev = "f94771ad56008e68553341d4df4341d192d58e0d"
+rev = "88103f85b5053cbbd67e51d57ae7f5e0e2725a7c"
 version = "0.8.1"
 
 [[templates]]
@@ -56,7 +56,7 @@ content_hash = "4cba2edfa14ea128ecdfaeba7230c2ddcf68f94b89be6bd3227ce93e0e625652
 content_hash = "4bebd1c3417c33f9d1c51f011694f6d82b098bbb1a5a102ba56e97ab01a866ef"
 
 [files.".kata/vars.toml"]
-content_hash = "84daa3d716a28510f2dba69e3c95eb43936d89916df8f16c39b60d0473f9e818"
+content_hash = "1a2d41c79daff9753bf3592b4b531fb9e0fc4abd31335ea52b72fc7e7a4a5ce1"
 once_applied = true
 
 [files."AGENTS.md"]
