@@ -86,7 +86,7 @@ thiserror           = "2.0.20"
 tokio               = { version = "1.53.1", features = ["full"] }
 # Dev-only: `ServiceExt::oneshot`, for driving handlers without a socket.
 tower               = { version = "0.5.3", features = ["util"] }
-toml                = "1.1.4"
+toml                = "1.1.5"
 tower-http          = { version = "0.7.1", features = ["cors", "trace"] }
 tracing             = "0.1.44"
 tracing-subscriber  = { version = "0.3.23", features = ["env-filter"] }
