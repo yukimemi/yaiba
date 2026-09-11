@@ -57,7 +57,7 @@ rcgen               = { version = "0.14.10", default-features = false, features 
 # the root store now comes from `rustls-platform-verifier` — the machine's
 # own store, which is what `yaiba-sync`'s `ca_tls_config` goes out of its
 # way to read so a TLS-inspecting proxy's CA is trusted.
-reqwest             = { version = "0.13.4", default-features = false, features = [
+reqwest             = { version = "0.13.5", default-features = false, features = [
     "form",
     "json",
     "query",
