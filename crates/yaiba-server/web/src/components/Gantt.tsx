@@ -190,20 +190,26 @@ export function Gantt({
   }, [cursor, tasks.length, onlyPane]);
 
   // Follow the cursor horizontally so a task scheduled months out
-  // doesn't require hunting for its bar.
+  // doesn't require hunting for its bar. Keyed on the selected task's
+  // own start/end — not just its id — so a reschedule that leaves the
+  // cursor on the same row (a duration edit, a date shift, a dependency
+  // commit, a drag) still pulls the pane along, the same as moving the
+  // cursor with j/k does.
+  const cursorSched = cursorTask && bySchedule.get(cursorTask.id);
+  const cursorStart = cursorSched?.start;
+  const cursorEnd = cursorSched?.end;
   useEffect(() => {
     const pane = paneRef.current;
-    const sched = cursorTask && bySchedule.get(cursorTask.id);
-    if (!pane || !sched) return;
-    const left = x(sched.start);
-    const right = x(sched.end) + dayW;
+    if (!pane || !cursorStart || !cursorEnd) return;
+    const left = x(cursorStart);
+    const right = x(cursorEnd) + dayW;
     if (left < pane.scrollLeft + 40) {
       pane.scrollTo({ left: Math.max(left - 80, 0) });
     } else if (right > pane.scrollLeft + pane.clientWidth - 40) {
       pane.scrollTo({ left: right - pane.clientWidth + 120 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, cursorTask?.id, zoom, rangeStart]);
+  }, [cursor, cursorTask?.id, zoom, rangeStart, cursorStart, cursorEnd]);
 
   useEffect(() => {
     if (!drag) return;
