@@ -80,6 +80,8 @@ interface Props {
   onToggleTheme: () => void;
   /** Flip between super mode and the neon HUD. */
   onToggleSuper: () => void;
+  /** Flip between glass mode and the neon HUD. */
+  onToggleGlass: () => void;
   /** Open the colour settings — the one setting with no other route. */
   onOpenColours: () => void;
   /** Which language the weekday beside the reference date is in. */
@@ -120,6 +122,7 @@ export function Hud({
   theme,
   onToggleTheme,
   onToggleSuper,
+  onToggleGlass,
   onOpenColours,
   lang,
   onToggleLang,
@@ -353,7 +356,9 @@ export function Hud({
           ? t("◑ office")
           : theme === "super"
             ? t("◈ super")
-            : t("◐ neon")}
+            : theme === "glass"
+              ? t("❆ glass")
+              : t("◐ neon")}
       </button>
       {/* Its own button rather than a third stop on the one beside it:
           office mode is a setting somebody needs in a hurry, in a
@@ -371,6 +376,21 @@ export function Hud({
         }
       >
         {theme === "super" ? t("◈ SUPER") : t("◇ super")}
+      </button>
+      {/* Glass mode's own switch, same bargain `hud__super` makes: its
+          own button rather than a third stop on the theme cycle, and
+          `is-on` is what lights it. */}
+      <button
+        type="button"
+        className={`hud__glass${theme === "glass" ? " is-on" : ""}`}
+        onClick={onToggleGlass}
+        title={
+          theme === "glass"
+            ? t("back to neon mode (gw)")
+            : t("glass mode — slow light, soft edges (gw)")
+        }
+      >
+        {theme === "glass" ? t("❆ GLASS") : t("❈ glass")}
       </button>
       {/* The panel behind it is the only way to reach the palette at all:
           the theme and super mode have keys *and* the two buttons beside

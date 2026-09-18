@@ -134,13 +134,14 @@ yaiba self-update --check    # just tell me whether one exists
 | `co` | hand the row over — the panel lists the names already in use |
 | `gt` | office mode ⇄ neon · `:theme` and `:lang` say it by name |
 | `gs` | super mode ⇄ neon — every effect at maximum · `:super` |
+| `gw` | glass mode ⇄ neon — slow light, soft edges · `:glass` |
 | `gc` | the colours — presets, and every slot by hand · `:colors` |
 | `h` `l` | out / in — a fold, or a cell once `gd` is up · `⏎` `i` `I` `a` `A` `cc` edit it |
 | `>>` `<<` | nest under the row above / move back out |
 | `zm` `zr` | fold one level shallower / deeper · `zM` `zR` all the way |
 | `za` | fold this row · `zf` focus its subtree, `zF` to come back |
 
-## Three modes, and a mouse
+## Four modes, and a mouse
 
 `yaiba` ships a second theme for the times a neon HUD is the wrong
 thing to have open — a meeting room, a shared screen, a status deck.
@@ -181,12 +182,35 @@ this far — the palette rule, so magenta still means the critical path
 and nothing else, and `prefers-reduced-motion`, which turns the whole
 mode's motion off and leaves nothing frozen on screen.
 
+And a fourth, opposite the third. **Glass mode** is the same HUD with
+the brakes left on and the clock turned down instead: the panels frost
+— a blur behind them rather than a colour under them — light drifts
+behind the plan the way it does through water, the cursor row breathes
+rather than sweeps, the critical path still marches but at a slow
+tide's pace, and a stroke still answers at the scale of the whole
+screen, as a soft ripple rather than a shockwave.
+
+Two things it deliberately does not have. No shake on a delete and no
+strikes off the caret while typing — both are fast gestures, and fast
+is the one thing this theme refuses to be.
+
+```text
+gw              glass mode <-> neon mode
+:glass          bare toggles · :glass on / :glass off
+:theme glass    or by name
+```
+
+It rides the same axis super does: `gt` takes you out of glass exactly
+the way it takes you out of super, and the two loud themes cannot be on
+at once — pressing one always turns the other off first, on the way to
+wherever it is going.
+
 The choice is remembered, and a fresh install follows your OS
 preference.
 
 ### The colours are yours
 
-The three modes above decide how loud the screen is. What each colour
+The four modes above decide how loud the screen is. What each colour
 *is* is a separate question, and `gc` opens the panel that answers it:
 twelve named slots, a hex field and a swatch on each, and a handful of
 presets to start from.
@@ -206,7 +230,7 @@ Cyan is the blade, magenta is the critical path and amber is overdue —
 that rule is the reason a row can say something in a colour instead of a
 word, so the panel lets you pick which magenta and not which meaning.
 Two things are deliberately out of reach for the same reason: the glow,
-which is the whole of office mode and lives on `gs`, and anything that is
+which is the whole of office mode and lives on `gs` / `gw`, and anything that is
 not a colour.
 
 The two grounds keep separate palettes, because a fill mixed for a

@@ -77,18 +77,21 @@ export const depKey = (dep: Pick<Dep, "from" | "to">): string =>
   `${dep.from} ${dep.to}`;
 
 /**
- * Super mode's answer to a stroke, at the scale of the whole screen.
+ * The two loud themes' answer to a stroke, at the scale of the whole
+ * screen.
  *
  * The three strokes above are drawn on the thing they happen to. In
- * super mode the screen answers as well: a burst over everything
+ * super and glass the screen answers as well: a burst over everything
  * (`.burst--${kind}`, one element keyed on a counter, exactly the way
- * `.wipe` is) and, for a delete, a shake.
+ * `.wipe` is) — a shockwave in super, a soft ripple in glass — and, for
+ * a delete, super alone answers with a shake; glass refuses to be that
+ * fast.
  *
- * Neither is rendered outside super mode — see the note on `burst` in
- * `App.tsx`. The class names live here rather than inline for the same
- * reason the kinds do: `check-flash.ts` holds `styles.css` to them, and
- * a burst with no rule behind it is an element that costs a render and
- * draws nothing.
+ * Rendered in neither theme outside these two — see the note on `burst`
+ * in `App.tsx`. The class names live here rather than inline for the
+ * same reason the kinds do: `check-flash.ts` holds `styles.css` to
+ * them, and a burst with no rule behind it is an element that costs a
+ * render and draws nothing.
  */
 export const BURST_KINDS = FLASH_KINDS;
 
@@ -98,11 +101,11 @@ export const BURST_KINDS = FLASH_KINDS;
  * Longer than the CSS animation it triggers, exactly as `FLASH_MS` is —
  * and `check-flash.ts` fails the build if a burst outlasts its window.
  * The reason it is *taken down* at all is less obvious: the burst is
- * rendered only in super mode, so one left standing is one that plays
- * again the moment somebody presses `gs`, replaying a gesture that
- * finished minutes ago. The shake rides the same state, so it would
- * likewise keep its class on the shell long after the 240ms it moves
- * for.
+ * rendered only in super or glass, so one left standing is one that
+ * plays again the moment somebody presses `gs` or `gw`, replaying a
+ * gesture that finished minutes ago. Super's shake rides the same
+ * state, so it would likewise keep its class on the shell long after
+ * the 240ms it moves for.
  *
  * Not `FLASH_MS`: two of the three bursts outlast the stroke on the row
  * (the row's `slain` is 200ms against the screen's 240), and clearing on

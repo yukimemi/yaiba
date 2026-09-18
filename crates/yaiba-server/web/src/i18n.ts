@@ -82,6 +82,11 @@ const JA: Record<string, string> = {
   "◈ super": "◈ スーパー",
   "◈ SUPER": "◈ SUPER",
   "◇ super": "◇ スーパー",
+  // Same convention: GLASS stays Latin on the switch, the glyphs read as
+  // frost rather than as a word.
+  "❆ glass": "❆ グラス",
+  "❆ GLASS": "❆ GLASS",
+  "❈ glass": "❈ グラス",
   "◌ local": "◌ ローカル",
   // The glyph carries the meaning at a glance and the word beside it is
   // the one a Japanese schedule uses. 営業日 alone, without 計算 or
@@ -104,6 +109,9 @@ const JA: Record<string, string> = {
   "super mode — every effect at maximum (gs)":
     "スーパーモード — 演出を全部いちばん強く (gs)",
   "back to neon mode (gs)": "ネオンモードに戻す (gs)",
+  "glass mode — slow light, soft edges (gw)":
+    "グラスモード — 光も動きもやわらかく (gw)",
+  "back to neon mode (gw)": "ネオンモードに戻す (gw)",
   "◍ colours": "◍ 配色",
   "colours — every slot, and a few presets (gc)":
     "配色 — 全スロットとプリセット (gc)",
@@ -204,6 +212,7 @@ const JA: Record<string, string> = {
   "neon mode": "ネオンモード",
   "SUPER YAIBA 刃 — everything at maximum":
     "SUPER YAIBA 刃 — 演出全開",
+  "凪 刃 — slow light, soft glass": "凪 刃 — 光もやわらかく、ガラス越しに",
   "dates — click a cell to pick one": "日付列 — セルをクリックで選べます",
   "split at {n}%": "分割 {n}%",
   "compact columns": "コンパクト表示",
@@ -358,10 +367,12 @@ const JA: Record<string, string> = {
   // The suggestion carries the fix, so the sentence only has to say
   // what the rule is — 空白は使えません would say it twice.
   "one word per name — try {joined}": "名前は1語です — {joined} はどうですか",
-  "usage: :theme dark|light|super  (bare :theme toggles office)":
-    "使い方: :theme dark|light|super（引数なしでオフィスと切替）",
+  "usage: :theme dark|light|super|glass  (bare :theme toggles office)":
+    "使い方: :theme dark|light|super|glass（引数なしでオフィスと切替）",
   "usage: :super on|off  (bare :super toggles)":
     "使い方: :super on|off（引数なしで切替）",
+  "usage: :glass on|off  (bare :glass toggles)":
+    "使い方: :glass on|off（引数なしで切替）",
   "usage: :lang en|ja  (bare :lang toggles)":
     "使い方: :lang en|ja（引数なしで切替）",
   "usage: :level <0 or more>  (:level with no argument shows all)":
@@ -502,6 +513,7 @@ const JA: Record<string, string> = {
   "date columns ⇄ compact": "日付列 ⇄ コンパクト",
   "office mode ⇄ neon mode": "オフィス ⇄ ネオン",
   "super mode ⇄ neon mode": "スーパー ⇄ ネオン",
+  "glass mode ⇄ neon mode": "グラス ⇄ ネオン",
   "put the cursor on a row": "その行にカーソルを置く",
   "new task below, at this level": "同じ階層に下へ追加",
   // 担当欄 rather than just 担当: this row names the *thing you click*,
@@ -687,10 +699,11 @@ const JA: Record<string, string> = {
   "move under row n (bare = top level)":
     "n 行目の下へ移す（引数なしで最上位）",
   "focus this subtree / clear": "この部分木に絞る / 解除",
-  "dark / light / super — bare toggles office":
-    "dark / light / super（引数なしでオフィスと切替）",
+  "dark / light / super / glass — bare toggles office":
+    "dark / light / super / glass（引数なしでオフィスと切替）",
   "straight to office mode": "そのままオフィスモードへ",
   "every effect at maximum — bare toggles": "演出全開（引数なしで切替）",
+  "slow light, soft edges — bare toggles": "光も動きもやわらかく（引数なしで切替）",
   "en / ja — bare toggles": "en / ja（引数なしで切替）",
   "colours — presets, and every slot": "配色 — プリセットと全スロット",
   "the same panel — :settings works too": "同じパネル（:settings でも）",

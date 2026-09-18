@@ -42,6 +42,9 @@ import { THEMES } from "../src/theme.ts";
  */
 const SUPER = ':root[data-theme="super"]';
 
+/** The same scope, for the calm theme opposite it. */
+const GLASS = ':root[data-theme="glass"]';
+
 /**
  * The stylesheet with its comments taken out.
  *
@@ -236,17 +239,30 @@ check(
 /** Rules scoped to the loud theme. */
 const superRules = rules.filter((r) => r.selector.includes(SUPER));
 
+/** Rules scoped to the calm theme opposite it. */
+const glassRules = rules.filter((r) => r.selector.includes(GLASS));
+
 check(
   "super mode has rules at all",
   superRules.length > 0,
   `no rule in styles.css is scoped ${SUPER}.`,
 );
 
+check(
+  "glass mode has rules at all",
+  glassRules.length > 0,
+  `no rule in styles.css is scoped ${GLASS}.`,
+);
+
 // 1. Office mode cannot be reached from here. `data-theme` holds one
 //    value, so scoping every rule to this one is what makes that true —
 //    a rule that forgot the scope would light up on a shared screen, and
 //    it would do it in the mode that has no way to turn it off.
-for (const sel of [".burst", ".app--quake", ".app--jolt", ".strike", ".combo"]) {
+//
+//    `.burst` is checked separately from the rest: it is the one
+//    screen-level effect glass keeps from super, so a rule naming it
+//    must carry one of the two loud scopes rather than super's alone.
+for (const sel of [".app--quake", ".app--jolt", ".strike", ".combo"]) {
   const stray = rules.filter(
     (r) => r.selector.includes(sel) && !r.selector.includes(SUPER),
   );
@@ -258,12 +274,27 @@ for (const sel of [".burst", ".app--quake", ".app--jolt", ".strike", ".combo"]) 
   );
 }
 
-// 2. Every element super mode conjures rests invisible. The blanket
-//    `animation: none` under reduced motion is what turns the section
+{
+  const stray = rules.filter(
+    (r) =>
+      r.selector.includes(".burst") &&
+      !r.selector.includes(SUPER) &&
+      !r.selector.includes(GLASS),
+  );
+  check(
+    ".burst is drawn in a loud theme only",
+    stray.length === 0,
+    `these rules mention ".burst" without ${SUPER} or ${GLASS}: ` +
+      stray.map((r) => r.selector.trim()).join(" / "),
+  );
+}
+
+// 2. Every element either theme conjures rests invisible. The blanket
+//    `animation: none` under reduced motion is what turns each section
 //    off, and it can only do that for an effect whose resting state is
 //    nothing — otherwise stopping the clock leaves a sweep frozen
 //    half-way across the screen.
-for (const rule of superRules) {
+for (const rule of [...superRules, ...glassRules]) {
   if (!/content:\s*""/.test(rule.body)) continue;
   check(
     `${rule.selector.trim()} rests at opacity 0`,
@@ -283,13 +314,31 @@ check(
     `animation: none !important for ${SUPER}.`,
 );
 
-// 3. The screen's own answers exist, and the shake is spelled twice.
+check(
+  "glass mode stands down under reduced motion",
+  /:root\[data-theme="glass"\][\s\S]*animation:\s*none\s*!important/.test(
+    reduced,
+  ),
+  `the @media (prefers-reduced-motion: reduce) block has no blanket ` +
+    `animation: none !important for ${GLASS}.`,
+);
+
+// 3. The screen's own answers exist in both themes, and the shake — the
+//    one screen effect glass does not keep — is spelled twice.
 for (const kind of BURST_KINDS) {
   check(`burst: .burst--${kind} is drawn`, draws(`.burst--${kind}`));
+  check(
+    `burst: .burst--${kind} is drawn in super mode`,
+    superRules.some((r) => r.selector.includes(`.burst--${kind}`)),
+  );
+  check(
+    `burst: .burst--${kind} is drawn in glass mode`,
+    glassRules.some((r) => r.selector.includes(`.burst--${kind}`)),
+  );
   // Same bargain as a stroke's, and it arrived for a second reason: the
-  // burst is unmounted on this timer so that entering super mode later
-  // cannot replay a gesture that is over. Too short a window and the
-  // node goes while it is still playing.
+  // burst is unmounted on this timer so that entering either loud theme
+  // later cannot replay a gesture that is over. Too short a window and
+  // the node goes while it is still playing.
   const ms = longestMs(`.burst--${kind}`);
   check(
     `burst: ${kind} fits in the ${BURST_MS[kind]}ms it is mounted for`,

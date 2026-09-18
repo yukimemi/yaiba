@@ -23,6 +23,8 @@
 
 import { readFileSync } from "node:fs";
 
+import { COMMANDS, type ArgContext } from "../src/commands.ts";
+
 import {
   activePreset,
   ground,
@@ -381,24 +383,56 @@ check(
   `\`ground()\` returned something that is not a ground.`,
 );
 
-// Super is not a third ground — it shares the neon block, which is what
-// makes `gs` a question about loudness rather than about hues.
+// Super and glass are not a third ground — each shares the neon block,
+// which is what makes `gs` / `gw` a question about loudness rather than
+// about hues.
 check(
-  "dark and super read the same ground",
-  ground("dark") === ground("super") && ground("light") === "office",
-  `super has become a ground of its own, which means a second copy of the ` +
-    `twelve colours and a palette the panel cannot reach from either tab.`,
+  "dark, super and glass read the same ground",
+  ground("dark") === ground("super") &&
+    ground("dark") === ground("glass") &&
+    ground("light") === "office",
+  `super or glass has become a ground of its own, which means a second ` +
+    `copy of the twelve colours and a palette the panel cannot reach ` +
+    `from either tab.`,
 );
 
 // The tab switches the theme, and coming back from office must not drop
-// somebody out of super — the tab is about hues, `gs` is about loudness.
+// somebody out of super or glass — the tab is about hues, `gs` / `gw`
+// are about loudness.
 check(
-  "the neon tab keeps super",
+  "the neon tab keeps super and glass",
   themeFor("neon", "super") === "super" &&
+    themeFor("neon", "glass") === "glass" &&
     themeFor("neon", "light") === "dark" &&
-    themeFor("office", "super") === "light",
-  `themeFor sends the neon tab to ${themeFor("neon", "super")} from super.`,
+    themeFor("office", "super") === "light" &&
+    themeFor("office", "glass") === "light",
+  `themeFor sends the neon tab to ${themeFor("neon", "super")} from ` +
+    `super and to ${themeFor("neon", "glass")} from glass.`,
 );
+
+// Each loudness switch is two halves — a `case` in `runCommand` and an
+// entry in `COMMANDS` — and only the first one is needed to make the
+// command work when it is typed out in full. A handler with no entry
+// beside it does not exist to `<tab>`: nothing offers the word, and
+// nothing offers `on` / `off` after it — which is exactly the state
+// `:glass` shipped in the first time.
+const noCtx = {
+  data: { tasks: [] },
+  projects: [],
+} as unknown as ArgContext; // neither switch reads the project
+const toggleWords = (name: string): string =>
+  (COMMANDS.find((c) => c.name === name)?.args?.(noCtx, 1, [name]) ?? []).join(
+    ",",
+  );
+for (const name of ["super", "glass"]) {
+  check(
+    `\`:${name}\` completes, word and arguments both`,
+    toggleWords(name) === "on,off",
+    `\`:${name}\` offers "${toggleWords(name)}" where \`on,off\` is ` +
+      `expected — a switch \`runCommand\` handles but \`COMMANDS\` does ` +
+      `not list can only be found by somebody who already knows it.`,
+  );
+}
 
 check(
   "an untouched ground shows the built-in",
