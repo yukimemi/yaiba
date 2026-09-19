@@ -1,21 +1,26 @@
 /**
  * Theme handling, and the palette under it.
  *
- * Three intents, not three colour schemes: `dark` is the neon HUD,
- * `light` is office mode — something you can have open in a meeting room
- * or paste into a status deck without it looking like a toy — and
- * `super` is the neon HUD with the brakes off, for the times the point
- * *is* that it looks like a toy.
+ * Four intents, not four colour schemes: `dark` is the neon HUD, `light`
+ * is office mode — something you can have open in a meeting room or
+ * paste into a status deck without it looking like a toy — `super` is
+ * the neon HUD with the brakes off, for the times the point *is* that
+ * it looks like a toy, and `glass` is the opposite temperament at the
+ * same volume: the brakes stay on and the clock slows down instead —
+ * frosted panels, drifting light, breathing glows, the way a screen
+ * behaves underwater or behind a pane of glass rather than through a
+ * CRT.
  *
- * Super deliberately rides the same axis rather than being a second
- * switch beside it. Two switches would have a fourth combination —
- * office mode with the effects on — that has no meaning and no way to
- * look right, and every rule in `styles.css` would have to carry two
- * attributes to say so. One attribute, three values, and the base
- * `:root` block *is* the dark theme: `light` overrides it into office
- * mode, `super` overrides it upward. The consequence worth knowing is
- * that `gt` takes you out of super the way it takes you out of neon —
- * office mode is somewhere you go *to*, and it wins.
+ * Super and glass deliberately ride the same axis rather than being a
+ * second switch beside it. A second switch would have a fourth
+ * combination — office mode with either mode's effects on — that has no
+ * meaning and no way to look right, and every rule in `styles.css` would
+ * have to carry two attributes to say so. One attribute, four values,
+ * and the base `:root` block *is* the dark theme: `light` overrides it
+ * into office mode, `super` and `glass` each override it upward in their
+ * own direction. The consequence worth knowing is that `gt` takes you
+ * out of either the way it takes you out of neon — office mode is
+ * somewhere you go *to*, and it wins.
  *
  * The choice is applied to `<html data-theme>` and the tab title, and
  * remembered in localStorage, so it survives a reload and is picked up before React
@@ -37,30 +42,31 @@
  * - **`--glow`.** It is the whole of office mode (every shadow is
  *   `calc(Npx * var(--glow))`), so a palette able to set it could light
  *   the neon back up in the one mode whose job is surviving a shared
- *   screen. `gs` is where loudness lives.
+ *   screen. `gs` and `gw` are where loudness lives.
  * - **Layout.** `--row-h`, `--gutter`, the pane metrics and `--mono` are
  *   not colours and are not here.
  *
  * Overrides are stored per *ground* rather than per theme, because that
  * is how the stylesheet is built: `:root` carries the neon colours that
- * `dark` and `super` share, and `:root[data-theme="light"]` replaces
- * them for office mode. Keeping the two apart is also the only honest
- * answer to the alpha trap documented in AGENTS.md — a fill mixed for a
- * near-black background washes out to nothing over white, so one palette
- * spanning both grounds would always be wrong for one of them.
+ * `dark`, `super` and `glass` share, and `:root[data-theme="light"]`
+ * replaces them for office mode. Keeping the two apart is also the only
+ * honest answer to the alpha trap documented in AGENTS.md — a fill mixed
+ * for a near-black background washes out to nothing over white, so one
+ * palette spanning both grounds would always be wrong for one of them.
  */
 
-export type Theme = "dark" | "light" | "super";
+export type Theme = "dark" | "light" | "super" | "glass";
 
-export const THEMES: Theme[] = ["dark", "light", "super"];
+export const THEMES: Theme[] = ["dark", "light", "super", "glass"];
 
 /**
  * Which of the stylesheet's two colour blocks a theme reads.
  *
- * `super` is not a third ground: it turns the glow up and adds a section
- * of animations, and takes its hues from the same `:root` block `dark`
- * does. Anything that looks like a third ground here is a sign somebody
- * has started a second stylesheet.
+ * `super` and `glass` are not a third ground: each turns a different
+ * knob (the glow up, the clock down) and adds a section of animations,
+ * and both take their hues from the same `:root` block `dark` does.
+ * Anything that looks like a third ground here is a sign somebody has
+ * started a second stylesheet.
  */
 export type Ground = "neon" | "office";
 
@@ -70,14 +76,15 @@ export function ground(theme: Theme): Ground {
   return theme === "light" ? "office" : "neon";
 }
 
+
 /**
  * A theme that shows `on`, given where you are now.
  *
  * The settings panel edits one ground at a time and switches to it, on
  * the grounds that editing colours you cannot see is not editing. Coming
- * back to neon from office lands on `dark`; already being in `super`
- * keeps `super`, because the tab is a question about hues and `gs` is
- * the one about loudness.
+ * back to neon from office lands on `dark`; already being in `super` or
+ * `glass` keeps it, because the tab is a question about hues and `gs` /
+ * `gw` are the ones about loudness.
  */
 export function themeFor(on: Ground, current: Theme): Theme {
   if (on === "office") return "light";
@@ -297,7 +304,13 @@ export function applyTheme(theme: Theme): void {
   // same explaining it does in the corner of the HUD. Super says so in
   // the one place a tab has room to.
   document.title =
-    theme === "light" ? "yaiba" : theme === "super" ? "yaiba 刃 SUPER" : "yaiba 刃";
+    theme === "light"
+      ? "yaiba"
+      : theme === "super"
+        ? "yaiba 刃 SUPER"
+        : theme === "glass"
+          ? "yaiba 刃 凪"
+          : "yaiba 刃";
   try {
     localStorage.setItem(THEME_KEY, theme);
   } catch {
@@ -331,9 +344,10 @@ export function applyPalette(theme: Theme, palettes: Palettes): void {
  * The theme to start in: whatever was chosen last, else the OS
  * preference, else dark.
  *
- * Super is remembered like the other two. It is loud, but it is loud
- * because somebody asked for it, and a mode that quietly reset itself
- * every morning would read as the setting not having worked.
+ * Super and glass are remembered like the other two. Both are loud in
+ * their own direction, but they are loud because somebody asked for it,
+ * and a mode that quietly reset itself every morning would read as the
+ * setting not having worked.
  */
 export function initialTheme(): Theme {
   try {

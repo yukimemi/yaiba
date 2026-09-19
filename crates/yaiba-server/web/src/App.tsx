@@ -2340,14 +2340,15 @@ export function App() {
     if (ui.asof !== undefined) setReferenceDate(ui.asof);
     if (ui.theme) {
       setTheme((prev) => {
-        // Three values, two switches. `toggle` is office ⇄ everything
-        // else, so it comes back from super as well — spelled
+        // Four values, three switches. `toggle` is office ⇄ everything
+        // else, so it comes back from super and glass as well — spelled
         // `prev === "light"` rather than `prev === "dark"` precisely for
         // that: the old form read super as "not dark" and sent `gt`
         // *deeper* into the neon end instead of out to the office.
-        // `super-toggle` is the other switch, and lands on neon rather
-        // than on whatever you were in before, because a mode that
-        // remembered would make `gs` mean two different things.
+        // `super-toggle` and `glass-toggle` are the other two switches,
+        // and each lands on neon rather than on whatever you were in
+        // before, because a mode that remembered would make `gs` / `gw`
+        // mean two different things.
         const next: Theme =
           ui.theme === "toggle"
             ? prev === "light"
@@ -2357,7 +2358,11 @@ export function App() {
               ? prev === "super"
                 ? "dark"
                 : "super"
-              : ui.theme!;
+              : ui.theme === "glass-toggle"
+                ? prev === "glass"
+                  ? "dark"
+                  : "glass"
+                : ui.theme!;
         applyTheme(next);
         // The two grounds keep separate colours, and the overrides live
         // as inline properties on `<html>` which outrank every rule in
@@ -2370,7 +2375,9 @@ export function App() {
             ? t("office mode")
             : next === "super"
               ? t("SUPER YAIBA 刃 — everything at maximum")
-              : t("neon mode"),
+              : next === "glass"
+                ? t("凪 刃 — slow light, soft glass")
+                : t("neon mode"),
         );
         return next;
       });
@@ -3694,6 +3701,10 @@ export function App() {
         applyUi({ theme: "super-toggle" });
         break;
 
+      case "gw":
+        applyUi({ theme: "glass-toggle" });
+        break;
+
       case "gc":
         setShowSettings(true);
         break;
@@ -4098,12 +4109,17 @@ export function App() {
     ? (visible.find((t) => t.id === pickingNotes.id) ?? null)
     : null;
 
-  // Super mode's two screen-level effects. Both are decided here rather
-  // than in the stylesheet because both would cost something outside
-  // super mode: the burst is a grid child (see its state), and the
-  // shake's class would sit on `.app` claiming an animation that mode
-  // has no rule for.
+  // The two loud themes' screen-level effects. The burst is decided
+  // here rather than in the stylesheet because it would cost something
+  // outside either theme — it is a grid child (see its state) — and it
+  // is shared: both super and glass answer a stroke at the scale of the
+  // whole screen, just with different CSS for the same class. The
+  // shake is super's alone — glass is the deliberately calm theme, and
+  // a shell that jolted on every delete would be the one thing it
+  // cannot do — so only `superOn` feeds `quake`, and its class would
+  // otherwise sit on `.app` claiming an animation glass has no rule for.
   const superOn = theme === "super";
+  const glassOn = theme === "glass";
   const quake =
     superOn && burst?.kind === "slain"
       ? ` ${QUAKE_CLASSES[burst.n % 2]}`
@@ -4124,7 +4140,7 @@ export function App() {
           animation runs again — restarting one in place needs a reflow
           poke, and this says what it means. */}
       {wipe > 0 && <div key={wipe} className="wipe" aria-hidden="true" />}
-      {superOn && burst && (
+      {(superOn || glassOn) && burst && (
         <div
           key={burst.n}
           className={`burst burst--${burst.kind}`}
@@ -4180,6 +4196,7 @@ export function App() {
         }}
         onToggleTheme={() => applyUi({ theme: "toggle" })}
         onToggleSuper={() => applyUi({ theme: "super-toggle" })}
+        onToggleGlass={() => applyUi({ theme: "glass-toggle" })}
         onOpenColours={() => setShowSettings(true)}
         lang={lang}
         onToggleLang={() => applyUi({ lang: "toggle" })}

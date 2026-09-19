@@ -62,15 +62,16 @@ export interface UiPatch {
   /** Reference date; null means now. */
   asof?: string | null;
   /**
-   * The look, on one axis: neon, office, super.
+   * The look, on one axis: neon, office, super, glass.
    *
-   * Two sentinels rather than one, because there are three values and
-   * two switches on them. `"toggle"` is office ⇄ neon — bare `:theme`
-   * and `gt` — and it leaves super the way it leaves neon, since office
-   * mode is somewhere you go *to*. `"super-toggle"` is super ⇄ neon,
-   * which is `:super` and `gs`.
+   * Three sentinels rather than one, because there are four values and
+   * three switches on them. `"toggle"` is office ⇄ neon — bare `:theme`
+   * and `gt` — and it leaves super and glass the way it leaves neon,
+   * since office mode is somewhere you go *to*. `"super-toggle"` is
+   * super ⇄ neon, which is `:super` and `gs`; `"glass-toggle"` is glass
+   * ⇄ neon, which is `:glass` and `gw`.
    */
-  theme?: Theme | "toggle" | "super-toggle";
+  theme?: Theme | "toggle" | "super-toggle" | "glass-toggle";
   /** Weekday names only; `"toggle"` is what bare `:lang` does. */
   lang?: Lang | "toggle";
   zoom?: Zoom;
@@ -323,6 +324,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: "theme", args: first(() => THEMES) },
   { name: "office" },
   { name: "super", args: first(() => ["on", "off"]) },
+  { name: "glass", args: first(() => ["on", "off"]) },
   { name: "colors", aliases: ["colours", "settings"] },
   { name: "lang", args: first(() => ["en", "ja"]) },
   { name: "asof", aliases: ["as"], args: first(() => DATE_WORDS) },
@@ -1196,7 +1198,9 @@ export function runCommand(
       if (THEMES.includes(arg as Theme)) return { ui: { theme: arg as Theme } };
       if (!arg) return { ui: { theme: "toggle" } };
       return {
-        error: t("usage: :theme dark|light|super  (bare :theme toggles office)"),
+        error: t(
+          "usage: :theme dark|light|super|glass  (bare :theme toggles office)",
+        ),
       };
     }
     case "office":
@@ -1211,6 +1215,14 @@ export function runCommand(
       if (arg === "off") return { ui: { theme: "dark" } };
       if (!arg) return { ui: { theme: "super-toggle" } };
       return { error: t("usage: :super on|off  (bare :super toggles)") };
+    }
+    // Bare `:glass` toggles, the same bargain `:super` makes — glass is
+    // a thing you turn on and off, not a place you go to be readable.
+    case "glass": {
+      if (arg === "on") return { ui: { theme: "glass" } };
+      if (arg === "off") return { ui: { theme: "dark" } };
+      if (!arg) return { ui: { theme: "glass-toggle" } };
+      return { error: t("usage: :glass on|off  (bare :glass toggles)") };
     }
     // Colours are the one appearance setting with no `:` grammar of their
     // own — see `UiPatch.settings`. Bare, because everything it could take
