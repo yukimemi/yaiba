@@ -1,0 +1,105 @@
+# magi competing on the yaiba repository.
+#
+# **Only what is peculiar to this checkout lives here.** The roster, the seat
+# assignment, the shape of a run and the update policy live at the machine
+# layer (`<config_dir>/magi/config.toml`), because none of them are facts about
+# this repository: they are facts about which agent CLIs are installed and what
+# the operator is willing to spend. Stating them once there is the point of
+# having layers, and it keeps this file to the things a different machine would
+# still need to be told.
+#
+# What that leaves, and why each one has to be here:
+#
+# - `[verify]` is unset at the machine layer, so without it `verify.gate` is
+#   an empty array and magi skips the gate entirely, reporting every run
+#   clean regardless of whether it actually passes CI.
+# - `[merge] base` names this repository's branch, and is required at all
+#   because of how this checkout is set up (see below).
+# - `[prompts]` are this project's conventions.
+#
+# Note that an array may be declared in exactly one layer
+# (`Config::refuse_split_arrays`), so `[verify]`'s arrays being here is also
+# why the machine layer's roster arrays stay only there.
+#
+# Rendered by teravars. Tera braces are live everywhere in this file, but
+# comments are stripped before Tera sees them (teravars >= 0.2.2), so a comment
+# may quote `{{ ... }}` freely.
+
+[vars]
+# Shared build cache for the verification commands. Override per machine with
+# MAGI_CACHE. Lives beside its only consumer: `[vars]` is rendered per file, so
+# a value used by this file's templates is stated in this file.
+cache = "{{ env.MAGI_CACHE | default(value='/tmp') }}"
+
+[verify]
+# The real-machine leg, run in the winner's worktree once per review round.
+#
+# CARGO_TARGET_DIR is shared on purpose: each candidate worktree would otherwise
+# compile this crate from scratch, which is by far the slowest thing in a run on
+# a Rust repo. Only the winner's worktree runs these commands, and only one at
+# a time, so nothing contends on cargo's lock.
+e2e = ["CARGO_TARGET_DIR={{ vars.cache }}/yaiba-target cargo test --locked --all-targets"]
+# Same gate as CI: `cargo make check` (Makefile.toml's [tasks.check]) runs
+# editorconfig-check + fmt-check + clippy + test (whose `--doc` step both
+# sides skip, since both gate it on `src/lib.rs` and there is none) +
+# lock-check, which together cover ci.yml's
+# check/test/fmt/editorconfig/clippy/lockfile jobs (lock-check's
+# `cargo check --locked --all-targets` also covers the plain `check` job,
+# since anything that compiles --locked also compiles unlocked).
+#
+# The coverage job (cargo llvm-cov) is deliberately left out of the gate: it
+# uploads to Codecov with `fail_ci_if_error: false`, so it never fails CI
+# either — gating on it here would block merges over something CI itself does
+# not block on.
+#
+# editorconfig is enforced by CI's `editorconfig` job only, not by this gate:
+# tools that must be installed on a specific machine stay in GHA. The
+# `editorconfig-check` task inside `cargo make check` no-ops when the binary
+# is missing, which is fine here.
+#
+# ci.yml is not the only required workflow: `.github/workflows/web.yml` (job
+# `web build`) type-checks and builds the SPA that rust-embed bakes into the
+# binary, then runs a set of `scripts/check-*` assertions, all under
+# `crates/yaiba-server/web`. The web entries below are exactly that workflow's
+# steps, in its order: `bun install --frozen-lockfile`, `bun run build` (the
+# package's `tsc -b && node node_modules/vite/bin/vite.js build`; with no node
+# on PATH, `bun run` aliases `node` to bun), then the check scripts it lists.
+# `check-i18n.mjs` runs under `bun` rather than web.yml's `node`: it only
+# uses `node:fs` / `node:path` / `node:url`, and the magi machine has no node.
+# Makefile.toml's `web-build` task runs *more* check scripts (nest, rows,
+# theme, join, gcal, cal, mobile) than web.yml does; the gate follows web.yml,
+# not web-build, because gating on checks CI does not run would block merges
+# CI itself allows. If web.yml gains those checks, add them here too.
+#
+# The web entries run *after* `cargo make check`, not before: ci.yml compiles
+# and tests the Rust crates with an empty `web/dist/` (build.rs only creates
+# the directory), so building the bundle first would test against a state CI
+# never sees.
+gate = [
+  "CARGO_TARGET_DIR={{ vars.cache }}/yaiba-target cargo make check",
+  "cd crates/yaiba-server/web && bun install --frozen-lockfile",
+  "cd crates/yaiba-server/web && bun run build",
+  "cd crates/yaiba-server/web && bun scripts/check-i18n.mjs",
+  "cd crates/yaiba-server/web && bun scripts/check-folds.ts",
+  "cd crates/yaiba-server/web && bun scripts/check-cells.ts",
+  "cd crates/yaiba-server/web && bun scripts/check-pin.ts",
+  "cd crates/yaiba-server/web && bun scripts/check-rowmenu.ts",
+  "cd crates/yaiba-server/web && bun scripts/check-flash.ts",
+]
+
+[merge]
+# Required here, and in every jj-colocated repo: jj keeps git's HEAD detached at
+# the working-copy commit, so magi cannot infer the base branch from
+# `git symbolic-ref HEAD`. Teaching magi to read the jj bookmark instead is a
+# real feature, not a workaround — tracked as its own competition.
+base = "main"
+
+# Project conventions appended to the node prompts, never merged into them.
+# Repository-wide context lives in AGENTS.md, which every agent already reads
+# from the checkout; these are the things a magi *node* needs to know.
+[prompts]
+all = """
+This repository uses jj (Jujutsu) with a colocated git repo. `git commit` works \
+in a candidate worktree and is what magi expects, but never run `jj` commands \
+and never touch the main working copy.
+"""
