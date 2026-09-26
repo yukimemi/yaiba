@@ -19,6 +19,8 @@ export interface ViewState {
   zoom: Zoom;
   columns: Columns;
   sort: SortKey;
+  /** List hidden tasks too. A view setting, so it stays on this device. */
+  showHidden: boolean;
 }
 
 const VIEW_STATE_KEY = "yaiba:view";
@@ -28,6 +30,7 @@ const DEFAULT_VIEW_STATE: ViewState = {
   zoom: "day",
   columns: "compact",
   sort: "manual",
+  showHidden: false,
 };
 
 /**
@@ -49,6 +52,8 @@ export function initialViewState(): ViewState {
       sort: SORT_KEYS.includes(parsed.sort as SortKey)
         ? (parsed.sort as SortKey)
         : "manual",
+      // Anything but a real true reads as off: hidden is the default.
+      showHidden: parsed.showHidden === true,
     };
   } catch {
     // Unreadable storage or unparseable JSON — start from the defaults.

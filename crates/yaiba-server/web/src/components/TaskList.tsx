@@ -500,6 +500,7 @@ export function TaskList({
               "row",
               `row--${task.status}`,
               sched?.summary && "row--summary",
+              task.hidden && "row--hidden",
               isCursor && "row--cursor",
               rowSelected && spanAllCols && "row--selected",
               sched?.blocked && "row--blocked",
@@ -751,6 +752,11 @@ export function TaskList({
                       }`}
                       onDoubleClick={() => onEditTitle(task.id)}
                     >
+                      {task.hidden && (
+                        <span className="row__hidden-mark" title={t("hidden — shown by zH")}>
+                          ◌{" "}
+                        </span>
+                      )}
                       {task.title || "…"}
                     </span>
                   )}

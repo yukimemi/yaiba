@@ -53,6 +53,7 @@ function task(id: string, title: string, start: string | null): Task {
     due: null,
     actual_start: null,
     actual_end: null,
+    hidden: false,
     progress: 0,
     position: nextId,
     tags: [],

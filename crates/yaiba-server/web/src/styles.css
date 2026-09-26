@@ -2281,6 +2281,11 @@ button.row__date:focus-visible {
   color: var(--ash-dim);
 }
 
+.status__hidden {
+  color: var(--ash-dim);
+  margin-right: 1.5ch;
+}
+
 .status__pending {
   color: var(--edge);
   min-width: 4ch;
@@ -4803,4 +4808,17 @@ button.row__date:focus-visible {
 .hud__asof-input {
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* ---- hidden tasks, when `zH` lists them --------------------------- */
+
+/* Dimmed and marked with ◌, so the rows that carry the flag can be told
+   from the rest and `zh` on one is known to bring it back. */
+.row--hidden,
+.gantt__row--hidden {
+  opacity: 0.45;
+}
+
+.row__hidden-mark {
+  color: var(--ash-dim);
 }

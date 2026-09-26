@@ -80,6 +80,7 @@ export function snapshotPatch(task: Task): Required<TaskPatch> {
     actual_start: task.actual_start,
     actual_end: task.actual_end,
     progress: task.progress,
+    hidden: task.hidden,
     tags: [...task.tags],
   };
 }

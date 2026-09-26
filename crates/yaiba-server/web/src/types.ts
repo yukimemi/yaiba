@@ -31,6 +31,8 @@ export interface Task {
   /** When work actually finished; set on done, cleared on reopen. */
   actual_end: string | null;
   progress: number;
+  /** Operator-set view flag; scheduling ignores it. */
+  hidden: boolean;
   position: number;
   tags: string[];
   created_at: string;
@@ -279,6 +281,7 @@ export type TaskPatch = Partial<
     | "actual_start"
     | "actual_end"
     | "progress"
+    | "hidden"
     | "tags"
   >
 >;

@@ -16,6 +16,8 @@ interface Props {
   message: Message | null;
   pending: string;
   hint: string;
+  /** "N hidden" while the hidden flag is keeping rows off the list. */
+  hiddenNote: string;
   completion: Completion | null;
 }
 
@@ -27,6 +29,7 @@ export function StatusLine({
   message,
   pending,
   hint,
+  hiddenNote,
   completion,
 }: Props) {
   const typing = mode === "command" || mode === "search";
@@ -60,6 +63,7 @@ export function StatusLine({
           >
             {message?.text ?? ""}
           </span>
+          {hiddenNote && <span className="status__hidden">{hiddenNote}</span>}
           <span className="status__hint">{hint}</span>
         </>
       )}
