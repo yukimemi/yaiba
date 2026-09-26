@@ -524,6 +524,11 @@ const JA: Record<string, string> = {
   "filter, or write a name that is new": "絞り込み、または新しい名前を入力",
   "walk the names in use": "使われている名前を移動",
   "open the notes panel": "メモパネルを開く",
+  "open the link in the notes — a list when there are several":
+    "メモ内のリンクを開く — 複数あれば一覧から選ぶ",
+  "no link in the notes": "メモにリンクがありません",
+  "links": "リンク",
+  "j / k move · enter open · esc cancel": "j / k 移動 · enter 開く · esc 取消",
   "the same panel, from the marker": "同じパネルをマーカーから開く",
   "save & close": "保存して閉じる",
   "a quick one-line note without the panel": "パネルなしで一行だけ手早く",

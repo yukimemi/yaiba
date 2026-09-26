@@ -205,6 +205,7 @@ const groups = (): Group[] => [
     title: t("NOTES"),
     keys: [
       ["gn", t("open the notes panel")],
+      ["gx", t("open the link in the notes — a list when there are several")],
       ["click ✎", t("the same panel, from the marker")],
       ["ctrl+⏎ / esc", t("save & close")],
       [":notes ⟨t⟩", t("a quick one-line note without the panel")],

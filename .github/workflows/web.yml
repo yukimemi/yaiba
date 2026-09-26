@@ -130,3 +130,9 @@ jobs:
         # `prefers-reduced-motion` is not a preference to honour when
         # convenient. Neither is visible to `tsc`.
         run: bun scripts/check-flash.ts
+
+      - name: Check the link picker
+        working-directory: crates/yaiba-server/web
+        # `gx` chooses between nothing, one link and a picker from the
+        # note's distinct URLs; a wrong count type-checks and misfires.
+        run: bun scripts/check-links.ts
