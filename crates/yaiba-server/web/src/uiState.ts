@@ -25,6 +25,18 @@ export interface ViewState {
 
 const VIEW_STATE_KEY = "yaiba:view";
 
+// The one place a raw value becomes a view setting, shared by the
+// localStorage read below and the URL fragment (urlState.ts): both are
+// untrusted input that must degrade field by field.
+export const asView = (v: unknown): View | undefined =>
+  VIEWS.includes(v as View) ? (v as View) : undefined;
+export const asZoom = (v: unknown): Zoom | undefined =>
+  ZOOMS.includes(v as Zoom) ? (v as Zoom) : undefined;
+export const asColumns = (v: unknown): Columns | undefined =>
+  COLUMNS.includes(v as Columns) ? (v as Columns) : undefined;
+export const asSort = (v: unknown): SortKey | undefined =>
+  SORT_KEYS.includes(v as SortKey) ? (v as SortKey) : undefined;
+
 const DEFAULT_VIEW_STATE: ViewState = {
   view: "split",
   zoom: "day",
@@ -44,14 +56,10 @@ export function initialViewState(): ViewState {
     if (!saved) return DEFAULT_VIEW_STATE;
     const parsed = JSON.parse(saved) as Partial<ViewState>;
     return {
-      view: VIEWS.includes(parsed.view as View) ? (parsed.view as View) : "split",
-      zoom: ZOOMS.includes(parsed.zoom as Zoom) ? (parsed.zoom as Zoom) : "day",
-      columns: COLUMNS.includes(parsed.columns as Columns)
-        ? (parsed.columns as Columns)
-        : "compact",
-      sort: SORT_KEYS.includes(parsed.sort as SortKey)
-        ? (parsed.sort as SortKey)
-        : "manual",
+      view: asView(parsed.view) ?? "split",
+      zoom: asZoom(parsed.zoom) ?? "day",
+      columns: asColumns(parsed.columns) ?? "compact",
+      sort: asSort(parsed.sort) ?? "manual",
       // Anything but a real true reads as off: hidden is the default.
       showHidden: parsed.showHidden === true,
     };

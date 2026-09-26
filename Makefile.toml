@@ -252,6 +252,7 @@ bun scripts/check-cal.ts
 bun scripts/check-mobile.ts
 bun scripts/check-links.ts
 bun scripts/check-hidden.ts
+bun scripts/check-urlstate.ts
 node node_modules/vite/bin/vite.js build
 '''
 

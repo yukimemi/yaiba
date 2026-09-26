@@ -11,6 +11,12 @@ interface Props {
   onForget: (name: string) => void;
   /** Cut the *active* project loose from its peers. Always confirmed. */
   onLeave: () => void;
+  /**
+   * Join the project a shared link names, after the user said yes. Only
+   * asked of a `join` confirmation, which App opens for a link whose
+   * ticket matches none of the projects here.
+   */
+  onJoin?: () => void;
   onClose: () => void;
   /** The last action that failed, or null. Shown next to the prompt. */
   error: string | null;
@@ -47,7 +53,7 @@ export type Mode =
    * there is no way back without a ticket from whoever they left. So
    * they ask for opposite reasons, and the question has to say which.
    */
-  | { kind: "confirm"; verb: "forget" | "leave"; target: string };
+  | { kind: "confirm"; verb: "forget" | "leave" | "join"; target: string };
 
 /**
  * Score a subsequence match, or return null when `query` isn't one.
@@ -85,6 +91,7 @@ export function ProjectPalette({
   onRename,
   onForget,
   onLeave,
+  onJoin,
   onClose,
   error,
   onDismissError,
@@ -165,6 +172,7 @@ export function ProjectPalette({
     }
     if (mode.kind === "confirm") {
       if (mode.verb === "leave") onLeave();
+      else if (mode.verb === "join") onJoin?.();
       else onForget(mode.target);
       return;
     }
@@ -186,8 +194,11 @@ export function ProjectPalette({
     // handler, which would move the task cursor behind the palette.
     const key = e.key;
     if (key === "Escape" || (e.ctrlKey && key === "[")) {
-      if (mode.kind === "filter") onClose();
-      else backToFilter();
+      // A join was never asked for from here: backing out of the question
+      // means no, not "show me the project list".
+      if (mode.kind === "filter" || (mode.kind === "confirm" && mode.verb === "join")) {
+        onClose();
+      } else backToFilter();
     } else if (key === "Enter") {
       commit();
     } else if (mode.kind !== "filter") {
@@ -235,13 +246,21 @@ export function ProjectPalette({
           <span className="palette__sigil">{sigil}</span>
           {mode.kind === "confirm" ? (
             <span className="palette__ask">
-              {mode.verb === "leave" ? t("leave the group") : t("forget")}{" "}
+              {mode.verb === "leave"
+                ? t("leave the group")
+                : mode.verb === "join"
+                  ? t("join")
+                  : t("forget")}{" "}
               <strong>{mode.target}</strong>
               {mode.verb === "leave"
                 ? t(
                     "? its ticket changes, so every replica holding the old one is cut off — your other machines too",
                   )
-                : t("? it leaves the list — the database stays on disk")}
+                : mode.verb === "join"
+                  ? t(
+                      "? the link's ticket opens someone's project here as a new local one, and makes you a peer of their replica — enter to join, esc to cancel",
+                    )
+                  : t("? it leaves the list — the database stays on disk")}
             </span>
           ) : (
             <input

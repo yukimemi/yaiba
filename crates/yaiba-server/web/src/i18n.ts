@@ -310,6 +310,38 @@ const JA: Record<string, string> = {
   "left · there was nobody to cut · new ticket":
     "離脱しました · 切断する相手はいませんでした · チケットが変わりました",
   "joined · {name}": "参加しました · {name}",
+  "usage: :url [view]":
+    "使い方: :url [view]",
+  "usage: :open <link or #fragment>":
+    "使い方: :open <リンクまたは #フラグメント>",
+  "link opened":
+    "リンクを開きました",
+  "not a yaiba link — nothing changed":
+    "yaiba のリンクではありません — 何も変更していません",
+  "the link's ticket is not valid — nothing changed":
+    "リンクのチケットが不正です — 何も変更していません",
+  "sync is off — started with --no-sync, so the link's project can't be joined":
+    "同期は無効です(--no-sync) — リンクのプロジェクトには参加できません",
+  "link copied without the ticket · only for someone who already has this project · :open on another port":
+    "チケットなしでリンクをコピーしました · このプロジェクトを既に持つ相手向け · 別ポートの相手は :open",
+  "link copied · it includes the project ticket: anyone holding it can read and write this project · :open on another port":
+    "リンクをコピーしました · チケット入り: 持つ人は誰でもこのプロジェクトを読み書きできます · 別ポートの相手は :open",
+  "link copied · this project has no ticket, so it reproduces the view on the same project only · :open on another port":
+    "リンクをコピーしました · このプロジェクトにはチケットがないため、同じプロジェクト上のビューのみ再現します · 別ポートの相手は :open",
+  " · folds left out (too long)":
+    " · 折りたたみは長すぎるため省きました",
+  "copy this link by hand · {url}":
+    "手動でコピーしてください · {url}",
+  "join":
+    "参加",
+  "? the link's ticket opens someone's project here as a new local one, and makes you a peer of their replica — enter to join, esc to cancel":
+    "? リンクのチケットで相手のプロジェクトを新しいローカルプロジェクトとして開き、相手のレプリカのピアになります — ⏎ で参加、esc で中止",
+  "copy a link to this view — with the ticket, or `view` without it":
+    "このビューへのリンクをコピー — チケット付き、`view` を付けるとなし",
+  "apply a pasted link (or its #fragment) to this page":
+    "貼り付けたリンク(または #フラグメント)をこのページに適用",
+  "a link with a ticket lets whoever holds it read and write this project, like the ticket itself — the # part never reaches the server but stays in history and wherever it is pasted":
+    "チケット入りリンクは、持つ人にこのプロジェクトの読み書きを許します(チケットと同じ)— # 以降はサーバには送られませんが、履歴や貼り付け先には残ります",
 
   // ---- the google calendar ---------------------------------------
   // 「書き込む」rather than プッシュ: the CLI's word is `push`, but what

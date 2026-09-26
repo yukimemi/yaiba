@@ -984,6 +984,33 @@ Both were spelled `join` until v0.21 — the `--join` *flag* merged, the
 back, guessing wrong cost people the separation they had set up. The flag
 now refuses and names both replacements.
 
+### Sharing a view as a link
+
+The address bar is always a link to what is on screen — view, zoom,
+columns, sort, filter, folds, focus, the `:asof` date, the cursor row and
+the show-hidden toggle (`#view=split&sort=due&fold=…`). Theme, colours,
+language and the split width are yours and are not in it. It is the URL
+*fragment*, so it never reaches the server; opening one overrides your
+saved view for that session without rewriting it, until you change
+something yourself. Task ids are the same on every replica, so ids the
+recipient does not have are ignored.
+
+- `:url` (or `gL`) copies the full URL **with this project's ticket**, so
+  the recipient lands on the project — switched to if they already have it
+  (matched by the ticket's room key, not by name), or offered as a join
+  behind a confirmation. `:url view` leaves the ticket out, for someone who
+  already has the project. (`:link` and `:share` were already taken, by
+  dependencies and by `:ticket`.)
+- `:open <link>` (alias `:goto`) takes a pasted URL or a bare `#…` fragment
+  and applies only the fragment to the page you are on — for a recipient
+  on another host or port, since a copied URL carries the sender's origin.
+- **A link with a ticket is the ticket.** Whoever holds it can read and
+  write that project. The fragment is not sent to the server, but it does
+  land in browser history and wherever the link is pasted. The address bar
+  itself never contains the ticket; only `:url` does, when you ask.
+- The fold list is the only part that grows: past 2000 characters it is
+  left out of the link (and `:url` says so) — roughly fifty folded rows.
+
 ### `leave` is the way back out
 
 ```sh
