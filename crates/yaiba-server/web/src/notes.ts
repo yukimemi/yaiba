@@ -48,3 +48,28 @@ function trimTrailingPunctuation(url: string): string {
   }
   return url;
 }
+
+/**
+ * The URLs `gx` offers for a row: `noteLinks`, each address once.
+ *
+ * The same URL pasted twice in a note is one destination, and a picker
+ * with two identical lines would ask a question that has no answer.
+ */
+export function linksToOpen(text: string): string[] {
+  return [...new Set(noteLinks(text))];
+}
+
+/**
+ * Open a note's link the way the panel's own `<a>` does: a new tab, no
+ * `opener`, no referrer. Call it synchronously from the key event, or the
+ * browser's popup blocker takes it for a script-made window.
+ */
+export function openLink(url: string): void {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/** Move a picker cursor by `delta`, wrapping — a short list is quicker from either end. */
+export function stepCursor(at: number, delta: number, length: number): number {
+  if (length === 0) return 0;
+  return (((at + delta) % length) + length) % length;
+}

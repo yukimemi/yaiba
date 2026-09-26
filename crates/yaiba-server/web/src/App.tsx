@@ -101,6 +101,8 @@ import {
   saveViewState,
   type ProjectUiState,
 } from "./uiState";
+import { LinkPicker } from "./components/LinkPicker";
+import { linksToOpen, openLink } from "./notes";
 import { applyOps, inversePatch, type Op, type Step } from "./ops";
 import type { AppData, Dep, Status, Task, TaskPatch } from "./types";
 import {
@@ -266,6 +268,7 @@ export function App() {
 
   const [projects, setProjects] = useState<ProjectsInfo>({ projects: [], active: "" });
   const [showProjects, setShowProjects] = useState(false);
+  const [pickingLink, setPickingLink] = useState<{ urls: string[] } | null>(null);
   /**
    * What the palette opens in, when a command already knows.
    *
@@ -3333,6 +3336,19 @@ export function App() {
       case "gn":
         openNotes(current);
         break;
+      // `gx`, vim's "go to link": the keyboard's way to what the ⛓
+      // marker only points at. One link opens; several ask which.
+      case "gx": {
+        const urls = current ? linksToOpen(current.notes ?? "") : [];
+        if (urls.length === 0) {
+          say(t("no link in the notes"));
+        } else if (urls.length === 1) {
+          openLink(urls[0]);
+        } else {
+          setPickingLink({ urls });
+        }
+        break;
+      }
       case "<space>":
         toggleDone(selection);
         leaveVisual();
@@ -3731,7 +3747,15 @@ export function App() {
     const activeMode = modeRef.current;
     // The palette and the date picker each run their own input and own
     // every key while up, exactly as insert / command / search do.
-    if (showProjects || showSettings || picking || pickingOwner || pickingNotes) return;
+    if (
+      showProjects ||
+      showSettings ||
+      picking ||
+      pickingOwner ||
+      pickingNotes ||
+      pickingLink
+    )
+      return;
     // The row menu is the same bargain — it runs its own keyboard while
     // it is up, and hands back `esc`.
     if (rowMenu) return;
@@ -4387,6 +4411,13 @@ export function App() {
         />
       )}
       {showHelp && <Help onClose={() => setShowHelp(false)} />}
+      {pickingLink && (
+        <LinkPicker
+          urls={pickingLink.urls}
+          onPick={openLink}
+          onClose={() => setPickingLink(null)}
+        />
+      )}
       {showProjects && (
         <ProjectPalette
           projects={projects.projects}
