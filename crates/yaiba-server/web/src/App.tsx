@@ -1264,13 +1264,14 @@ export function App() {
       setCollapsed(new Set());
       setFilter("");
     }
+    // Read even for a complete link: the address bar is written as one, so
+    // a plain reload arrives here, and the saved fold depth and `zF`
+    // memory (which no link carries) must survive it.
     let base: ProjectUiState = {};
-    if (!full) {
-      try {
-        base = await api.getUi();
-      } catch {
-        // Older server or dropped connection: nothing saved to start from.
-      }
+    try {
+      base = await api.getUi();
+    } catch {
+      // Older server or dropped connection: nothing saved to start from.
     }
     if (full || state.asof !== undefined) {
       asofRef.current = state.asof ?? null;
@@ -1282,21 +1283,28 @@ export function App() {
     pendingLinkRef.current = opts.afterJoin && !resolved ? { state, tries: 0 } : null;
 
     if (!full) applyProjectUi(base);
-    else {
-      foldLevelRef.current = null;
-      foldMemoryRef.current = null;
-    }
     const nextFilter = state.filter ?? (full ? "" : (base.filter ?? ""));
     const nextCollapsed =
       state.fold !== undefined ? (pruned.fold ?? []) : full ? [] : (base.collapsed ?? []);
     const nextFocus =
       state.focus !== undefined ? (pruned.focus ?? null) : full ? null : (base.focus ?? null);
-    if (state.fold !== undefined) foldLevelRef.current = null;
-    if (state.focus !== undefined) foldMemoryRef.current = null;
+    if (full) {
+      // The depth and the focus memory describe the folds they were saved
+      // with; they stay only when the link left those folds as they were.
+      const same =
+        uiKey(nextCollapsed, nextFocus, "") ===
+        uiKey(base.collapsed ?? [], base.focus ?? null, "");
+      foldLevelRef.current = same ? (base.foldLevel ?? null) : null;
+      foldMemoryRef.current = same ? (base.foldMemory ?? null) : null;
+    } else {
+      if (state.fold !== undefined) foldLevelRef.current = null;
+      if (state.focus !== undefined) foldMemoryRef.current = null;
+    }
     setFilter(nextFilter);
     setCollapsed(new Set(nextCollapsed));
     setFocus(nextFocus);
-    putCursor(pruned.cursor ?? null);
+    // A hand-typed fragment that names no cursor leaves the cursor alone.
+    if (full || state.cursor !== undefined) putCursor(pruned.cursor ?? null);
 
     const v = viewRef.current;
     const nextView: ViewState = {
