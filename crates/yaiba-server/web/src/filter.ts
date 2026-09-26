@@ -1,3 +1,4 @@
+import { dropHidden } from "./hidden";
 import type { Scheduled, Task, TaskId } from "./types";
 
 export type SortKey =
@@ -321,6 +322,17 @@ export interface ViewOptions {
   collapsed: Set<TaskId>;
   /** Show only this subtree, including the root itself. */
   focus: TaskId | null;
+  /** List tasks carrying the hidden flag too. Off by default. */
+  showHidden: boolean;
+}
+
+/** The rows on screen, and what the hidden flag took off them. */
+export interface VisibleView {
+  rows: Task[];
+  /** How many rows in the focus are off the screen for being hidden. */
+  hiddenCount: number;
+  /** Which ones — the cursor uses it to know its row left. */
+  dropped: Set<TaskId>;
 }
 
 /**
@@ -484,7 +496,23 @@ export function visibleTasks(
   bySchedule: Map<TaskId, Scheduled>,
   options: ViewOptions,
 ): Task[] {
-  const { query, sort, collapsed, focus } = options;
+  return visibleView(tasks, bySchedule, options).rows;
+}
+
+/**
+ * `visibleTasks` plus what the hidden flag removed.
+ *
+ * The stages run focus, then hidden, then the query, then sort and folds.
+ * Hidden sits before the query on purpose: the query re-adds the
+ * ancestors of every match, and if it ran first a hidden parent would
+ * come back for the sake of a matching child.
+ */
+export function visibleView(
+  tasks: Task[],
+  bySchedule: Map<TaskId, Scheduled>,
+  options: ViewOptions,
+): VisibleView {
+  const { query, sort, collapsed, focus, showHidden } = options;
   const byId = new Map(tasks.map((t) => [t.id, t]));
 
   let pool = tasks;
@@ -493,6 +521,9 @@ export function visibleTasks(
       task.id === focus || ancestorsOf(task.id, byId).includes(focus);
     pool = tasks.filter(inFocus);
   }
+
+  const stage = dropHidden(pool, tasks, showHidden);
+  pool = stage.shown;
 
   if (query) {
     const keep = new Set<TaskId>();
@@ -504,11 +535,19 @@ export function visibleTasks(
     pool = pool.filter((t) => keep.has(t.id));
   }
 
-  if (sort !== "manual") return flatSorted(pool, bySchedule, sort);
+  const done = (rows: Task[]): VisibleView => ({
+    rows,
+    hiddenCount: stage.dropped.size,
+    dropped: stage.dropped,
+  });
+
+  if (sort !== "manual") return done(flatSorted(pool, bySchedule, sort));
 
   const ordered = treeOrder(pool, focus ? null : null);
-  return ordered.filter(
-    (task) => !ancestorsOf(task.id, byId).some((a) => collapsed.has(a)),
+  return done(
+    ordered.filter(
+      (task) => !ancestorsOf(task.id, byId).some((a) => collapsed.has(a)),
+    ),
   );
 }
 

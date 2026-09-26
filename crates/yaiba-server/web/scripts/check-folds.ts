@@ -61,6 +61,7 @@ const tasks: Task[] = ROWS.map((r, i) => ({
   due: null,
   actual_start: null,
   actual_end: null,
+  hidden: false,
   progress: 0,
   position: i,
   tags: [],
@@ -93,6 +94,7 @@ function shown(collapsed: Set<string>): string {
     sort: "manual",
     collapsed,
     focus: null,
+    showHidden: false,
   })
     .map((t) => t.id)
     .join(" ");

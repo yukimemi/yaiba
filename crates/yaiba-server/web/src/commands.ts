@@ -53,6 +53,8 @@ export interface UiPatch {
   view?: View;
   /** `"toggle"` flips between the two — what bare `:dates` and `gd` do. */
   columns?: Columns | "toggle";
+  /** List hidden tasks too; `"toggle"` is bare `:hidden` and `zH`. */
+  showHidden?: boolean | "toggle";
   /** The list's percent of the split view — `:split 40` and the grip. */
   listWidth?: number;
   /** Show only this subtree; null clears the focus. */
@@ -293,6 +295,13 @@ export const COMMANDS: CommandSpec[] = [
     ],
   },
   { name: "sort", args: first(() => SORT_KEYS) },
+  { name: "hide", args: first(() => ["done"]) },
+  { name: "unhide" },
+  {
+    name: "hidden",
+    aliases: ["showhidden"],
+    args: first(() => ["on", "off"]),
+  },
   { name: "new", aliases: ["n"] },
   { name: "delete", aliases: ["d"] },
   { name: "due", args: first(() => DATE_WORDS) },
@@ -819,6 +828,16 @@ export function runCommand(
         ui: { filter: arg },
         message: arg ? t("filter: {q}", { q: arg }) : t("filter cleared"),
       };
+    // The view toggle: whether hidden tasks are listed at all. Not
+    // `:hide`, which sets the flag on rows.
+    case "hidden":
+    case "showhidden": {
+      if (!arg) return { ui: { showHidden: "toggle" } };
+      if (arg !== "on" && arg !== "off") {
+        return { error: t("usage: :hidden [on|off]  (bare toggles)") };
+      }
+      return { ui: { showHidden: arg === "on" } };
+    }
     case "sort": {
       if (!SORT_KEYS.includes(arg as SortKey)) {
         return { error: t("usage: :sort {list}", { list: SORT_KEYS.join("|") }) };
@@ -1069,6 +1088,27 @@ export function runCommand(
       const title = arg.trim();
       if (!title) return { error: t("usage: :title ⟨text⟩") };
       return patchSelection(selection, () => ({ title }), t("title"));
+    }
+    // Sets the flag on the cursor row or the selection. `:hide done` is
+    // the "clear the board" case: every done task not yet hidden, wherever
+    // it is in the plan, ignoring the selection and the filter.
+    case "hide":
+    case "unhide": {
+      const hide = head === "hide";
+      if (hide && arg === "done") {
+        const targets = data.tasks.filter((t) => t.status === "done" && !t.hidden);
+        if (!targets.length) return { message: t("no done tasks to hide") };
+        return patchSelection(targets, () => ({ hidden: true }), t("hide done"));
+      }
+      if (arg) {
+        return { error: hide ? t("usage: :hide [done]") : t("usage: :unhide") };
+      }
+      if (!selection.length) return needTask();
+      return patchSelection(
+        selection,
+        () => ({ hidden: hide }),
+        hide ? t("hide") : t("unhide"),
+      );
     }
     case "assign":
     case "owner": {

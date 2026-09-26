@@ -132,6 +132,7 @@ const groups = (): Group[] => [
       ["8/14", t("a due date — this colour is overdue"), "help__key--due"],
       ["▸ / ▾", t("a summary, folded / open")],
       ["[ ] [x]", t("todo / done — click it")],
+      ["◌", t("hidden — shown by zH")],
     ],
   },
   {
@@ -143,6 +144,7 @@ const groups = (): Group[] => [
       ["zM / zR", t("fold to projects only / unfold all")],
       ["za", t("toggle this row · zo open · zc close")],
       ["zf / zF", t("focus this subtree / show everything")],
+      ["zh / zH", t("hide this row (or unhide it) / show hidden rows")],
     ],
   },
   {
@@ -158,6 +160,9 @@ const groups = (): Group[] => [
       [":tag +a -b", t("add / remove tags")],
       [":assign ⟨n⟩", t("hand it to somebody — bare clears")],
       [":title ⟨t⟩", t("rename — the whole selection")],
+      [":hide [done]", t("flag hidden — bare: the row · done: every done task")],
+      [":unhide", t("take the hidden flag off")],
+      [":hidden [on|off]", t("show or hide the hidden rows")],
       [":notes ⟨t⟩", t("attach a note — bare clears · click the ✎")],
       [":dep ⟨n⟩", t("wait for row n")],
       [":dep ⟨n⟩ +0", t("…and may start the same day")],

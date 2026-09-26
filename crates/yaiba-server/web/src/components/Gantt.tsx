@@ -429,7 +429,9 @@ export function Gantt({
                 key={task.id}
                 data-task-id={task.id}
                 ref={index === cursor ? cursorRowRef : undefined}
-                className={`gantt__row${index === cursor ? " gantt__row--cursor" : ""}`}
+                className={`gantt__row${index === cursor ? " gantt__row--cursor" : ""}${
+                  task.hidden ? " gantt__row--hidden" : ""
+                }`}
                 style={{ top: index * ROW_H }}
                 onMouseDown={() => onPick(task.id)}
                 // A bar is a row, so it answers the right button the same
@@ -595,6 +597,7 @@ export function Gantt({
                     className="gantt__label"
                     style={{ left: left + barW + 6 }}
                   >
+                    {task.hidden ? "◌ " : ""}
                     {task.title}
                   </div>
                 )}

@@ -99,6 +99,11 @@ pub struct Task {
     /// 0..=100.
     #[serde(default)]
     pub progress: i64,
+    /// Operator-set flag that drops the task out of the normal view
+    /// without deleting it. Never read by the scheduler: a hidden task
+    /// still takes part in dates, dependencies and the critical path.
+    #[serde(default)]
+    pub hidden: bool,
     /// Manual ordering key for the list view.
     pub position: f64,
     #[serde(default)]
@@ -198,6 +203,8 @@ pub struct TaskPatch {
     pub actual_end: Option<Option<NaiveDate>>,
     #[serde(default)]
     pub progress: Option<i64>,
+    #[serde(default)]
+    pub hidden: Option<bool>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
 }

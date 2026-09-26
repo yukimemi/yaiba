@@ -136,3 +136,9 @@ jobs:
         # `gx` chooses between nothing, one link and a picker from the
         # note's distinct URLs; a wrong count type-checks and misfires.
         run: bun scripts/check-links.ts
+
+      - name: Check the hidden flag
+        working-directory: crates/yaiba-server/web
+        # Hiding is a view rule applied in one place (`hidden.ts`); a
+        # wrong parent-subtree or cursor rule type-checks and misfires.
+        run: bun scripts/check-hidden.ts

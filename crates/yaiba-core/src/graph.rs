@@ -724,6 +724,7 @@ mod tests {
             due: None,
             actual_start: None,
             actual_end: None,
+            hidden: false,
             progress: 0,
             position: n as f64,
             tags: Vec::new(),

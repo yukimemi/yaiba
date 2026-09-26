@@ -19,10 +19,10 @@ use crate::calendar::{Calendar, CalendarMode, DayMark, HolidaySet, parse_week_ma
 use crate::crdt::{
     CAL_KEY, Entry, FIELD_ACTUAL_END, FIELD_ACTUAL_START, FIELD_ASSIGNEE, FIELD_CAL_HOLIDAYS,
     FIELD_CAL_MODE, FIELD_CAL_WEEK, FIELD_CREATED, FIELD_DELETED, FIELD_DUE, FIELD_DURATION,
-    FIELD_EXISTS, FIELD_LAG, FIELD_NOTES, FIELD_PARENT, FIELD_POSITION, FIELD_PRIORITY,
-    FIELD_PROGRESS, FIELD_START, FIELD_STATUS, FIELD_TITLE, TAG_PREFIX, VersionVector, dep_key,
-    holiday_field, log_key, parse_dep_key, parse_holiday_field, parse_log_key, parse_task_key,
-    task_key,
+    FIELD_EXISTS, FIELD_HIDDEN, FIELD_LAG, FIELD_NOTES, FIELD_PARENT, FIELD_POSITION,
+    FIELD_PRIORITY, FIELD_PROGRESS, FIELD_START, FIELD_STATUS, FIELD_TITLE, TAG_PREFIX,
+    VersionVector, dep_key, holiday_field, log_key, parse_dep_key, parse_holiday_field,
+    parse_log_key, parse_task_key, task_key,
 };
 use crate::graph;
 use crate::hlc::{Clock, Hlc, NodeId};
@@ -447,6 +447,7 @@ impl Store {
                 FIELD_PROGRESS.into(),
                 json!(task.progress.clamp(0, 100)),
             ),
+            (key.clone(), FIELD_HIDDEN.into(), json!(task.hidden)),
             (key.clone(), FIELD_POSITION.into(), json!(task.position)),
             (
                 key.clone(),
@@ -533,6 +534,9 @@ impl Store {
         }
         if let Some(v) = patch.progress {
             writes.push((key.clone(), FIELD_PROGRESS.into(), json!(v.clamp(0, 100))));
+        }
+        if let Some(v) = patch.hidden {
+            writes.push((key.clone(), FIELD_HIDDEN.into(), json!(v)));
         }
 
         // Stamp the actual dates from the status transition, unless the
@@ -1106,6 +1110,7 @@ fn materialize(entries: &[Entry]) -> Snapshot {
             actual_start: field_date(fields, FIELD_ACTUAL_START),
             actual_end: field_date(fields, FIELD_ACTUAL_END),
             progress: field_i64(fields, FIELD_PROGRESS).unwrap_or(0).clamp(0, 100),
+            hidden: field_bool(fields, FIELD_HIDDEN).unwrap_or(false),
             position: fields
                 .get(FIELD_POSITION)
                 .and_then(|e| e.value.as_f64())
@@ -1358,6 +1363,30 @@ mod tests {
         // write comes back empty after a delete is taken back.
         let restored = store.put_task(&task).unwrap();
         assert_eq!(restored.assignee, "yuki");
+    }
+
+    #[test]
+    fn hidden_is_a_flag_that_survives_delete_and_restore() {
+        let mut store = Store::open_in_memory().unwrap();
+        let task = store.create_task(new_task("board")).unwrap();
+        assert!(!task.hidden, "tasks are born visible");
+
+        let hidden = store
+            .patch_task(
+                task.id,
+                TaskPatch {
+                    hidden: Some(true),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(hidden.hidden);
+        assert_eq!(hidden.status, task.status, "hiding is not a status change");
+        assert_eq!(hidden.done_at, task.done_at);
+
+        store.delete_task(task.id).unwrap();
+        let restored = store.put_task(&hidden).unwrap();
+        assert!(restored.hidden, "put_task must write the flag back");
     }
 
     #[test]

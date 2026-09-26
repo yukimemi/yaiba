@@ -305,6 +305,10 @@ pub struct UpdateTask {
     #[schemars(description = "Percent complete, 0 to 100.")]
     pub progress: Option<i64>,
     #[schemars(
+        description = "Hide (true) or unhide (false) the task. A view flag only: it never changes status, dates or scheduling."
+    )]
+    pub hidden: Option<bool>,
+    #[schemars(
         description = "Pinned start, YYYY-MM-DD. A pin is a floor: the task starts no earlier, and it cannot be pulled before a predecessor finishes."
     )]
     pub start: Option<String>,
@@ -476,7 +480,7 @@ impl Yaiba {
     }
 
     #[tool(
-        description = "Change a task: its title, parent, status, owner, progress, pinned start, duration, or due date. Only the fields you pass are touched."
+        description = "Change a task: its title, parent, status, owner, progress, hidden flag, pinned start, duration, or due date. Only the fields you pass are touched."
     )]
     async fn update_task(&self, Parameters(args): Parameters<UpdateTask>) -> String {
         let state = match self.state().await {
@@ -523,6 +527,9 @@ impl Yaiba {
         }
         if let Some(progress) = args.progress {
             body["progress"] = json!(progress.clamp(0, 100));
+        }
+        if let Some(hidden) = args.hidden {
+            body["hidden"] = json!(hidden);
         }
         if let Some(start) = args.start {
             body["start"] = json!(start);
@@ -852,6 +859,9 @@ fn render_plan(state: &State) -> String {
         if sched.summary {
             marks.push("summary");
         }
+        if task.hidden {
+            marks.push("hidden");
+        }
 
         let indent = "  ".repeat(sched.level.max(0) as usize);
         let owner = if task.assignee.is_empty() {
@@ -947,6 +957,7 @@ mod tests {
             due: None,
             actual_start: None,
             actual_end: None,
+            hidden: false,
             progress: 0,
             position: 0.0,
             tags: Vec::new(),

@@ -36,6 +36,10 @@ pub const FIELD_DURATION: &str = "duration";
 pub const FIELD_DUE: &str = "due";
 pub const FIELD_ACTUAL_START: &str = "actual_start";
 pub const FIELD_ACTUAL_END: &str = "actual_end";
+/// Operator-set "leave this off the board" flag. Its own LWW entry, so
+/// hiding a task never races an edit to any other field. Purely a view
+/// flag: scheduling never reads it.
+pub const FIELD_HIDDEN: &str = "hidden";
 pub const FIELD_PROGRESS: &str = "progress";
 pub const FIELD_POSITION: &str = "position";
 pub const FIELD_CREATED: &str = "created";

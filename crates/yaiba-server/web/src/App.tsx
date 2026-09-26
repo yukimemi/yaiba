@@ -59,10 +59,11 @@ import {
   focusStep,
   foldStep,
   stepOrder,
-  visibleTasks,
+  visibleView,
   type FoldMemory,
   type SortKey,
 } from "./filter";
+import { emptyReason, nearestVisible } from "./hidden";
 import {
   cellColumns,
   actualsWriteFirst,
@@ -298,6 +299,12 @@ export function App() {
   const [zoom, setZoom] = useState<Zoom>(savedView.zoom);
   /** Which columns the list carries — `:dates` / `gd` swaps them. */
   const [columns, setColumns] = useState<Columns>(savedView.columns);
+  /**
+   * Whether tasks carrying the hidden flag are listed. Off by default; a
+   * view setting like `columns`, so it lives with them and not in the
+   * project — see `hidden.ts` for what the flag does to a row.
+   */
+  const [showHidden, setShowHidden] = useState<boolean>(savedView.showHidden);
   /** True while the window is phone-width — see `narrow.ts`. */
   const narrow = useNarrow();
   /**
@@ -601,18 +608,22 @@ export function App() {
     () => new Map((data?.schedule.tasks ?? []).map((s) => [s.id, s])),
     [data],
   );
-  const visible = useMemo(
+  const listing = useMemo(
     () =>
       data
-        ? visibleTasks(data.tasks, bySchedule, {
+        ? visibleView(data.tasks, bySchedule, {
             query: filter,
             sort,
             collapsed,
             focus,
+            showHidden,
           })
-        : [],
-    [data, bySchedule, filter, sort, collapsed, focus],
+        : { rows: [] as Task[], hiddenCount: 0, dropped: new Set<string>() },
+    [data, bySchedule, filter, sort, collapsed, focus, showHidden],
   );
+  const visible = listing.rows;
+  /** Rows the hidden flag is keeping off the screen — the status line says so. */
+  const hiddenCount = listing.hiddenCount;
 
   /** The progress line is noise on an empty plan; show it once there is
    *  something to compare. */
@@ -815,8 +826,9 @@ export function App() {
   // The global half of the persisted UI state — written on every change,
   // read once at mount (see `savedView`).
   useEffect(() => {
-    saveViewState({ view, zoom, columns, sort });
-  }, [view, zoom, columns, sort]);
+    saveViewState({ view, zoom, columns, sort, showHidden });
+  }, [view, zoom, columns, sort, showHidden]);
+
 
   /**
    * A pass of the blade whenever the view changes — `<tab>`, `:view`,
@@ -1233,6 +1245,26 @@ export function App() {
     cursorRef.current = id;
     setCursorId(id);
   }, []);
+
+  /**
+   * Move the cursor off a row the hidden flag just took away.
+   *
+   * One place for every way it can happen — `zh` on the cursor row,
+   * `zH`, `:hide done`, a peer's edit arriving in a refresh — by
+   * watching the rows instead of the gestures. It only answers to rows
+   * the hidden stage dropped: a fold or a filter that loses the cursor
+   * already has its own behaviour and is not this effect's to change.
+   */
+  const prevVisibleRef = useRef<string[]>([]);
+  useEffect(() => {
+    const before = prevVisibleRef.current;
+    const after = visible.map((t) => t.id);
+    prevVisibleRef.current = after;
+    const id = cursorRef.current;
+    if (!id || !listing.dropped.has(id)) return;
+    const next = nearestVisible(before, after, id) ?? after[0] ?? null;
+    if (next) putCursor(next);
+  }, [visible, listing, putCursor]);
 
   /** Set the visual anchor, keeping the ref in lockstep. */
   const putAnchor = useCallback((id: string | null) => {
@@ -2412,6 +2444,13 @@ export function App() {
         return next;
       });
     }
+    if (ui.showHidden !== undefined) {
+      setShowHidden((prev) => {
+        const next = ui.showHidden === "toggle" ? !prev : ui.showHidden!;
+        say(next ? t("showing hidden tasks") : t("hidden tasks are off the list"));
+        return next;
+      });
+    }
     // `:level n` / `:level` / `:only` / `:all` all arrive here, and all of
     // them mean the same thing `zM` means — so they go through the same
     // expansion rather than setting a depth nothing reads.
@@ -3353,6 +3392,20 @@ export function App() {
         toggleDone(selection);
         leaveVisual();
         break;
+      // `zh` flags the row (or the block) hidden, and on a block that is
+      // all hidden already, takes the flag off — which is how a row shown
+      // by `zH` is brought back for good. Mixed selections hide, the way
+      // `toggleDone` completes. `zH` is the view, not the flag.
+      case "zh": {
+        if (!selection.length) break;
+        const unhide = selection.every((t) => t.hidden);
+        patchAll(selection, () => ({ hidden: !unhide }), unhide ? "unhide" : "hide");
+        leaveVisual();
+        break;
+      }
+      case "zH":
+        applyUi({ showHidden: "toggle" });
+        break;
       // `x` is delete-what-is-under-the-cursor, which on a grid of cells
       // is the cell — the reading the date picker has always had for it
       // (`DatePicker.tsx`), lifted out of the panel and onto the grid so
@@ -4254,7 +4307,11 @@ export function App() {
             linkAnchor={linkAnchor}
             onlyPane={shownView === "list"}
             emptyHint={
-              filter ? t("nothing matches this filter.") : t("no tasks yet.")
+              {
+                filter: t("nothing matches this filter."),
+                hidden: t("{n} hidden — zH to show", { n: hiddenCount }),
+                none: t("no tasks yet."),
+              }[emptyReason(filter, hiddenCount)]
             }
             sort={sort}
             columns={columns}
@@ -4330,6 +4387,7 @@ export function App() {
         message={message}
         pending={pending}
         hint={modeHint(mode)}
+        hiddenNote={hiddenCount > 0 ? t("{n} hidden", { n: hiddenCount }) : ""}
       />
 
       {/* Keyed on the cell, because clicking straight from one open
