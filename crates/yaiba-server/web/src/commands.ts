@@ -126,6 +126,12 @@ export interface CommandResult {
    * /api/calendar. Never set by a bare `:cal`, which only reports.
    */
   cal?: CalendarPatch;
+  /**
+   * Shareable-link actions (urlState.ts). `copy` puts the current view's
+   * URL on the clipboard, with or without the project's ticket; `open`
+   * applies a pasted link's fragment to this page.
+   */
+  link?: { copy?: "full" | "view"; open?: string };
   /** Project actions the app performs against /api/projects. */
   project?: {
     switch?: string;
@@ -343,6 +349,8 @@ export const COMMANDS: CommandSpec[] = [
   { name: "parent" },
   { name: "ticket", aliases: ["share"] },
   { name: "join" },
+  { name: "url", aliases: ["permalink", "copylink"], args: first(() => ["view"]) },
+  { name: "open", aliases: ["goto"] },
   { name: "merge" },
   { name: "leave" },
   { name: "gcal", args: first(() => ["push"]) },
@@ -1352,6 +1360,19 @@ export function runCommand(
     case "join": {
       if (!arg) return { error: t("usage: :join <ticket>") };
       return { project: { join: arg } };
+    }
+    // `:link` and `:share` are taken (dependencies, and the ticket), so the
+    // shareable view is `:url`. `:url view` leaves the ticket out.
+    case "url":
+    case "permalink":
+    case "copylink": {
+      if (arg && arg !== "view") return { error: t("usage: :url [view]") };
+      return { link: { copy: arg ? "view" : "full" } };
+    }
+    case "open":
+    case "goto": {
+      if (!arg) return { error: t("usage: :open <link or #fragment>") };
+      return { link: { open: arg } };
     }
     case "merge": {
       if (!arg) return { error: t("usage: :merge <ticket>") };

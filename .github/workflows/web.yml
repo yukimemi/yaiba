@@ -142,3 +142,9 @@ jobs:
         # Hiding is a view rule applied in one place (`hidden.ts`); a
         # wrong parent-subtree or cursor rule type-checks and misfires.
         run: bun scripts/check-hidden.ts
+
+      - name: Check the shareable URL state
+        working-directory: crates/yaiba-server/web
+        # `urlState.ts` turns the view into a fragment and back; a lossy
+        # round trip or a crash on a malformed link type-checks fine.
+        run: bun scripts/check-urlstate.ts

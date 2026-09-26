@@ -101,7 +101,17 @@ import {
   initialViewState,
   saveViewState,
   type ProjectUiState,
+  type ViewState,
 } from "./uiState";
+import {
+  decodeLink,
+  encodeLink,
+  parseTicket,
+  projectNameFromTicket,
+  pruneToIds,
+  sameProject,
+  type LinkState,
+} from "./urlState";
 import { LinkPicker } from "./components/LinkPicker";
 import { linksToOpen, openLink } from "./notes";
 import { applyOps, inversePatch, type Op, type Step } from "./ops";
@@ -118,6 +128,20 @@ const REFRESH_MS = 3000;
 /** Peer list refresh — peers join on a human timescale, not a UI one. */
 const PEERS_MS = 15000;
 const HALF_PAGE = 10;
+/** How many refreshes a joined link waits for its tasks to arrive. */
+const LINK_POLLS = 10;
+/** Debounce for the address bar, so a held `j` is one write. */
+const HASH_MS = 300;
+
+/** Where a link came from — see `dispatchLink`. */
+type LinkSource = "load" | "hash" | "open";
+
+// What a shared link must not overwrite, as comparable strings. See
+// `linkGuardRef`.
+const uiKey = (collapsed: Iterable<string>, focus: string | null, filter: string) =>
+  JSON.stringify([[...collapsed].sort(), focus, filter]);
+const viewKey = (v: ViewState) =>
+  JSON.stringify([v.view, v.zoom, v.columns, v.sort, v.showHidden]);
 const STATUS_CYCLE: Status[] = ["todo", "doing", "done"];
 
 /** Held down rather than typed, so they never end a completion cycle. */
@@ -502,6 +526,45 @@ export function App() {
    * reload into a reset — the bug the whole mechanism exists to fix.
    */
   const uiLoadedRef = useRef(false);
+
+  // ---- shared links (urlState.ts) --------------------------------
+  /**
+   * What the saves must not write while it is all that has happened.
+   *
+   * A shared link puts its own folds, filter, sort… on screen, and the
+   * effects that persist them would write them straight over the
+   * recipient's own saved state — for opening a link. So a link records
+   * what it set, and a save is skipped for as long as the state still
+   * equals it; the first change the recipient makes themselves differs,
+   * drops the guard, and saving is normal from then on. `ui` guards the
+   * per-project half (`/api/ui`), `view` the global half (localStorage).
+   */
+  const linkGuardRef = useRef<{ ui: string | null; view: string | null }>({
+    ui: null,
+    view: null,
+  });
+  /**
+   * Ids a link named that had not arrived yet, for a project just joined:
+   * the first pull may land after the join answers. Re-applied on each
+   * refresh (`LINK_POLLS` times at most) and dropped once everything
+   * resolved or the user touches the keyboard or mouse.
+   */
+  const pendingLinkRef = useRef<{ state: LinkState; tries: number } | null>(null);
+  /** A link waiting for the user's yes before its project is joined. */
+  const pendingJoinRef = useRef<{ state: LinkState; ticket: string } | null>(null);
+  /** The fragment the page loaded with, read once — see the mount effect. */
+  const linkBootRef = useRef<{ hash: string; started: boolean; link: boolean } | null>(
+    null,
+  );
+  /** The address-bar write of ours, so a `hashchange` can tell its own from a paste. */
+  const lastHashRef = useRef("");
+  /** Set once the load-time fragment (if any) is dealt with; the bar is written after. */
+  const [linkReady, setLinkReady] = useState(false);
+  /** Bumped to remount the palette when a link opens it while it is up. */
+  const [paletteKey, setPaletteKey] = useState(0);
+  const dispatchLinkRef = useRef<(text: string, source: LinkSource) => Promise<void>>(
+    async () => undefined,
+  );
   /** Show only this subtree — :only / zf. */
   const [focus, setFocus] = useState<string | null>(null);
   /**
@@ -510,7 +573,7 @@ export function App() {
    * Kept in a ref as well because `load` runs from an interval and a
    * stale closure would silently snap the view back to today.
    */
-  const [, setAsof] = useState<string | null>(null);
+  const [asof, setAsof] = useState<string | null>(null);
   /**
    * The reference-date picker hanging off the HUD.
    *
@@ -820,12 +883,34 @@ export function App() {
 
   useEffect(() => {
     void load();
-    void loadProjectUi();
+    // The fragment is read once: the first render's, before the address
+    // bar is ever written. A link at load takes the place of the saved
+    // per-project state (see `dispatchLink`), so that is not fetched.
+    const boot = (linkBootRef.current ??= {
+      hash: location.hash,
+      started: false,
+      link: decodeLink(location.hash) !== null,
+    });
+    if (!boot.link) {
+      void loadProjectUi();
+      setLinkReady(true);
+    } else if (!boot.started) {
+      // StrictMode runs this twice; a confirmation or a switch must not.
+      boot.started = true;
+      void dispatchLinkRef.current(boot.hash, "load");
+    }
   }, [load, loadProjectUi]);
 
   // The global half of the persisted UI state — written on every change,
   // read once at mount (see `savedView`).
   useEffect(() => {
+    const guard = linkGuardRef.current;
+    if (guard.view !== null) {
+      // Still exactly what a shared link set: not the recipient's choice,
+      // so not theirs to have saved yet.
+      if (guard.view === viewKey({ view, zoom, columns, sort, showHidden })) return;
+      guard.view = null;
+    }
     saveViewState({ view, zoom, columns, sort, showHidden });
   }, [view, zoom, columns, sort, showHidden]);
 
@@ -858,6 +943,11 @@ export function App() {
    */
   useEffect(() => {
     if (!uiLoadedRef.current) return;
+    const guard = linkGuardRef.current;
+    if (guard.ui !== null) {
+      if (guard.ui === uiKey(collapsed, focus, filter)) return;
+      guard.ui = null;
+    }
     const timer = setTimeout(() => {
       if (!uiLoadedRef.current) return;
       void api
@@ -1079,6 +1169,323 @@ export function App() {
     landOnProject(api.joinProject(ticket), (info) =>
       t("joined · {name}", { name: info.active }),
     );
+
+  // ---- shared links ------------------------------------------------
+
+  /** The view settings as of the latest render, for code that runs after an await. */
+  const viewRef = useRef<ViewState>({ view, zoom, columns, sort, showHidden });
+  viewRef.current = { view, zoom, columns, sort, showHidden };
+
+  /** Ids in the project, for dropping folds and the like that name none of them. */
+  const knownIds = useMemo(() => new Set((data?.tasks ?? []).map((t) => t.id)), [data]);
+
+  /**
+   * Everything a link carries except the project, from the live state.
+   * The fold list is cut to rows that exist, which is also what keeps a
+   * long-lived folded set from growing the URL with ids of deleted tasks.
+   */
+  const linkView = useMemo<LinkState>(
+    () => ({
+      view,
+      zoom,
+      columns,
+      sort,
+      showHidden,
+      filter,
+      fold: [...collapsed].filter((id) => knownIds.has(id)).sort(),
+      focus: focus ?? undefined,
+      asof: asof ?? undefined,
+      cursor: cursorId ?? undefined,
+    }),
+    [view, zoom, columns, sort, showHidden, filter, collapsed, knownIds, focus, asof, cursorId],
+  );
+
+  /**
+   * Keep the address bar a link to what is on screen.
+   *
+   * `replaceState`, never `pushState`: the active project is global to
+   * the server, so a Back that switched or joined a project would do so
+   * for every open tab, and a push per cursor move would bury the history.
+   * The ticket is never put here — only `:url` copies it — so the room
+   * key does not end up in browser history and history sync. Debounced,
+   * and skipped when unchanged.
+   */
+  const hasData = data !== null;
+  useEffect(() => {
+    if (!linkReady || !hasData) return;
+    const timer = setTimeout(() => {
+      const hash = `#${encodeLink(linkView).fragment}`;
+      if (location.hash === hash) return;
+      lastHashRef.current = hash;
+      try {
+        window.history.replaceState(window.history.state, "", `${location.pathname}${location.search}${hash}`);
+      } catch {
+        // A sandboxed frame may refuse; the link is a convenience.
+      }
+    }, HASH_MS);
+    return () => clearTimeout(timer);
+  }, [linkReady, hasData, linkView]);
+
+  /**
+   * Put a link's state on screen.
+   *
+   * The link's values go straight in — the recipient's saved per-project
+   * state is neither read nor written (see `linkGuardRef`). A link from
+   * `encodeLink` (`complete`) replaces the whole per-project state, its
+   * absent filter meaning none; a hand-typed fragment starts from the
+   * saved state and overrides only what it names.
+   */
+  const applyLink = async (
+    state: LinkState,
+    opts: { switchTo: string | null; source: LinkSource; afterJoin?: boolean },
+  ) => {
+    const full = state.complete === true;
+    if (opts.switchTo) {
+      uiLoadedRef.current = false;
+      try {
+        setProjects(await api.switchProject(opts.switchTo));
+      } catch (e) {
+        failProject(e as Error);
+        if (opts.source === "load") await loadProjectUi();
+        else uiLoadedRef.current = true;
+        setLinkReady(true);
+        return;
+      }
+    }
+    if (opts.switchTo || opts.afterJoin) {
+      // The same reset as `switchTo`: nothing of the outgoing project's
+      // cursor, folds or filter names a row of this one.
+      putCursor(null);
+      putAnchor(null);
+      setPicking(null);
+      setFocus(null);
+      foldLevelRef.current = null;
+      foldMemoryRef.current = null;
+      setCollapsed(new Set());
+      setFilter("");
+    }
+    let base: ProjectUiState = {};
+    if (!full) {
+      try {
+        base = await api.getUi();
+      } catch {
+        // Older server or dropped connection: nothing saved to start from.
+      }
+    }
+    if (full || state.asof !== undefined) {
+      asofRef.current = state.asof ?? null;
+      setAsof(state.asof ?? null);
+    }
+    const next = await load();
+    const ids = new Set((next?.tasks ?? []).map((t) => t.id));
+    const { state: pruned, complete: resolved } = pruneToIds(state, ids);
+    pendingLinkRef.current = opts.afterJoin && !resolved ? { state, tries: 0 } : null;
+
+    if (!full) applyProjectUi(base);
+    else {
+      foldLevelRef.current = null;
+      foldMemoryRef.current = null;
+    }
+    const nextFilter = state.filter ?? (full ? "" : (base.filter ?? ""));
+    const nextCollapsed =
+      state.fold !== undefined ? (pruned.fold ?? []) : full ? [] : (base.collapsed ?? []);
+    const nextFocus =
+      state.focus !== undefined ? (pruned.focus ?? null) : full ? null : (base.focus ?? null);
+    if (state.fold !== undefined) foldLevelRef.current = null;
+    if (state.focus !== undefined) foldMemoryRef.current = null;
+    setFilter(nextFilter);
+    setCollapsed(new Set(nextCollapsed));
+    setFocus(nextFocus);
+    putCursor(pruned.cursor ?? null);
+
+    const v = viewRef.current;
+    const nextView: ViewState = {
+      view: state.view ?? v.view,
+      zoom: state.zoom ?? v.zoom,
+      columns: state.columns ?? v.columns,
+      sort: state.sort ?? v.sort,
+      showHidden: state.showHidden ?? v.showHidden,
+    };
+    linkGuardRef.current = {
+      ui: uiKey(nextCollapsed, nextFocus, nextFilter),
+      view: viewKey(nextView),
+    };
+    setView(nextView.view);
+    setZoom(nextView.zoom);
+    setColumns(nextView.columns);
+    setSort(nextView.sort);
+    setShowHidden(nextView.showHidden);
+
+    uiLoadedRef.current = true;
+    if (opts.switchTo || opts.afterJoin) setWipe((n) => n + 1);
+    if (opts.source !== "load") say(t("link opened"), "ok");
+    setLinkReady(true);
+  };
+
+  /**
+   * What to do with a link — at load, on a pasted `hashchange`, or from
+   * `:open`. All three come through here, so they cannot disagree.
+   *
+   * Only the fragment of whatever was pasted is used; its origin is the
+   * sender's and is neither visited nor fetched. A ticket in it is matched
+   * against the projects here by room key, never by name (names are local
+   * to a replica). No match asks first: joining pulls someone else's data
+   * into a new database and makes us a peer of their replica, and the
+   * ticket in a link is the room key. Nothing is created, joined or
+   * switched until the user has said yes.
+   */
+  const dispatchLink = async (text: string, source: LinkSource) => {
+    const state = decodeLink(text);
+    // A load-time link that leads nowhere still owes the page its saved state.
+    const settle = async () => {
+      if (source === "load") await loadProjectUi();
+      setLinkReady(true);
+    };
+    if (!state) {
+      if (source === "open") say(t("not a yaiba link — nothing changed"), "error");
+      await settle();
+      return;
+    }
+    const refuse = async (why: string) => {
+      say(why, "error");
+      await settle();
+    };
+    if (!state.project) {
+      await applyLink(state, { switchTo: null, source });
+      return;
+    }
+    if (!parseTicket(state.project)) {
+      await refuse(t("the link's ticket is not valid — nothing changed"));
+      return;
+    }
+    let info: ProjectsInfo;
+    try {
+      info = await api.getProjects();
+    } catch (e) {
+      await refuse(`offline: ${(e as Error).message}`);
+      return;
+    }
+    setProjects(info);
+    const match = info.projects.find((p) => p.ticket && sameProject(p.ticket, state.project!));
+    if (match) {
+      await applyLink(state, {
+        switchTo: match.name === info.active ? null : match.name,
+        source,
+      });
+      return;
+    }
+    if (info.projects.every((p) => p.ticket === null)) {
+      await refuse(t("sync is off — started with --no-sync, so the link's project can't be joined"));
+      return;
+    }
+    pendingJoinRef.current = { state, ticket: state.project };
+    setProjectError(null);
+    setPaletteMode({
+      kind: "confirm",
+      verb: "join",
+      target: `${projectNameFromTicket(state.project)} (${state.project.slice(0, 12)}…)`,
+    });
+    setPaletteKey((n) => n + 1);
+    setShowProjects(true);
+    await settle();
+  };
+  dispatchLinkRef.current = dispatchLink;
+
+  /** The user said yes to the join a link asked for. */
+  const confirmLinkJoin = () => {
+    const pending = pendingJoinRef.current;
+    if (!pending) return;
+    pendingJoinRef.current = null;
+    uiLoadedRef.current = false;
+    void api
+      .joinProject(pending.ticket)
+      .then(async (info) => {
+        setProjects(info);
+        setShowProjects(false);
+        setPaletteMode(undefined);
+        await applyLink(pending.state, { switchTo: null, source: "open", afterJoin: true });
+        say(t("joined · {name}", { name: info.active }), "ok");
+      })
+      .catch((e: Error) => {
+        failProject(e);
+        uiLoadedRef.current = true;
+        pendingJoinRef.current = pending;
+      });
+  };
+
+  // A pasted link in an open tab, or Back / Forward across hashes.
+  useEffect(() => {
+    const onHash = () => {
+      if (location.hash === lastHashRef.current) return;
+      void dispatchLinkRef.current(location.hash, "hash");
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // Anything the user does themselves ends the wait for a joined link's ids.
+  useEffect(() => {
+    const drop = () => {
+      pendingLinkRef.current = null;
+    };
+    window.addEventListener("keydown", drop, true);
+    window.addEventListener("pointerdown", drop, true);
+    return () => {
+      window.removeEventListener("keydown", drop, true);
+      window.removeEventListener("pointerdown", drop, true);
+    };
+  }, []);
+
+  // Tasks arrive after a join: apply what a refresh made resolvable.
+  useEffect(() => {
+    const pending = pendingLinkRef.current;
+    if (!pending || !data) return;
+    const guard = linkGuardRef.current;
+    if (guard.ui === null) {
+      pendingLinkRef.current = null;
+      return;
+    }
+    const { state, complete } = pruneToIds(pending.state, data.tasks.map((t) => t.id));
+    const nextCollapsed =
+      pending.state.fold !== undefined ? (state.fold ?? []) : [...collapsed];
+    const nextFocus = pending.state.focus !== undefined ? (state.focus ?? null) : focus;
+    setCollapsed(new Set(nextCollapsed));
+    setFocus(nextFocus);
+    if (state.cursor) putCursor(state.cursor);
+    // What was just set is still the link's doing, not the user's.
+    guard.ui = uiKey(nextCollapsed, nextFocus, filter);
+    pending.tries += 1;
+    if (complete || pending.tries >= LINK_POLLS) pendingLinkRef.current = null;
+  }, [data]);
+
+  /** Copy the current view as a URL — with the project's ticket, or without. */
+  const copyLink = (kind: "full" | "view") => {
+    const own = projects.projects.find((p) => p.name === projects.active)?.ticket ?? peers.ticket;
+    const ticket = kind === "full" ? own : null;
+    const { fragment, foldDropped } = encodeLink({
+      ...linkView,
+      project: ticket ?? undefined,
+    });
+    const url = `${location.origin}${location.pathname}${location.search}#${fragment}`;
+    let note: string;
+    if (kind === "view") {
+      note = t("link copied without the ticket · only for someone who already has this project · :open on another port");
+    } else if (ticket) {
+      note = t("link copied · it includes the project ticket: anyone holding it can read and write this project · :open on another port");
+    } else {
+      note = t("link copied · this project has no ticket, so it reproduces the view on the same project only · :open on another port");
+    }
+    if (foldDropped) note += t(" · folds left out (too long)");
+    const clip = navigator.clipboard;
+    if (!clip) {
+      say(t("copy this link by hand · {url}", { url }), "info");
+      return;
+    }
+    clip.writeText(url).then(
+      () => say(note, "ok"),
+      () => say(t("copy this link by hand · {url}", { url }), "info"),
+    );
+  };
 
   /**
    * Leave the group the active project is in.
@@ -3377,6 +3784,10 @@ export function App() {
         break;
       // `gx`, vim's "go to link": the keyboard's way to what the ⛓
       // marker only points at. One link opens; several ask which.
+      // `gL` copies the link to this view — `:url`, ticket and all.
+      case "gL":
+        copyLink("full");
+        break;
       case "gx": {
         const urls = current ? linksToOpen(current.notes ?? "") : [];
         if (urls.length === 0) {
@@ -4070,6 +4481,8 @@ export function App() {
         .catch((e: Error) => say(e.message, "error"));
     }
     if (result.project?.join) joinProject(result.project.join);
+    if (result.link?.copy) copyLink(result.link.copy);
+    if (result.link?.open) void dispatchLink(result.link.open, "open");
     if (result.peer?.leave) {
       // Straight into the question, on the project you are looking at.
       setProjectError(null);
@@ -4478,6 +4891,7 @@ export function App() {
       )}
       {showProjects && (
         <ProjectPalette
+          key={paletteKey}
           projects={projects.projects}
           active={projects.active}
           onPick={switchTo}
@@ -4485,6 +4899,7 @@ export function App() {
           onRename={renameProject}
           onForget={forgetProject}
           onLeave={leavePeers}
+          onJoin={confirmLinkJoin}
           initialMode={paletteMode}
           error={projectError}
           onDismissError={() => setProjectError(null)}
@@ -4492,6 +4907,8 @@ export function App() {
             setShowProjects(false);
             setPaletteMode(undefined);
             setProjectError(null);
+            // Closing is the "no" to a link's join.
+            pendingJoinRef.current = null;
           }}
         />
       )}

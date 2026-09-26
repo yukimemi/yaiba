@@ -220,6 +220,9 @@ const groups = (): Group[] => [
     title: t("PEERS"),
     keys: [
       [":ticket", t("copy this replica's invite")],
+      [":url [view] / gL", t("copy a link to this view — with the ticket, or `view` without it")],
+      [":open ⟨link⟩", t("apply a pasted link (or its #fragment) to this page")],
+      ["⚠ link", t("a link with a ticket lets whoever holds it read and write this project, like the ticket itself — the # part never reaches the server but stays in history and wherever it is pasted")],
       [":join ⟨t⟩", t("open their tasks as a project of its own")],
       [":merge ⟨t⟩", t("mix both task sets together (not undoable)")],
       [":leave", t("cut this project loose from its peers")],
