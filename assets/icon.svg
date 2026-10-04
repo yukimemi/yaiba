@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="yaiba icon">
+  <title>yaiba — 刃</title>
+
+  <defs>
+    <linearGradient id="yaiba-edge" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#f472b6"/>
+    </linearGradient>
+  </defs>
+
+  <!--
+    Square crop of the wordmark logo: the blade on its own, enlarged,
+    with the gantt reduced to two bars and one finish-to-start edge in
+    the space the blade leaves. Magenta marks the critical path, as in
+    the app. Blade coordinates are the logo's, scaled by 2.4.
+  -->
+  <rect x="2" y="2" width="252" height="252" rx="40" fill="#05070d" stroke="#05070d" stroke-width="4"/>
+
+  <g>
+    <rect x="158" y="92" width="34" height="26" rx="5" fill="rgba(34,211,238,.28)" stroke="#22d3ee" stroke-width="8"/>
+    <rect x="206" y="160" width="32" height="26" rx="5" fill="rgba(244,114,182,.28)" stroke="#f472b6" stroke-width="8"/>
+    <path d="M192 105h7v68h7" fill="none" stroke="#f472b6" stroke-width="8" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(-50 -70) scale(2.4)">
+    <path d="M42 111 L88 36 L100 43 L54 118 Z" fill="url(#yaiba-edge)"/>
+    <path d="M42 111 L54 118 L32 123 Z" fill="#94a3b8"/>
+  </g>
+</svg>
