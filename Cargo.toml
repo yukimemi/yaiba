@@ -72,7 +72,7 @@ rusqlite            = { version = "0.40.2", features = ["bundled", "chrono"] }
 rust-embed          = "8.13.0"
 # Reads the machine's own CA roots, which yaiba-sync hands to iroh so a
 # TLS-inspecting proxy's CA is trusted. See `ca_tls_config` there.
-rustls-native-certs = "0.8.4"
+rustls-native-certs = "0.8.5"
 # Dev-only: `ServerName` / `UnixTime` for driving the verifier directly.
 rustls-pki-types    = "1.15.1"
 # Derives the JSON Schema for each MCP tool's arguments. Pinned here
