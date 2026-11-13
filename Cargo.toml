@@ -74,7 +74,7 @@ rust-embed          = "8.13.0"
 # TLS-inspecting proxy's CA is trusted. See `ca_tls_config` there.
 rustls-native-certs = "0.8.5"
 # Dev-only: `ServerName` / `UnixTime` for driving the verifier directly.
-rustls-pki-types    = "1.15.1"
+rustls-pki-types    = "1.16.0"
 # Derives the JSON Schema for each MCP tool's arguments. Pinned here
 # because rmcp re-exports it and the two must agree on the major.
 schemars            = "1.2.3"
