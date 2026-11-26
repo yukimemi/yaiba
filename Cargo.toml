@@ -25,7 +25,7 @@ debug = "line-tables-only"
 # Shared dependency pins. Member crates declare them with
 #   foo = { workspace = true }
 # so version bumps happen in one place.
-anyhow              = "1.0.104"
+anyhow              = "1.0.105"
 axum                = { version = "0.8.9", features = ["macros"] }
 # The two halves of a PKCE `S256` challenge, and nothing else. Both are
 # already in the tree under iroh's TLS stack, so neither costs build time
